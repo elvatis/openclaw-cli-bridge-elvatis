@@ -77,7 +77,7 @@ OpenClaw agent
 
 ## AAHP handoff
 
-Project tracking lives in `.ai/handoff/` (AAHP v2 protocol).
+Project tracking lives in `.ai/handoff/` (AAHP v3 protocol).
 
 ## License
 

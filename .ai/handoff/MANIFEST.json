@@ -1,5 +1,5 @@
 {
-  "aahp_version": "2.0",
+  "aahp_version": "3.0",
   "project": "openclaw-cli-bridge",
   "last_session": {
     "agent": "anthropic/claude-sonnet-4-6",
