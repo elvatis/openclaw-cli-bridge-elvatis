@@ -1,26 +1,37 @@
-# NEXT_ACTIONS.md — openclaw-cli-bridge
+# NEXT_ACTIONS.md — openclaw-cli-bridge-elvatis
 
 _Last updated: 2026-03-07_
 
-## Immediate (T-003)
+## Immediate
 
-1. **Test auth flow**
-   ```bash
-   openclaw models auth login --provider openai-codex
-   ```
-   Expected: sees "Codex CLI (existing login)" option, reads tokens from `~/.codex/auth.json`, registers profile.
+1. **Validate proxy runtime**
+   - Confirm local proxy listens on `127.0.0.1:31337`
+   - Test:
+     - `GET /v1/models`
+     - `POST /v1/chat/completions` (non-stream + stream)
 
-2. **Verify model call**
-   Switch to `openai-codex/gpt-5.2` or `openai-codex/gpt-5.3-codex` and send a test message.
+2. **Validate OpenClaw vllm integration**
+   - Ensure `models.providers.vllm` contains `cli-gemini/*` + `cli-claude/*`
+   - Send live test prompts with:
+     - `vllm/cli-gemini/gemini-2.5-pro`
+     - `vllm/cli-claude/claude-sonnet-4-6`
 
-## Next (T-005, T-006)
+3. **Stability pass**
+   - Confirm timeout behavior and error mapping (CLI exits, malformed output)
+   - Confirm no secret leakage in logs
 
-3. **Gemini bridge** — implement `src/gemini-auth.ts` that reads `~/.gemini/` or Google CLI token store and registers a fallback `google-gemini-cli` provider.
+## Next
 
-4. **Claude Code bridge** — implement `src/claude-auth.ts` reading `~/.claude/` OAuth credentials.
+4. **Self-heal integration**
+   - Update `openclaw-self-healing-elvatis` model order for dev-safe default fallback chain.
 
-## Later (T-007)
+5. **Release pipeline**
+   - GitHub release tag
+   - npm publish (`@elvatis_com/openclaw-cli-bridge-elvatis`)
+   - ClawHub publish
 
-5. **Publish** — GitHub repo (elvatis org), npm `@elvatis_com/openclaw-cli-bridge`, ClawHub.
-6. **README** — installation + usage instructions.
-7. **Self-heal integration** — update `openclaw-self-healing-elvatis` model order to use `openai-codex` via this bridge.
+## Optional hardening
+
+- Add unit tests for prompt formatter + model router
+- Add proxy auth key rotation via config
+- Add explicit model allowlist for CLI execution

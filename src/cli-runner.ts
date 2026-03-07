@@ -67,6 +67,10 @@ export function runCli(
     let stdout = "";
     let stderr = "";
 
+    // Important: some CLIs (notably Claude Code) keep waiting for stdin EOF
+    // even when prompt is provided as an argument. Close stdin immediately.
+    proc.stdin.end();
+
     proc.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
     });
@@ -124,7 +128,18 @@ export async function runClaude(
   timeoutMs: number
 ): Promise<string> {
   const model = stripPrefix(modelId);
-  const args = ["-p", "--output-format", "text", "-m", model, prompt];
+  const args = [
+    "-p",
+    "--output-format",
+    "text",
+    "--permission-mode",
+    "plan",
+    "--tools",
+    "",
+    "--model",
+    model,
+    prompt,
+  ];
   const result = await runCli("claude", args, timeoutMs);
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {

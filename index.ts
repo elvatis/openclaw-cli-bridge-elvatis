@@ -1,5 +1,5 @@
 /**
- * openclaw-cli-bridge — index.ts
+ * openclaw-cli-bridge-elvatis — index.ts
  *
  * Phase 1 (auth bridge): registers openai-codex provider using tokens from
  *   ~/.codex/auth.json (Codex CLI is already logged in — no re-login needed).
@@ -48,7 +48,7 @@ const DEFAULT_PROXY_API_KEY = "cli-bridge";
 // Plugin definition
 // ──────────────────────────────────────────────────────────────────────────────
 const plugin = {
-  id: "openclaw-cli-bridge",
+  id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
   version: "0.2.0",
   description:

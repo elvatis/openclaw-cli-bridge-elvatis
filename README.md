@@ -1,4 +1,4 @@
-# openclaw-cli-bridge
+# openclaw-cli-bridge-elvatis
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers.
 
@@ -27,13 +27,13 @@
 
 ```bash
 # Install from ClawHub (once published)
-clawhub install openclaw-cli-bridge
+clawhub install openclaw-cli-bridge-elvatis
 
 # Or load directly from this repo (development)
 # Add to ~/.openclaw/openclaw.json:
 # plugins.load.paths: ["<path-to-this-repo>"]
-# plugins.allow: ["openclaw-cli-bridge"]
-# plugins.entries.openclaw-cli-bridge: { "enabled": true }
+# plugins.allow: ["openclaw-cli-bridge-elvatis"]
+# plugins.entries.openclaw-cli-bridge-elvatis: { "enabled": true }
 ```
 
 ## Auth setup (Phase 1 — Codex)
@@ -49,7 +49,7 @@ The proxy server (Phase 2) starts automatically and patches `openclaw.json` with
 
 ## Configuration
 
-Add to your `plugins.entries.openclaw-cli-bridge.config` in `~/.openclaw/openclaw.json`:
+Add to your `plugins.entries.openclaw-cli-bridge-elvatis.config` in `~/.openclaw/openclaw.json`:
 
 ```json5
 {
@@ -69,7 +69,7 @@ OpenClaw agent
   ├─ openai-codex/* ──► OpenAI API (auth via Codex CLI OAuth tokens)
   │
   └─ vllm/cli-gemini/*  ─┐
-     vllm/cli-claude/*   ─┤─► openclaw-cli-bridge proxy (127.0.0.1:31337)
+     vllm/cli-claude/*   ─┤─► openclaw-cli-bridge-elvatis proxy (127.0.0.1:31337)
                           │       ├─ cli-gemini/* → gemini -m <model> -p "<prompt>"
                           │       └─ cli-claude/* → claude -p -m <model> "<prompt>"
                           └──────────────────────────────────────────────────────

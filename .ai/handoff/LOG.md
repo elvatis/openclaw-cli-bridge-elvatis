@@ -1,24 +1,28 @@
-# LOG.md — openclaw-cli-bridge
+# LOG.md — openclaw-cli-bridge-elvatis
 
-## 2026-03-07 — Session 1 (claude-sonnet-4-6)
+## 2026-03-07 — Session 1 (gpt-5.3-codex / sonnet)
 
-**Phase:** Scaffold + initial implementation
+**Major progress**
+- Implemented and verified Codex auth bridge for provider `openai-codex`.
+- Resolved "Unknown provider openai-codex" by registering provider in plugin.
+- Added `.gitignore` for build artifacts + secrets.
+- Created GitHub repo under `elvatis`: https://github.com/elvatis/openclaw-cli-bridge-elvatis
+- Pushed initial release code and follow-up fix for AAHP version label.
 
-**Done:**
-- Diagnosed root cause: `openai-codex` provider has no stock plugin in OpenClaw 2026.3.2
-- Created project folder with AAHP structure at `.ai/handoff/`
-- Built plugin skeleton: package.json, tsconfig.json, openclaw.plugin.json, index.ts, src/codex-auth.ts
-- Symlinked global `openclaw` install for TypeScript type resolution (no extra dep needed)
-- Typecheck: 0 errors
-- Wired plugin into `~/.openclaw/openclaw.json` (allow + load.paths + entries)
-- Gateway restarted successfully, no errors from doctor
+**Architecture upgrade**
+- Added full request-bridge components:
+  - `src/cli-runner.ts`
+  - `src/proxy-server.ts`
+  - `src/config-patcher.ts`
+- Updated plugin to `0.2.0` conceptually (manifest), with phase split:
+  - Phase 1: auth bridge (`openai-codex`)
+  - Phase 2: HTTP proxy + vllm mapping (`cli-gemini/*`, `cli-claude/*`)
 
-**Key decisions:**
-- Auth reads from `~/.codex/auth.json` directly (Codex CLI is already logged in, no re-login needed)
-- `refreshOAuth` re-reads the file (Codex auto-refreshes tokens when it runs)
-- `enableCodex: true` by default; Gemini + Claude bridges opt-in via config
-- Token expiry estimated as `last_refresh + 3600s` (ChatGPT token lifetime)
+**Operational notes**
+- `openai-codex/gpt-5.4` returns 401 missing scope `model.request`.
+- `openai-codex/gpt-5.3-codex` selected as current dev model.
+- Self-heal startup warning investigated; startup cleanup delay increased in `openclaw-self-healing-elvatis`.
 
-**Not done:**
-- Auth flow not yet tested end-to-end
-- Model call not yet verified
+**Next**
+- Validate proxy endpoints + live vllm model calls end-to-end.
+- Then release pipeline (GitHub tag, npm, ClawHub).

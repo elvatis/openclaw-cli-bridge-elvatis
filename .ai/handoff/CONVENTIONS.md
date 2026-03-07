@@ -1,4 +1,4 @@
-# CONVENTIONS.md — openclaw-cli-bridge
+# CONVENTIONS.md — openclaw-cli-bridge-elvatis
 
 ## Language & Runtime
 - TypeScript strict mode, ESM (`"type": "module"`)
@@ -6,8 +6,8 @@
 - Target: ES2022
 
 ## Package
-- Scope: `@elvatis_com/openclaw-cli-bridge`
-- Plugin ID: `openclaw-cli-bridge`
+- Scope: `@elvatis_com/openclaw-cli-bridge-elvatis`
+- Plugin ID: `openclaw-cli-bridge-elvatis`
 - Providers declared: `["openai-codex"]`
 
 ## File Layout

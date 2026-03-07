@@ -41,14 +41,19 @@ export function patchOpencllawConfig(port: number): PatchResult {
     return { patched: false, reason: "Config is not valid JSON — skipping patch." };
   }
 
-  // Check if already patched
+  // Check if already patched (both provider models + agent allowlist)
   const models = (cfg as any)?.models?.providers?.vllm?.models;
-  const alreadyHasBridge =
+  const hasBridgeProviderModels =
     Array.isArray(models) &&
     models.some((m: any) => typeof m?.id === "string" && m.id.startsWith("cli-"));
 
-  if (alreadyHasBridge) {
-    return { patched: false, reason: "vllm provider already has cli-bridge models." };
+  const allowedModels = (cfg as any)?.agents?.defaults?.models ?? {};
+  const hasBridgeAllowlist =
+    !!allowedModels["vllm/cli-gemini/gemini-2.5-pro"] ||
+    !!allowedModels["vllm/cli-claude/claude-sonnet-4-6"];
+
+  if (hasBridgeProviderModels && hasBridgeAllowlist) {
+    return { patched: false, reason: "vllm provider + agent allowlist already include cli-bridge models." };
   }
 
   // Backup
@@ -97,6 +102,21 @@ export function patchOpencllawConfig(port: number): PatchResult {
     api: "openai-completions",
     models: mergedModels,
   };
+
+  // Also whitelist the full provider/model refs in agents.defaults.models
+  // so session model switching and allow checks accept them.
+  cfgAny.agents = cfgAny.agents ?? {};
+  cfgAny.agents.defaults = cfgAny.agents.defaults ?? {};
+  cfgAny.agents.defaults.models = cfgAny.agents.defaults.models ?? {};
+
+  for (const m of vllmModels) {
+    const ref = `vllm/${m.id}`;
+    if (!cfgAny.agents.defaults.models[ref]) {
+      cfgAny.agents.defaults.models[ref] = {
+        alias: m.id.replace(/\//g, "-")
+      };
+    }
+  }
 
   // Validate JSON before writing
   let newRaw: string;
