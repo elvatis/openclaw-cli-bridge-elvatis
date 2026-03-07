@@ -2,10 +2,22 @@
  * cli-runner.ts
  *
  * Spawns CLI subprocesses (gemini, claude) and captures their output.
- * Input: OpenAI-format messages → formatted prompt string → CLI stdout.
+ * Input: OpenAI-format messages → formatted prompt string → CLI stdin.
+ *
+ * IMPORTANT: Prompt is always passed via stdin (not as a CLI argument) to
+ * avoid E2BIG ("Argument list too long") when conversation history is large.
  */
 
 import { spawn } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+
+/** Max messages to include in the prompt sent to the CLI. */
+const MAX_MESSAGES = 20;
+/** Max characters per message content before truncation. */
+const MAX_MSG_CHARS = 4000;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Message formatting
@@ -18,29 +30,42 @@ export interface ChatMessage {
 
 /**
  * Convert OpenAI messages to a single flat prompt string.
- * Both Gemini and Claude CLIs accept a plain text prompt.
+ * Truncates to MAX_MESSAGES (keeping the most recent) and MAX_MSG_CHARS per
+ * message to avoid E2BIG when conversation history is very large.
  */
 export function formatPrompt(messages: ChatMessage[]): string {
   if (messages.length === 0) return "";
 
-  // If it's just a single user message, send it directly — no wrapping.
-  if (messages.length === 1 && messages[0].role === "user") {
-    return messages[0].content;
+  // Keep system message (if any) + last N non-system messages
+  const system = messages.find((m) => m.role === "system");
+  const nonSystem = messages.filter((m) => m.role !== "system");
+  const recent = nonSystem.slice(-MAX_MESSAGES);
+  const truncated = system ? [system, ...recent] : recent;
+
+  // If single user message with short content, send directly — no wrapping.
+  if (truncated.length === 1 && truncated[0].role === "user") {
+    return truncateContent(truncated[0].content);
   }
 
-  return messages
+  return truncated
     .map((m) => {
+      const content = truncateContent(m.content);
       switch (m.role) {
         case "system":
-          return `[System]\n${m.content}`;
+          return `[System]\n${content}`;
         case "assistant":
-          return `[Assistant]\n${m.content}`;
+          return `[Assistant]\n${content}`;
         case "user":
         default:
-          return `[User]\n${m.content}`;
+          return `[User]\n${content}`;
       }
     })
     .join("\n\n");
+}
+
+function truncateContent(s: string): string {
+  if (s.length <= MAX_MSG_CHARS) return s;
+  return s.slice(0, MAX_MSG_CHARS) + `\n...[truncated ${s.length - MAX_MSG_CHARS} chars]`;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -53,23 +78,29 @@ export interface CliRunResult {
   exitCode: number;
 }
 
+/**
+ * Spawn a CLI and deliver the prompt via stdin (not as an argument).
+ * This avoids E2BIG ("Argument list too long") for large conversation histories.
+ */
 export function runCli(
   cmd: string,
   args: string[],
+  prompt: string,
   timeoutMs = 120_000
 ): Promise<CliRunResult> {
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, args, {
       timeout: timeoutMs,
-      env: { ...process.env, NO_COLOR: "1" }, // strip ANSI codes from output
+      env: { ...process.env, NO_COLOR: "1" },
     });
 
     let stdout = "";
     let stderr = "";
 
-    // Important: some CLIs (notably Claude Code) keep waiting for stdin EOF
-    // even when prompt is provided as an argument. Close stdin immediately.
-    proc.stdin.end();
+    // Write prompt to stdin then close — prevents the CLI from waiting for more input.
+    proc.stdin.write(prompt, "utf8", () => {
+      proc.stdin.end();
+    });
 
     proc.stdout.on("data", (d: Buffer) => {
       stdout += d.toString();
@@ -102,16 +133,24 @@ export async function runGemini(
   timeoutMs: number
 ): Promise<string> {
   const model = stripPrefix(modelId);
-  const args = ["-m", model, "-p", prompt];
-  const result = await runCli("gemini", args, timeoutMs);
+  // Gemini CLI doesn't support stdin — write prompt to a temp file and read it via @file syntax
+  const tmpFile = join(tmpdir(), `cli-bridge-${randomBytes(6).toString("hex")}.txt`);
+  writeFileSync(tmpFile, prompt, "utf8");
+  try {
+    // Use @<file> to pass prompt from file (avoids ARG_MAX limit)
+    const args = ["-m", model, "-p", `@${tmpFile}`];
+    const result = await runCli("gemini", args, "", timeoutMs);
 
-  if (result.exitCode !== 0 && result.stdout.length === 0) {
-    throw new Error(
-      `gemini exited ${result.exitCode}: ${result.stderr || "(no output)"}`
-    );
+    if (result.exitCode !== 0 && result.stdout.length === 0) {
+      throw new Error(
+        `gemini exited ${result.exitCode}: ${result.stderr || "(no output)"}`
+      );
+    }
+
+    return result.stdout || result.stderr;
+  } finally {
+    try { unlinkSync(tmpFile); } catch { /* ignore */ }
   }
-
-  return result.stdout || result.stderr; // gemini sometimes writes to stderr
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -128,6 +167,7 @@ export async function runClaude(
   timeoutMs: number
 ): Promise<string> {
   const model = stripPrefix(modelId);
+  // No prompt argument — deliver via stdin to avoid E2BIG
   const args = [
     "-p",
     "--output-format",
@@ -138,9 +178,8 @@ export async function runClaude(
     "",
     "--model",
     model,
-    prompt,
   ];
-  const result = await runCli("claude", args, timeoutMs);
+  const result = await runCli("claude", args, prompt, timeoutMs);
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
     throw new Error(
