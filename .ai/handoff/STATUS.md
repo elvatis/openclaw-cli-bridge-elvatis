@@ -2,7 +2,7 @@
 
 _Last updated: 2026-03-07 by Akido (claude-sonnet-4-6)_
 
-## Current Version: 0.2.6 — STABLE
+## Current Version: 0.2.7 — STABLE
 
 ## What is done
 

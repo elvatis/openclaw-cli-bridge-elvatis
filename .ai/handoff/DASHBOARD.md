@@ -6,15 +6,15 @@ _Last updated: 2026-03-07_
 
 | Component | Version | Build | Tests | Status |
 |-----------|---------|-------|-------|--------|
-| openclaw-cli-bridge-elvatis | 0.2.6 | ✅ | 5/5 ✅ | ✅ Stable |
+| openclaw-cli-bridge-elvatis | 0.2.7 | ✅ | 5/5 ✅ | ✅ Stable |
 
 ## 🚀 Release State
 
 | Platform | Version | Status |
 |----------|---------|--------|
-| GitHub | v0.2.6 | ✅ Tagged + Release |
-| npm | 0.2.6 | ✅ Published |
-| ClawHub | 0.2.6 | ✅ Published |
+| GitHub | v0.2.7 | ✅ Tagged + Release |
+| npm | 0.2.7 | ✅ Published |
+| ClawHub | 0.2.7 | ✅ Published |
 
 ## 📋 Open Tasks
 
