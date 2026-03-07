@@ -79,8 +79,51 @@ export interface CliRunResult {
 }
 
 /**
+ * Build a minimal, safe environment for spawning CLI subprocesses.
+ *
+ * WHY: The OpenClaw gateway may inject large values into process.env at
+ * runtime (system prompts, session data, OPENCLAW_* vars, etc.). Spreading
+ * the full process.env into spawn() can push the combined argv+envp over
+ * ARG_MAX (~2 MB on Linux), causing "spawn E2BIG". Using only the vars that
+ * the CLI tools actually need keeps us well under the limit regardless of
+ * what the parent process environment contains.
+ */
+function buildMinimalEnv(): Record<string, string> {
+  const pick = (key: string): string | undefined => process.env[key];
+
+  const env: Record<string, string> = {
+    NO_COLOR: "1",
+    TERM: "dumb",
+  };
+
+  // Essential path/identity vars — always include when present.
+  for (const key of ["HOME", "PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP"]) {
+    const v = pick(key);
+    if (v) env[key] = v;
+  }
+
+  // Allow google-auth / claude auth paths to be inherited.
+  for (const key of [
+    "GOOGLE_APPLICATION_CREDENTIALS",
+    "ANTHROPIC_API_KEY",
+    "CLAUDE_API_KEY",
+    "CODEX_API_KEY",
+    "OPENAI_API_KEY",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_CACHE_HOME",
+  ]) {
+    const v = pick(key);
+    if (v) env[key] = v;
+  }
+
+  return env;
+}
+
+/**
  * Spawn a CLI and deliver the prompt via stdin (not as an argument).
- * This avoids E2BIG ("Argument list too long") for large conversation histories.
+ * This avoids E2BIG ("Argument list too long") for large conversation histories
+ * or when the parent process has a large runtime environment.
  */
 export function runCli(
   cmd: string,
@@ -91,7 +134,7 @@ export function runCli(
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, args, {
       timeout: timeoutMs,
-      env: { ...process.env, NO_COLOR: "1" },
+      env: buildMinimalEnv(),
     });
 
     let stdout = "";
