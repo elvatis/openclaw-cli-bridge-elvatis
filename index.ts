@@ -351,6 +351,8 @@ const plugin = {
     }
 
     // ── Phase 2: CLI request proxy ─────────────────────────────────────────────
+    let proxyServer: import("node:http").Server | null = null;
+
     if (enableProxy) {
       startProxyServer({
         port,
@@ -359,7 +361,8 @@ const plugin = {
         log: (msg) => api.logger.info(msg),
         warn: (msg) => api.logger.warn(msg),
       })
-        .then(() => {
+        .then((server) => {
+          proxyServer = server;
           api.logger.info(
             `[cli-bridge] proxy ready on :${port} — vllm/cli-gemini/* and vllm/cli-claude/* available`
           );
@@ -374,6 +377,26 @@ const plugin = {
           api.logger.warn(`[cli-bridge] proxy failed to start on port ${port}: ${err.message}`);
         });
     }
+
+    // ── Cleanup: close proxy server on plugin stop (hot-reload / gateway restart) ──
+    // Register a named service so OpenClaw can call stop() on plugin teardown.
+    api.registerService({
+      id: "cli-bridge-proxy",
+      start: async () => { /* proxy already started above */ },
+      stop: async () => {
+        if (proxyServer) {
+          await new Promise<void>((resolve) => {
+            proxyServer!.close((err) => {
+              if (err) api.logger.warn(`[cli-bridge] proxy close error: ${err.message}`);
+              else api.logger.info(`[cli-bridge] proxy server closed on plugin stop`);
+              resolve();
+            });
+          });
+          proxyServer = null;
+        }
+      },
+    });
+
 
     // ── Phase 3a: /cli-* model switch commands ─────────────────────────────────
     for (const entry of CLI_MODEL_COMMANDS) {
