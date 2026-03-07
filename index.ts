@@ -15,23 +15,27 @@
  *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro
  *   /cli-gemini-flash → vllm/cli-gemini/gemini-2.5-flash
  *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro
+ *   /cli-back         → restore model that was active before last /cli-* switch
+ *   /cli-test [model] → one-shot proxy health check (does NOT switch global model)
  *
  * Provider / model naming:
- *   vllm/cli-gemini/gemini-2.5-pro  → `gemini -m gemini-2.5-pro -p "<prompt>"`
- *   vllm/cli-claude/claude-opus-4-6 → `claude -p -m claude-opus-4-6 --output-format text "<prompt>"`
+ *   vllm/cli-gemini/gemini-2.5-pro  → `gemini -m gemini-2.5-pro @<tmpfile>`
+ *   vllm/cli-claude/claude-opus-4-6 → `claude -p -m claude-opus-4-6 --output-format text` (stdin)
  */
 
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import http from "node:http";
 import type {
   OpenClawPluginApi,
   ProviderAuthContext,
   ProviderAuthResult,
 } from "openclaw/plugin-sdk";
 
-// Types derived from the plugin SDK (PluginCommandContext / PluginCommandResult are
-// not re-exported from the package, so we infer them from the registerCommand signature).
-type RegisterCommandParam = Parameters<OpenClawPluginApi["registerCommand"]>[0];
-type PluginCommandContext = Parameters<RegisterCommandParam["handler"]>[0];
-type PluginCommandResult = Awaited<ReturnType<RegisterCommandParam["handler"]>>;
+// OpenClawPluginCommandDefinition is defined in the SDK types but not re-exported
+// by the package — derive it from the registerCommand signature.
+type OpenClawPluginCommandDefinition = Parameters<OpenClawPluginApi["registerCommand"]>[0];
 import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk";
 import {
   DEFAULT_CODEX_AUTH_PATH,
@@ -42,13 +46,18 @@ import { startProxyServer } from "./src/proxy-server.js";
 import { patchOpencllawConfig } from "./src/config-patcher.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Types derived from SDK (not re-exported by the package)
+// ──────────────────────────────────────────────────────────────────────────────
+type RegisterCommandParam = Parameters<OpenClawPluginApi["registerCommand"]>[0];
+type PluginCommandContext = Parameters<RegisterCommandParam["handler"]>[0];
+type PluginCommandResult = Awaited<ReturnType<RegisterCommandParam["handler"]>>;
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Plugin config type
 // ──────────────────────────────────────────────────────────────────────────────
 interface CliPluginConfig {
-  // Phase 1: auth bridge
   codexAuthPath?: string;
   enableCodex?: boolean;
-  // Phase 2: request proxy
   enableProxy?: boolean;
   proxyPort?: number;
   proxyApiKey?: string;
@@ -59,10 +68,53 @@ const DEFAULT_PROXY_PORT = 31337;
 const DEFAULT_PROXY_API_KEY = "cli-bridge";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Phase 3: slash-command model table
+// State file — persists the model that was active before the last /cli-* switch
+// Located at ~/.openclaw/cli-bridge-state.json (survives gateway restarts)
 // ──────────────────────────────────────────────────────────────────────────────
+const STATE_FILE = join(homedir(), ".openclaw", "cli-bridge-state.json");
 
-/** CLI bridge models available via /cli-* slash commands. */
+interface CliBridgeState {
+  previousModel: string;
+}
+
+function readState(): CliBridgeState | null {
+  try {
+    return JSON.parse(readFileSync(STATE_FILE, "utf8")) as CliBridgeState;
+  } catch {
+    return null;
+  }
+}
+
+function writeState(state: CliBridgeState): void {
+  try {
+    mkdirSync(join(homedir(), ".openclaw"), { recursive: true });
+    writeFileSync(STATE_FILE, JSON.stringify(state, null, 2) + "\n", "utf8");
+  } catch {
+    // non-fatal — /cli-back will just report no previous model
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Read the current primary model from openclaw.json
+// ──────────────────────────────────────────────────────────────────────────────
+function readCurrentModel(): string | null {
+  try {
+    const cfg = JSON.parse(
+      readFileSync(join(homedir(), ".openclaw", "openclaw.json"), "utf8")
+    );
+    const m = cfg?.agents?.defaults?.model;
+    if (typeof m === "string") return m;
+    if (typeof m === "object" && m !== null && typeof m.primary === "string")
+      return m.primary;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Phase 3: model command table
+// ──────────────────────────────────────────────────────────────────────────────
 const CLI_MODEL_COMMANDS = [
   {
     name: "cli-sonnet",
@@ -102,16 +154,24 @@ const CLI_MODEL_COMMANDS = [
   },
 ] as const;
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Helper: run `openclaw models set <model>` and return result text
-// ──────────────────────────────────────────────────────────────────────────────
+/** Default model used by /cli-test when no arg is given */
+const CLI_TEST_DEFAULT_MODEL = "cli-claude/claude-sonnet-4-6";
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Helper: switch global model, saving previous for /cli-back
+// ──────────────────────────────────────────────────────────────────────────────
 async function switchModel(
   api: OpenClawPluginApi,
   model: string,
   label: string,
-  _ctx: PluginCommandContext
 ): Promise<PluginCommandResult> {
+  // Save current model BEFORE switching so /cli-back can restore it
+  const current = readCurrentModel();
+  if (current && current !== model) {
+    writeState({ previousModel: current });
+    api.logger.info(`[cli-bridge] saved previous model: ${current}`);
+  }
+
   try {
     const result = await api.runtime.system.runCommandWithTimeout(
       ["openclaw", "models", "set", model],
@@ -126,7 +186,7 @@ async function switchModel(
 
     api.logger.info(`[cli-bridge] switched model → ${model}`);
     return {
-      text: `✅ Switched to ${label}\n\`${model}\``,
+      text: `✅ Switched to **${label}**\n\`${model}\`\n\nUse \`/cli-back\` to restore previous model.`,
     };
   } catch (err) {
     const msg = (err as Error).message;
@@ -136,16 +196,75 @@ async function switchModel(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Helper: fire a one-shot test request directly at the proxy (no global switch)
+// ──────────────────────────────────────────────────────────────────────────────
+function proxyTestRequest(
+  port: number,
+  apiKey: string,
+  model: string,
+  timeoutMs: number
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({
+      model,
+      messages: [{ role: "user", content: "Reply with exactly: CLI bridge OK" }],
+      stream: false,
+    });
+
+    const req = http.request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path: "/v1/chat/completions",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Length": Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk: Buffer) => { data += chunk.toString(); });
+        res.on("end", () => {
+          try {
+            const parsed = JSON.parse(data) as {
+              choices?: Array<{ message?: { content?: string } }>;
+              error?: { message?: string };
+            };
+            if (parsed.error) {
+              resolve(`Proxy error: ${parsed.error.message}`);
+            } else {
+              resolve(parsed.choices?.[0]?.message?.content?.trim() ?? "(empty response)");
+            }
+          } catch {
+            resolve(`(non-JSON response: ${data.slice(0, 200)})`);
+          }
+        });
+      }
+    );
+
+    req.setTimeout(timeoutMs, () => {
+      req.destroy();
+      reject(new Error(`Proxy test timed out after ${timeoutMs}ms`));
+    });
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Plugin definition
 // ──────────────────────────────────────────────────────────────────────────────
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.1",
+  version: "0.2.3",
   description:
-    "Phase 1: openai-codex auth bridge (reads ~/.codex/auth.json). " +
-    "Phase 2: HTTP proxy server routing model calls through gemini/claude CLIs. " +
-    "Phase 3: /cli-* slash commands for instant model switching.",
+    "Phase 1: openai-codex auth bridge. " +
+    "Phase 2: HTTP proxy for gemini/claude CLIs. " +
+    "Phase 3: /cli-* model switching, /cli-back restore, /cli-test health check.",
 
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as CliPluginConfig;
@@ -176,7 +295,6 @@ const plugin = {
               try {
                 const creds = await readCodexCredentials(codexAuthPath);
                 spin.stop("Codex CLI credentials loaded");
-
                 return buildOauthProviderAuthResult({
                   providerId: "openai-codex",
                   defaultModel: CODEX_DEFAULT_MODEL,
@@ -212,7 +330,7 @@ const plugin = {
         },
       });
 
-      api.logger.info("[cli-bridge] openai-codex provider registered (Codex CLI auth bridge)");
+      api.logger.info("[cli-bridge] openai-codex provider registered");
     }
 
     // ── Phase 2: CLI request proxy ─────────────────────────────────────────────
@@ -226,47 +344,124 @@ const plugin = {
       })
         .then(() => {
           api.logger.info(
-            `[cli-bridge] proxy ready — vllm/cli-gemini/* and vllm/cli-claude/* available`
+            `[cli-bridge] proxy ready on :${port} — vllm/cli-gemini/* and vllm/cli-claude/* available`
           );
-
-          // Auto-patch openclaw.json with vllm provider config (once)
           const result = patchOpencllawConfig(port);
           if (result.patched) {
             api.logger.info(
-              `[cli-bridge] openclaw.json patched with vllm provider. ` +
-                `Restart gateway to activate cli-gemini/* and cli-claude/* models.`
+              `[cli-bridge] openclaw.json patched with vllm provider. Restart gateway to activate.`
             );
-          } else {
-            api.logger.info(`[cli-bridge] config check: ${result.reason}`);
           }
         })
         .catch((err: Error) => {
-          api.logger.warn(
-            `[cli-bridge] proxy server failed to start on port ${port}: ${err.message}`
-          );
+          api.logger.warn(`[cli-bridge] proxy failed to start on port ${port}: ${err.message}`);
         });
     }
 
-    // ── Phase 3: /cli-* slash commands ────────────────────────────────────────
+    // ── Phase 3a: /cli-* model switch commands ─────────────────────────────────
     for (const entry of CLI_MODEL_COMMANDS) {
-      // Capture entry in closure (const iteration variable is stable in TS/ESM)
       const { name, model, description, label } = entry;
-
       api.registerCommand({
         name,
         description,
-        requireAuth: true, // only authorized senders
+        requireAuth: true,
         handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
-          api.logger.info(`[cli-bridge] /${name} triggered by ${ctx.senderId ?? "unknown"} (authorized=${ctx.isAuthorizedSender})`);
-          return switchModel(api, model, label, ctx);
+          api.logger.info(`[cli-bridge] /${name} by ${ctx.senderId ?? "?"}`);
+          return switchModel(api, model, label);
         },
-      });
+      } satisfies OpenClawPluginCommandDefinition);
     }
 
-    api.logger.info(
-      `[cli-bridge] registered ${CLI_MODEL_COMMANDS.length} slash commands: ` +
-        CLI_MODEL_COMMANDS.map((c) => `/${c.name}`).join(", ")
-    );
+    // ── Phase 3b: /cli-back — restore previous model ──────────────────────────
+    api.registerCommand({
+      name: "cli-back",
+      description: "Restore the model that was active before the last /cli-* switch",
+      requireAuth: true,
+      handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
+        api.logger.info(`[cli-bridge] /cli-back by ${ctx.senderId ?? "?"}`);
+
+        const state = readState();
+        if (!state?.previousModel) {
+          return { text: "ℹ️ No previous model saved. Use `/cli-sonnet` etc. to switch first." };
+        }
+
+        const prev = state.previousModel;
+
+        // Clear the saved state so a second /cli-back doesn't bounce back
+        writeState({ previousModel: "" });
+
+        try {
+          const result = await api.runtime.system.runCommandWithTimeout(
+            ["openclaw", "models", "set", prev],
+            { timeoutMs: 8_000 }
+          );
+
+          if (result.code !== 0) {
+            const err = (result.stderr || result.stdout || "unknown error").trim();
+            return { text: `❌ Failed to restore \`${prev}\`: ${err}` };
+          }
+
+          api.logger.info(`[cli-bridge] /cli-back restored → ${prev}`);
+          return { text: `✅ Restored previous model\n\`${prev}\`` };
+        } catch (err) {
+          return { text: `❌ Error: ${(err as Error).message}` };
+        }
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    // ── Phase 3c: /cli-test — one-shot proxy ping, no global model switch ──────
+    api.registerCommand({
+      name: "cli-test",
+      description: "Test the CLI bridge proxy without switching your active model. Usage: /cli-test [model]",
+      acceptsArgs: true,
+      requireAuth: true,
+      handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
+        const targetModel = ctx.args?.trim() || CLI_TEST_DEFAULT_MODEL;
+        // Accept short names like "cli-sonnet" or full "vllm/cli-claude/claude-sonnet-4-6"
+        const model = targetModel.startsWith("vllm/")
+          ? targetModel
+          : `vllm/${targetModel}`;
+
+        api.logger.info(`[cli-bridge] /cli-test → ${model} by ${ctx.senderId ?? "?"}`);
+
+        if (!enableProxy) {
+          return { text: "❌ Proxy is disabled (enableProxy: false in config)." };
+        }
+
+        const current = readCurrentModel();
+        const testTimeoutMs = Math.min(timeoutMs, 30_000);
+
+        try {
+          const start = Date.now();
+          const response = await proxyTestRequest(port, apiKey, model, testTimeoutMs);
+          const elapsed = Date.now() - start;
+
+          return {
+            text:
+              `🧪 **CLI Bridge Test**\n` +
+              `Model: \`${model}\`\n` +
+              `Response: _${response}_\n` +
+              `Latency: ${elapsed}ms\n\n` +
+              `Active model unchanged: \`${current ?? "unknown"}\``,
+          };
+        } catch (err) {
+          return {
+            text:
+              `❌ **CLI Bridge Test Failed**\n` +
+              `Model: \`${model}\`\n` +
+              `Error: ${(err as Error).message}\n\n` +
+              `Active model unchanged: \`${current ?? "unknown"}\``,
+          };
+        }
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    const allCommands = [
+      ...CLI_MODEL_COMMANDS.map((c) => `/${c.name}`),
+      "/cli-back",
+      "/cli-test",
+    ];
+    api.logger.info(`[cli-bridge] registered ${allCommands.length} commands: ${allCommands.join(", ")}`);
   },
 };
 
