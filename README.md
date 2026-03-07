@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, and health testing.
 
-**Current version:** `0.2.4`
+**Current version:** `0.2.5`
 
 ---
 
@@ -26,17 +26,36 @@ Starts a local OpenAI-compatible HTTP proxy on `127.0.0.1:31337` and configures 
 | `vllm/cli-claude/claude-haiku-4-5` | `claude -p --output-format text --model claude-haiku-4-5` (stdin) | ~1–3s |
 
 ### Phase 3 — Slash commands
-Eight plugin-registered commands (all `requireAuth: true`):
+Ten plugin-registered commands (all `requireAuth: true`):
+
+**Claude Code CLI** (routed via local proxy on `:31337`):
+
+| Command | Model |
+|---|---|
+| `/cli-sonnet` | `vllm/cli-claude/claude-sonnet-4-6` |
+| `/cli-opus` | `vllm/cli-claude/claude-opus-4-6` |
+| `/cli-haiku` | `vllm/cli-claude/claude-haiku-4-5` |
+
+**Gemini CLI** (routed via local proxy on `:31337`, stdin + `cwd=/tmp`):
+
+| Command | Model |
+|---|---|
+| `/cli-gemini` | `vllm/cli-gemini/gemini-2.5-pro` |
+| `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` |
+| `/cli-gemini3` | `vllm/cli-gemini/gemini-3-pro` |
+
+**Codex CLI** (via `openai-codex` provider — Codex CLI OAuth auth, calls OpenAI API directly, **not** through the local proxy):
+
+| Command | Model |
+|---|---|
+| `/cli-codex` | `openai-codex/gpt-5.3-codex` |
+| `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` |
+
+**Utility:**
 
 | Command | What it does |
 |---|---|
-| `/cli-sonnet` | Switch global model → `vllm/cli-claude/claude-sonnet-4-6` |
-| `/cli-opus` | Switch global model → `vllm/cli-claude/claude-opus-4-6` |
-| `/cli-haiku` | Switch global model → `vllm/cli-claude/claude-haiku-4-5` |
-| `/cli-gemini` | Switch global model → `vllm/cli-gemini/gemini-2.5-pro` |
-| `/cli-gemini-flash` | Switch global model → `vllm/cli-gemini/gemini-2.5-flash` |
-| `/cli-gemini3` | Switch global model → `vllm/cli-gemini/gemini-3-pro` |
-| `/cli-back` | Restore the model that was active **before** the last `/cli-*` switch |
+| `/cli-back` | Restore the model active **before** the last `/cli-*` switch |
 | `/cli-test [model]` | One-shot proxy health check — **does NOT switch your active model** |
 
 **`/cli-back` details:**
@@ -159,7 +178,10 @@ In `~/.openclaw/openclaw.json` → `plugins.entries.openclaw-cli-bridge-elvatis.
 ```
 OpenClaw agent
   │
-  ├─ openai-codex/*  ──► OpenAI API  (auth via ~/.codex/auth.json OAuth tokens)
+  ├─ openai-codex/*  ──────────────────────────► OpenAI API (direct)
+  │    auth: ~/.codex/auth.json OAuth tokens        ▲
+  │                                                 │
+  │    /cli-codex, /cli-codex-mini ─────────────────┘  (switch to this provider)
   │
   └─ vllm/cli-gemini/*  ─┐
      vllm/cli-claude/*   ─┤─► localhost:31337  (openclaw-cli-bridge proxy)
@@ -171,7 +193,7 @@ OpenClaw agent
                           └───────────────────────────────────────────────────
 
 Slash commands (bypass agent, requireAuth=true):
-  /cli-sonnet|opus|haiku|gemini|gemini-flash|gemini3
+  /cli-sonnet|opus|haiku|gemini|gemini-flash|gemini3|codex|codex-mini
      └─► saves current model → ~/.openclaw/cli-bridge-state.json
      └─► openclaw models set <model>  (~1s, atomic)
 
@@ -182,6 +204,7 @@ Slash commands (bypass agent, requireAuth=true):
   /cli-test [model]
      └─► HTTP POST → localhost:31337  (no global model change)
      └─► reports response + latency
+     └─► NOTE: only tests the proxy — Codex models bypass the proxy
 ```
 
 ---
@@ -210,6 +233,11 @@ npm test            # vitest run (5 unit tests for formatPrompt)
 ---
 
 ## Changelog
+
+### v0.2.5
+- **feat:** `/cli-codex` → `openai-codex/gpt-5.3-codex`
+- **feat:** `/cli-codex-mini` → `openai-codex/gpt-5.1-codex-mini`
+- Codex commands use the `openai-codex` provider (Codex CLI OAuth auth, direct OpenAI API — not the local proxy)
 
 ### v0.2.4
 - **fix:** Gemini agentic mode — replaced `@file` with stdin delivery (`-p ""`) + `cwd=/tmp`

@@ -9,12 +9,14 @@
  *   are handled by the Gemini CLI and Claude Code CLI subprocesses.
  *
  * Phase 3 (slash commands): registers /cli-* commands for instant model switching.
- *   /cli-sonnet       → vllm/cli-claude/claude-sonnet-4-6
- *   /cli-opus         → vllm/cli-claude/claude-opus-4-6
- *   /cli-haiku        → vllm/cli-claude/claude-haiku-4-5
- *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro
- *   /cli-gemini-flash → vllm/cli-gemini/gemini-2.5-flash
- *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro
+ *   /cli-sonnet       → vllm/cli-claude/claude-sonnet-4-6      (Claude Code CLI proxy)
+ *   /cli-opus         → vllm/cli-claude/claude-opus-4-6        (Claude Code CLI proxy)
+ *   /cli-haiku        → vllm/cli-claude/claude-haiku-4-5       (Claude Code CLI proxy)
+ *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro         (Gemini CLI proxy)
+ *   /cli-gemini-flash → vllm/cli-gemini/gemini-2.5-flash       (Gemini CLI proxy)
+ *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro           (Gemini CLI proxy)
+ *   /cli-codex        → openai-codex/gpt-5.3-codex             (Codex CLI OAuth, direct API)
+ *   /cli-codex-mini   → openai-codex/gpt-5.1-codex-mini        (Codex CLI OAuth, direct API)
  *   /cli-back         → restore model that was active before last /cli-* switch
  *   /cli-test [model] → one-shot proxy health check (does NOT switch global model)
  *
@@ -116,41 +118,56 @@ function readCurrentModel(): string | null {
 // Phase 3: model command table
 // ──────────────────────────────────────────────────────────────────────────────
 const CLI_MODEL_COMMANDS = [
+  // ── Claude (via local proxy → Claude Code CLI) ──────────────────────────────
   {
     name: "cli-sonnet",
     model: "vllm/cli-claude/claude-sonnet-4-6",
-    description: "Switch to Claude Sonnet 4.6 (CLI bridge)",
+    description: "Switch to Claude Sonnet 4.6 (Claude Code CLI via local proxy)",
     label: "Claude Sonnet 4.6 (CLI)",
   },
   {
     name: "cli-opus",
     model: "vllm/cli-claude/claude-opus-4-6",
-    description: "Switch to Claude Opus 4.6 (CLI bridge)",
+    description: "Switch to Claude Opus 4.6 (Claude Code CLI via local proxy)",
     label: "Claude Opus 4.6 (CLI)",
   },
   {
     name: "cli-haiku",
     model: "vllm/cli-claude/claude-haiku-4-5",
-    description: "Switch to Claude Haiku 4.5 (CLI bridge)",
+    description: "Switch to Claude Haiku 4.5 (Claude Code CLI via local proxy)",
     label: "Claude Haiku 4.5 (CLI)",
   },
+  // ── Gemini (via local proxy → Gemini CLI) ───────────────────────────────────
   {
     name: "cli-gemini",
     model: "vllm/cli-gemini/gemini-2.5-pro",
-    description: "Switch to Gemini 2.5 Pro (CLI bridge)",
+    description: "Switch to Gemini 2.5 Pro (Gemini CLI via local proxy)",
     label: "Gemini 2.5 Pro (CLI)",
   },
   {
     name: "cli-gemini-flash",
     model: "vllm/cli-gemini/gemini-2.5-flash",
-    description: "Switch to Gemini 2.5 Flash (CLI bridge)",
+    description: "Switch to Gemini 2.5 Flash (Gemini CLI via local proxy)",
     label: "Gemini 2.5 Flash (CLI)",
   },
   {
     name: "cli-gemini3",
     model: "vllm/cli-gemini/gemini-3-pro",
-    description: "Switch to Gemini 3 Pro (CLI bridge)",
+    description: "Switch to Gemini 3 Pro (Gemini CLI via local proxy)",
     label: "Gemini 3 Pro (CLI)",
+  },
+  // ── Codex (via openai-codex provider — Codex CLI OAuth auth, direct API) ────
+  {
+    name: "cli-codex",
+    model: "openai-codex/gpt-5.3-codex",
+    description: "Switch to GPT-5.3 Codex (openai-codex provider, Codex CLI auth)",
+    label: "GPT-5.3 Codex",
+  },
+  {
+    name: "cli-codex-mini",
+    model: "openai-codex/gpt-5.1-codex-mini",
+    description: "Switch to GPT-5.1 Codex Mini (openai-codex provider, Codex CLI auth)",
+    label: "GPT-5.1 Codex Mini",
   },
 ] as const;
 
@@ -260,7 +277,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.3",
+  version: "0.2.5",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
