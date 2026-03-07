@@ -354,14 +354,17 @@ const plugin = {
     let proxyServer: import("node:http").Server | null = null;
 
     if (enableProxy) {
-      startProxyServer({
-        port,
-        apiKey,
-        timeoutMs,
-        log: (msg) => api.logger.info(msg),
-        warn: (msg) => api.logger.warn(msg),
-      })
-        .then((server) => {
+      // Retry up to 3 times with 600ms delay to handle the race condition where
+      // a previous plugin instance's server.close() hasn't released the port yet.
+      const startWithRetry = async (attemptsLeft: number): Promise<void> => {
+        try {
+          const server = await startProxyServer({
+            port,
+            apiKey,
+            timeoutMs,
+            log: (msg) => api.logger.info(msg),
+            warn: (msg) => api.logger.warn(msg),
+          });
           proxyServer = server;
           api.logger.info(
             `[cli-bridge] proxy ready on :${port} — vllm/cli-gemini/* and vllm/cli-claude/* available`
@@ -372,10 +375,17 @@ const plugin = {
               `[cli-bridge] openclaw.json patched with vllm provider. Restart gateway to activate.`
             );
           }
-        })
-        .catch((err: Error) => {
-          api.logger.warn(`[cli-bridge] proxy failed to start on port ${port}: ${err.message}`);
-        });
+        } catch (err: unknown) {
+          const msg = (err as Error).message ?? String(err);
+          if (attemptsLeft > 1 && msg.includes("EADDRINUSE")) {
+            api.logger.warn(`[cli-bridge] port ${port} busy, retrying in 600ms (${attemptsLeft - 1} left)…`);
+            await new Promise((r) => setTimeout(r, 600));
+            return startWithRetry(attemptsLeft - 1);
+          }
+          api.logger.warn(`[cli-bridge] proxy failed to start on port ${port}: ${msg}`);
+        }
+      };
+      startWithRetry(3).catch(() => {});
     }
 
     // ── Cleanup: close proxy server on plugin stop (hot-reload / gateway restart) ──
@@ -385,6 +395,13 @@ const plugin = {
       start: async () => { /* proxy already started above */ },
       stop: async () => {
         if (proxyServer) {
+          // closeAllConnections() forcefully terminates keep-alive connections
+          // so that server.close() releases the port immediately rather than
+          // waiting for them to drain. Without this, the port stays bound
+          // during hot-reloads and the next start() call gets EADDRINUSE.
+          if (typeof (proxyServer as any).closeAllConnections === "function") {
+            (proxyServer as any).closeAllConnections();
+          }
           await new Promise<void>((resolve) => {
             proxyServer!.close((err) => {
               if (err) api.logger.warn(`[cli-bridge] proxy close error: ${err.message}`);
