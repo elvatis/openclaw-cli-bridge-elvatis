@@ -33,7 +33,8 @@ _Last updated: 2026-03-07_
 
 | Task | Title | Date |
 |------|-------|------|
-| T-006 | Fix port leak: registerService stop() hook | 2026-03-07 |
+| T-007 | Critical: remove fuser -k, safe proxy reuse via health probe | 2026-03-08 |
+| T-006 | Fix port leak: registerService stop() hook + closeAllConnections | 2026-03-07 |
 | T-005 | Add openclaw.extensions to package.json | 2026-03-07 |
 | T-004 | /cli-codex + /cli-codex-mini | 2026-03-07 |
 | T-003 | /cli-back + /cli-test | 2026-03-07 |

@@ -2,7 +2,7 @@
 
 _Last updated: 2026-03-07 by Akido (claude-sonnet-4-6)_
 
-## Current Version: 0.2.7 — STABLE
+## Current Version: 0.2.9 — STABLE
 
 ## What is done
 
@@ -17,11 +17,23 @@ _Last updated: 2026-03-07 by Akido (claude-sonnet-4-6)_
 - ✅ `registerService` stop() hook: closes proxy server on plugin teardown (fixes EADDRINUSE on hot-reload)
 - ✅ `openclaw.extensions` added to `package.json` (required for `openclaw plugins install`)
 
-## Bug Fixed (v0.2.6)
+## Bugs Fixed
 
-**Port leak on gateway hot-reload** — HTTP proxy server on port 31337 had no cleanup
-handler. On hot-reloads the old server kept the port bound, causing EADDRINUSE.
-Fixed with `registerService` stop() callback.
+### v0.2.9 — Critical: Gateway SIGKILL via fuser
+`fuser -k 31337/tcp` was sending SIGKILL to the gateway process itself during
+in-process hot-reloads. The gateway holds port 31337 (via the proxy it spawned),
+so `fuser` found it and killed it — explaining `status=9/KILL` in systemd journal.
+Fixed by replacing `fuser -k` with a safe health probe (`GET /v1/models`): if the
+existing proxy responds, reuse it silently. If EADDRINUSE but no response, wait 1s
+and retry once. No process killing involved.
+
+### v0.2.7–v0.2.8 — EADDRINUSE on hot-reload (partially fixed, superseded by v0.2.9)
+Added `closeAllConnections()` + `registerService` stop() hook. Port still leaked
+during systemd restarts due to race condition. v0.2.9 health-probe approach is the
+definitive fix.
+
+### v0.2.6 — Port leak on gateway hot-reload
+HTTP proxy server had no cleanup handler. Fixed with `registerService` stop() callback.
 
 ## Open Risks
 

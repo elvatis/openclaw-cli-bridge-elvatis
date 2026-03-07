@@ -6,15 +6,15 @@ _Last updated: 2026-03-07_
 
 | Component | Version | Build | Tests | Status |
 |-----------|---------|-------|-------|--------|
-| openclaw-cli-bridge-elvatis | 0.2.7 | ✅ | 5/5 ✅ | ✅ Stable |
+| openclaw-cli-bridge-elvatis | 0.2.9 | ✅ | 5/5 ✅ | ✅ Stable |
 
 ## 🚀 Release State
 
 | Platform | Version | Status |
 |----------|---------|--------|
-| GitHub | v0.2.7 | ✅ Tagged + Release |
-| npm | 0.2.7 | ✅ Published |
-| ClawHub | 0.2.7 | ✅ Published |
+| GitHub | v0.2.9 | ✅ Tagged + Release |
+| npm | 0.2.9 | ✅ Published |
+| ClawHub | 0.2.9 | ✅ Published |
 
 ## 📋 Open Tasks
 
@@ -28,7 +28,8 @@ _Last updated: 2026-03-07_
 
 | Task | Title | Version |
 |------|-------|---------|
-| T-006 | Fix port leak: registerService stop() hook for proxy server | 0.2.6 |
+| T-007 | Critical: remove fuser -k, replace with safe health probe | 0.2.9 |
+| T-006 | Fix port leak: registerService stop() hook + closeAllConnections | 0.2.7 |
 | T-005 | Add openclaw.extensions to package.json | 0.2.6 |
 | T-004 | /cli-codex + /cli-codex-mini slash commands | 0.2.5 |
 | T-003 | /cli-back restore + /cli-test health check | 0.2.3 |
