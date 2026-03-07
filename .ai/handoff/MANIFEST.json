@@ -1,0 +1,116 @@
+{
+  "aahp_version": "2.0",
+  "project": "openclaw-cli-bridge",
+  "last_session": {
+    "agent": "anthropic/claude-sonnet-4-6",
+    "session_id": "main",
+    "timestamp": "2026-03-07T20:56:00Z",
+    "commit": null,
+    "phase": "implementation",
+    "duration_minutes": 20
+  },
+  "files": {
+    "STATUS.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T20:56:00Z",
+      "lines": 0,
+      "summary": "Plugin skeleton complete. Typecheck passes. Gateway restarted with plugin loaded. Auth not yet tested."
+    },
+    "NEXT_ACTIONS.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T20:56:00Z",
+      "lines": 0,
+      "summary": "3 tasks. Top: Test openai-codex auth flow via 'openclaw models auth login --provider openai-codex'. Then verify model calls work."
+    },
+    "LOG.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T20:56:00Z",
+      "lines": 0,
+      "summary": "Last entry: Plugin scaffolded, config wired, gateway restarted."
+    },
+    "DASHBOARD.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T20:56:00Z",
+      "lines": 0,
+      "summary": "1/3 providers bridged (openai-codex). gemini + claude bridges not yet implemented."
+    },
+    "TRUST.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T20:56:00Z",
+      "lines": 0,
+      "summary": "Reads ~/.codex/auth.json. No destructive ops. Auth file access is read-only."
+    },
+    "CONVENTIONS.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T20:56:00Z",
+      "lines": 0,
+      "summary": "TypeScript strict, ESM, @elvatis_com scope, AAHP handoff at .ai/handoff/"
+    },
+    "WORKFLOW.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T20:56:00Z",
+      "lines": 0,
+      "summary": "1. Auth test → 2. Model call test → 3. Gemini bridge → 4. Claude bridge → 5. Publish"
+    }
+  },
+  "quick_context": "Plugin skeleton complete. Registers openai-codex provider by reading ~/.codex/auth.json tokens. Gateway loaded it without errors. Next step: run 'openclaw models auth login --provider openai-codex' to test the auth flow end-to-end, then verify a model call works.",
+  "token_budget": {
+    "manifest_only": 80,
+    "manifest_plus_core": 300,
+    "full_read": 600
+  },
+  "next_task_id": 4,
+  "tasks": {
+    "T-001": {
+      "title": "Scaffold plugin structure + AAHP handoff",
+      "status": "done",
+      "priority": "high",
+      "depends_on": [],
+      "created": "2026-03-07T20:40:00Z",
+      "completed": "2026-03-07T20:56:00Z"
+    },
+    "T-002": {
+      "title": "Implement openai-codex provider (Codex CLI auth bridge)",
+      "status": "done",
+      "priority": "high",
+      "depends_on": ["T-001"],
+      "created": "2026-03-07T20:40:00Z",
+      "completed": "2026-03-07T20:56:00Z"
+    },
+    "T-003": {
+      "title": "Test auth flow: openclaw models auth login --provider openai-codex",
+      "status": "ready",
+      "priority": "high",
+      "depends_on": ["T-002"],
+      "created": "2026-03-07T20:56:00Z"
+    },
+    "T-004": {
+      "title": "Verify model call: test gpt-5.2 or gpt-5.3-codex responds",
+      "status": "blocked",
+      "priority": "high",
+      "depends_on": ["T-003"],
+      "created": "2026-03-07T20:56:00Z"
+    },
+    "T-005": {
+      "title": "Implement Gemini CLI bridge (google-gemini-cli fallback)",
+      "status": "ready",
+      "priority": "medium",
+      "depends_on": ["T-003"],
+      "created": "2026-03-07T20:56:00Z"
+    },
+    "T-006": {
+      "title": "Implement Claude Code CLI bridge (anthropic fallback)",
+      "status": "ready",
+      "priority": "medium",
+      "depends_on": ["T-003"],
+      "created": "2026-03-07T20:56:00Z"
+    },
+    "T-007": {
+      "title": "Publish to GitHub, npm (@elvatis_com), ClawHub",
+      "status": "blocked",
+      "priority": "low",
+      "depends_on": ["T-004"],
+      "created": "2026-03-07T20:56:00Z"
+    }
+  }
+}
