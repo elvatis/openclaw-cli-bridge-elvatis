@@ -354,24 +354,32 @@ const plugin = {
     let proxyServer: import("node:http").Server | null = null;
 
     if (enableProxy) {
-      // Before binding, evict any stale process holding our port.
-      // Port 31337 is exclusively ours — it's safe to kill whatever is on it.
-      // This handles the systemd restart race: new process starts before the old
-      // one's socket is fully released.
-      const evictPort = async (): Promise<void> => {
-        try {
-          const { execSync } = await import("node:child_process");
-          // fuser -k sends SIGKILL to whatever holds the TCP port
-          execSync(`fuser -k ${port}/tcp 2>/dev/null || true`, { stdio: "ignore" });
-          // Give the OS ~200ms to release the socket
-          await new Promise((r) => setTimeout(r, 200));
-          api.logger.info(`[cli-bridge] evicted stale listener on port ${port}`);
-        } catch {
-          // fuser not available or port was already free — ignore
-        }
+      // Probe whether a healthy proxy is already listening on our port.
+      // This handles hot-reloads where the previous plugin instance's server.close()
+      // may not have completed yet — rather than killing anything (dangerous: fuser -k
+      // can kill the gateway process itself during in-process hot-reloads), we just
+      // check if the existing server still responds and reuse it if so.
+      const probeExisting = (): Promise<boolean> => {
+        return new Promise((resolve) => {
+          const req = http.request(
+            { hostname: "127.0.0.1", port, path: "/v1/models", method: "GET",
+              headers: { Authorization: `Bearer ${apiKey}` } },
+            (res) => { res.resume(); resolve(res.statusCode === 200); }
+          );
+          req.setTimeout(800, () => { req.destroy(); resolve(false); });
+          req.on("error", () => resolve(false));
+          req.end();
+        });
       };
 
       const startProxy = async (): Promise<void> => {
+        // If a healthy proxy is already up, reuse it — no need to rebind.
+        const alive = await probeExisting();
+        if (alive) {
+          api.logger.info(`[cli-bridge] proxy already running on :${port} — reusing`);
+          return;
+        }
+
         try {
           const server = await startProxyServer({
             port,
@@ -393,25 +401,28 @@ const plugin = {
         } catch (err: unknown) {
           const msg = (err as Error).message ?? String(err);
           if (msg.includes("EADDRINUSE")) {
-            // fuser didn't work (e.g. not installed) — one last retry after 800ms
-            api.logger.warn(`[cli-bridge] port ${port} still busy after evict, retrying in 800ms…`);
-            await new Promise((r) => setTimeout(r, 800));
-            const server = await startProxyServer({
-              port,
-              apiKey,
-              timeoutMs,
-              log: (msg) => api.logger.info(msg),
-              warn: (msg) => api.logger.warn(msg),
-            });
-            proxyServer = server;
-            api.logger.info(`[cli-bridge] proxy ready on :${port} (retry)`);
+            // Port is busy but probe didn't respond — wait for the OS to release it
+            api.logger.warn(`[cli-bridge] port ${port} busy, waiting 1s for OS release…`);
+            await new Promise((r) => setTimeout(r, 1000));
+            // One final attempt
+            try {
+              const server = await startProxyServer({
+                port, apiKey, timeoutMs,
+                log: (msg) => api.logger.info(msg),
+                warn: (msg) => api.logger.warn(msg),
+              });
+              proxyServer = server;
+              api.logger.info(`[cli-bridge] proxy ready on :${port} (retry)`);
+            } catch (e2: unknown) {
+              api.logger.warn(`[cli-bridge] proxy unavailable after retry: ${(e2 as Error).message}`);
+            }
           } else {
             api.logger.warn(`[cli-bridge] proxy failed to start on port ${port}: ${msg}`);
           }
         }
       };
 
-      evictPort().then(startProxy).catch(() => {});
+      startProxy().catch(() => {});
     }
 
     // ── Cleanup: close proxy server on plugin stop (hot-reload / gateway restart) ──
