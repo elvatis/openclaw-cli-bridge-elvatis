@@ -1,32 +1,30 @@
 # STATUS.md — openclaw-cli-bridge-elvatis
 
-_Last updated: 2026-03-07 by gpt-5.3-codex_
+_Last updated: 2026-03-07 by Akido (claude-sonnet-4-6)_
 
-## Phase: Integration & validation
+## Current Version: 0.2.6 — STABLE
 
 ## What is done
 
-- ✅ Repo created: `https://github.com/elvatis/openclaw-cli-bridge-elvatis`
-- ✅ AAHP handoff in `.ai/handoff/` (v3)
-- ✅ Phase 1 implemented: `openai-codex` auth bridge via `~/.codex/auth.json`
-- ✅ Auth flow verified with `openclaw models auth login --provider openai-codex`
-- ✅ Session model switching verified (`gpt-5.3-codex` works)
-- ✅ Phase 2 implemented: local OpenAI-compatible proxy server (`src/proxy-server.ts`)
-- ✅ CLI routing implemented (`src/cli-runner.ts`):
-  - `cli-gemini/*` → `gemini`
-  - `cli-claude/*` → `claude`
-- ✅ Config patcher implemented (`src/config-patcher.ts`) for `models.providers.vllm`
+- ✅ Repo: `https://github.com/elvatis/openclaw-cli-bridge-elvatis`
+- ✅ npm: `@elvatis_com/openclaw-cli-bridge-elvatis@0.2.6`
+- ✅ ClawHub: `openclaw-cli-bridge-elvatis@0.2.6`
+- ✅ Phase 1: `openai-codex` provider via `~/.codex/auth.json` (no re-login)
+- ✅ Phase 2: Local OpenAI-compatible proxy on `127.0.0.1:31337` (Gemini + Claude CLI)
+- ✅ Phase 3: 10 slash commands (`/cli-sonnet`, `/cli-opus`, `/cli-haiku`, `/cli-gemini`, `/cli-gemini-flash`, `/cli-gemini3`, `/cli-codex`, `/cli-codex-mini`, `/cli-back`, `/cli-test`)
+- ✅ Config patcher: auto-adds vllm provider to `openclaw.json` on first startup
+- ✅ Prompt delivery via stdin (no E2BIG, no Gemini agentic mode)
+- ✅ `registerService` stop() hook: closes proxy server on plugin teardown (fixes EADDRINUSE on hot-reload)
+- ✅ `openclaw.extensions` added to `package.json` (required for `openclaw plugins install`)
 
-## Current state
+## Bug Fixed (v0.2.6)
 
-- Development model pinned to: `openai-codex/gpt-5.3-codex`
-- `openai-codex/gpt-5.4` still fails with OpenAI scope error (`model.request`)
-- Plugin should now support both:
-  - direct Codex OAuth auth bridge
-  - vllm-based CLI request bridge (Gemini + Claude)
+**Port leak on gateway hot-reload** — HTTP proxy server on port 31337 had no cleanup
+handler. On hot-reloads the old server kept the port bound, causing EADDRINUSE.
+Fixed with `registerService` stop() callback.
 
-## Open risks
+## Open Risks
 
-- Need explicit runtime validation of proxy endpoints and vllm model calls.
-- Config patcher writes `openclaw.json`; keep backup/doctor discipline before release.
-- `gpt-5.4` scope limitation is external (OpenAI account/role/scope), not plugin code.
+- `openai-codex/gpt-5.4` returns 401 missing scope `model.request` — external (OpenAI account scope), not plugin code
+- Config patcher writes `openclaw.json` directly → triggers one gateway restart on first install (expected, one-time only)
+- ClawHub publish ignores `.clawhubignore` — use rsync workaround (see CONVENTIONS.md)

@@ -2,36 +2,40 @@
 
 _Last updated: 2026-03-07_
 
-## Immediate
+## Status Summary
 
-1. **Validate proxy runtime**
-   - Confirm local proxy listens on `127.0.0.1:31337`
-   - Test:
-     - `GET /v1/models`
-     - `POST /v1/chat/completions` (non-stream + stream)
+| Status | Count |
+|--------|-------|
+| Done   | 6     |
+| Ready  | 3     |
+| Blocked | 0   |
 
-2. **Validate OpenClaw vllm integration**
-   - Ensure `models.providers.vllm` contains `cli-gemini/*` + `cli-claude/*`
-   - Send live test prompts with:
-     - `vllm/cli-gemini/gemini-2.5-pro`
-     - `vllm/cli-claude/claude-sonnet-4-6`
+---
 
-3. **Stability pass**
-   - Confirm timeout behavior and error mapping (CLI exits, malformed output)
-   - Confirm no secret leakage in logs
+## Ready — Work These Next
 
-## Next
+### T-101: [medium] — Unit tests for prompt formatter + model router
+- **Goal:** Cover `src/cli-runner.ts` message formatting and model routing logic with vitest tests.
+- **Files:** `test/cli-runner.test.ts`, `src/cli-runner.ts`
+- **Definition of done:** Prompt truncation, stdin format, and model→CLI mapping covered by tests.
 
-4. **Self-heal integration**
-   - Update `openclaw-self-healing-elvatis` model order for dev-safe default fallback chain.
+### T-102: [low] — Proxy auth key rotation via config
+- **Goal:** Allow `proxyApiKey` to be rotated without code change via config reload.
+- **Files:** `index.ts`, `src/proxy-server.ts`
 
-5. **Release pipeline**
-   - GitHub release tag
-   - npm publish (`@elvatis_com/openclaw-cli-bridge-elvatis`)
-   - ClawHub publish
+### T-103: [low] — Explicit model allowlist for CLI execution
+- **Goal:** Config-driven allowlist of which model IDs are permitted to spawn CLI subprocesses.
+- **Files:** `index.ts`, `src/cli-runner.ts`
 
-## Optional hardening
+---
 
-- Add unit tests for prompt formatter + model router
-- Add proxy auth key rotation via config
-- Add explicit model allowlist for CLI execution
+## Recently Completed
+
+| Task | Title | Date |
+|------|-------|------|
+| T-006 | Fix port leak: registerService stop() hook | 2026-03-07 |
+| T-005 | Add openclaw.extensions to package.json | 2026-03-07 |
+| T-004 | /cli-codex + /cli-codex-mini | 2026-03-07 |
+| T-003 | /cli-back + /cli-test | 2026-03-07 |
+| T-002 | /cli-* model switch commands | 2026-03-07 |
+| T-001 | Phase 1+2: auth + proxy + config patcher | 2026-03-07 |
