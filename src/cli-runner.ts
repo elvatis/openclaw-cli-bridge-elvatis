@@ -4,15 +4,16 @@
  * Spawns CLI subprocesses (gemini, claude) and captures their output.
  * Input: OpenAI-format messages → formatted prompt string → CLI stdin.
  *
- * IMPORTANT: Prompt is always passed via stdin (not as a CLI argument) to
- * avoid E2BIG ("Argument list too long") when conversation history is large.
+ * Both Gemini and Claude receive the prompt via stdin to avoid:
+ *   - E2BIG (arg list too long) for large conversation histories
+ *   - Gemini agentic mode (triggered by @file syntax + workspace cwd)
+ *
+ * Gemini is always spawned with cwd = tmpdir() so it doesn't scan the
+ * workspace and enter agentic mode.
  */
 
 import { spawn } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { tmpdir, homedir } from "node:os";
 
 /** Max messages to include in the prompt sent to the CLI. */
 const MAX_MESSAGES = 20;
@@ -31,7 +32,7 @@ export interface ChatMessage {
 /**
  * Convert OpenAI messages to a single flat prompt string.
  * Truncates to MAX_MESSAGES (keeping the most recent) and MAX_MSG_CHARS per
- * message to avoid E2BIG when conversation history is very large.
+ * message to avoid oversized payloads.
  */
 export function formatPrompt(messages: ChatMessage[]): string {
   if (messages.length === 0) return "";
@@ -42,7 +43,7 @@ export function formatPrompt(messages: ChatMessage[]): string {
   const recent = nonSystem.slice(-MAX_MESSAGES);
   const truncated = system ? [system, ...recent] : recent;
 
-  // If single user message with short content, send directly — no wrapping.
+  // Single short user message — send bare (no wrapping needed)
   if (truncated.length === 1 && truncated[0].role === "user") {
     return truncateContent(truncated[0].content);
   }
@@ -51,13 +52,10 @@ export function formatPrompt(messages: ChatMessage[]): string {
     .map((m) => {
       const content = truncateContent(m.content);
       switch (m.role) {
-        case "system":
-          return `[System]\n${content}`;
-        case "assistant":
-          return `[Assistant]\n${content}`;
+        case "system":    return `[System]\n${content}`;
+        case "assistant": return `[Assistant]\n${content}`;
         case "user":
-        default:
-          return `[User]\n${content}`;
+        default:          return `[User]\n${content}`;
       }
     })
     .join("\n\n");
@@ -69,40 +67,26 @@ function truncateContent(s: string): string {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Core subprocess runner
+// Minimal environment for spawned subprocesses
 // ──────────────────────────────────────────────────────────────────────────────
-
-export interface CliRunResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
 
 /**
  * Build a minimal, safe environment for spawning CLI subprocesses.
  *
- * WHY: The OpenClaw gateway may inject large values into process.env at
- * runtime (system prompts, session data, OPENCLAW_* vars, etc.). Spreading
- * the full process.env into spawn() can push the combined argv+envp over
- * ARG_MAX (~2 MB on Linux), causing "spawn E2BIG". Using only the vars that
+ * WHY: The OpenClaw gateway modifies process.env at runtime (OPENCLAW_* vars,
+ * session context, etc.). Spreading the full process.env into spawn() can push
+ * argv+envp over ARG_MAX (~2 MB on Linux) → "spawn E2BIG". Only passing what
  * the CLI tools actually need keeps us well under the limit regardless of
- * what the parent process environment contains.
+ * gateway runtime state.
  */
 function buildMinimalEnv(): Record<string, string> {
-  const pick = (key: string): string | undefined => process.env[key];
+  const pick = (key: string) => process.env[key];
+  const env: Record<string, string> = { NO_COLOR: "1", TERM: "dumb" };
 
-  const env: Record<string, string> = {
-    NO_COLOR: "1",
-    TERM: "dumb",
-  };
-
-  // Essential path/identity vars — always include when present.
   for (const key of ["HOME", "PATH", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP"]) {
     const v = pick(key);
     if (v) env[key] = v;
   }
-
-  // Allow google-auth / claude auth paths to be inherited.
   for (const key of [
     "GOOGLE_APPLICATION_CREDENTIALS",
     "ANTHROPIC_API_KEY",
@@ -120,37 +104,56 @@ function buildMinimalEnv(): Record<string, string> {
   return env;
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Core subprocess runner
+// ──────────────────────────────────────────────────────────────────────────────
+
+export interface CliRunResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+}
+
+export interface RunCliOptions {
+  /**
+   * Working directory for the subprocess.
+   * Defaults to homedir() — a neutral dir that won't trigger agentic context scanning.
+   */
+  cwd?: string;
+  timeoutMs?: number;
+}
+
 /**
- * Spawn a CLI and deliver the prompt via stdin (not as an argument).
- * This avoids E2BIG ("Argument list too long") for large conversation histories
- * or when the parent process has a large runtime environment.
+ * Spawn a CLI and deliver the prompt via stdin.
+ *
+ * cwd defaults to homedir() so CLIs that scan the working directory for
+ * project context (like Gemini) don't accidentally enter agentic mode.
  */
 export function runCli(
   cmd: string,
   args: string[],
   prompt: string,
-  timeoutMs = 120_000
+  timeoutMs = 120_000,
+  opts: RunCliOptions = {}
 ): Promise<CliRunResult> {
+  const cwd = opts.cwd ?? homedir();
+
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, args, {
       timeout: timeoutMs,
       env: buildMinimalEnv(),
+      cwd,
     });
 
     let stdout = "";
     let stderr = "";
 
-    // Write prompt to stdin then close — prevents the CLI from waiting for more input.
     proc.stdin.write(prompt, "utf8", () => {
       proc.stdin.end();
     });
 
-    proc.stdout.on("data", (d: Buffer) => {
-      stdout += d.toString();
-    });
-    proc.stderr.on("data", (d: Buffer) => {
-      stderr += d.toString();
-    });
+    proc.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
 
     proc.on("close", (code) => {
       resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
@@ -167,8 +170,19 @@ export function runCli(
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * Run: gemini -m <modelId> -p "<prompt>"
- * Strips the model prefix ("cli-gemini/gemini-2.5-pro" → "gemini-2.5-pro").
+ * Run Gemini CLI in headless mode with prompt delivered via stdin.
+ *
+ * WHY stdin (not @file):
+ *   The @file syntax (`gemini -p @/tmp/xxx.txt`) triggers Gemini's agentic
+ *   mode — it scans the current working directory for project context and
+ *   interprets the prompt as a task instruction, not a Q&A. This causes hangs,
+ *   wrong answers, and "directory does not exist" errors when run from a
+ *   project workspace.
+ *
+ * Gemini CLI: -p "" triggers headless mode; stdin content is the actual prompt
+ * (per Gemini docs: "prompt is appended to input on stdin (if any)").
+ *
+ * cwd = tmpdir() — neutral empty-ish dir, prevents workspace context scanning.
  */
 export async function runGemini(
   prompt: string,
@@ -176,24 +190,22 @@ export async function runGemini(
   timeoutMs: number
 ): Promise<string> {
   const model = stripPrefix(modelId);
-  // Gemini CLI doesn't support stdin — write prompt to a temp file and read it via @file syntax
-  const tmpFile = join(tmpdir(), `cli-bridge-${randomBytes(6).toString("hex")}.txt`);
-  writeFileSync(tmpFile, prompt, "utf8");
-  try {
-    // Use @<file> to pass prompt from file (avoids ARG_MAX limit)
-    const args = ["-m", model, "-p", `@${tmpFile}`];
-    const result = await runCli("gemini", args, "", timeoutMs);
+  // -p "" = headless mode trigger; actual prompt arrives via stdin
+  const args = ["-m", model, "-p", ""];
+  const result = await runCli("gemini", args, prompt, timeoutMs, { cwd: tmpdir() });
 
-    if (result.exitCode !== 0 && result.stdout.length === 0) {
-      throw new Error(
-        `gemini exited ${result.exitCode}: ${result.stderr || "(no output)"}`
-      );
-    }
+  // Filter out [WARN] lines from stderr (Gemini emits noisy permission warnings)
+  const cleanStderr = result.stderr
+    .split("\n")
+    .filter((l) => !l.startsWith("[WARN]") && !l.startsWith("Loaded cached"))
+    .join("\n")
+    .trim();
 
-    return result.stdout || result.stderr;
-  } finally {
-    try { unlinkSync(tmpFile); } catch { /* ignore */ }
+  if (result.exitCode !== 0 && result.stdout.length === 0) {
+    throw new Error(`gemini exited ${result.exitCode}: ${cleanStderr || "(no output)"}`);
   }
+
+  return result.stdout || cleanStderr;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -201,7 +213,7 @@ export async function runGemini(
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * Run: claude -p --output-format text -m <modelId> "<prompt>"
+ * Run Claude Code CLI in headless mode with prompt delivered via stdin.
  * Strips the model prefix ("cli-claude/claude-opus-4-6" → "claude-opus-4-6").
  */
 export async function runClaude(
@@ -210,24 +222,17 @@ export async function runClaude(
   timeoutMs: number
 ): Promise<string> {
   const model = stripPrefix(modelId);
-  // No prompt argument — deliver via stdin to avoid E2BIG
   const args = [
     "-p",
-    "--output-format",
-    "text",
-    "--permission-mode",
-    "plan",
-    "--tools",
-    "",
-    "--model",
-    model,
+    "--output-format", "text",
+    "--permission-mode", "plan",
+    "--tools", "",
+    "--model", model,
   ];
   const result = await runCli("claude", args, prompt, timeoutMs);
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
-    throw new Error(
-      `claude exited ${result.exitCode}: ${result.stderr || "(no output)"}`
-    );
+    throw new Error(`claude exited ${result.exitCode}: ${result.stderr || "(no output)"}`);
   }
 
   return result.stdout;
@@ -238,8 +243,7 @@ export async function runClaude(
 // ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * Route a chat completion request to the right CLI based on the model name.
- * Model naming convention:
+ * Route a chat completion to the correct CLI based on model prefix.
  *   cli-gemini/<id>  → gemini CLI
  *   cli-claude/<id>  → claude CLI
  */
@@ -250,17 +254,11 @@ export async function routeToCliRunner(
 ): Promise<string> {
   const prompt = formatPrompt(messages);
 
-  if (model.startsWith("cli-gemini/")) {
-    return runGemini(prompt, model, timeoutMs);
-  }
-
-  if (model.startsWith("cli-claude/")) {
-    return runClaude(prompt, model, timeoutMs);
-  }
+  if (model.startsWith("cli-gemini/")) return runGemini(prompt, model, timeoutMs);
+  if (model.startsWith("cli-claude/")) return runClaude(prompt, model, timeoutMs);
 
   throw new Error(
-    `Unknown CLI bridge model: "${model}". ` +
-      `Use "cli-gemini/<model>" or "cli-claude/<model>".`
+    `Unknown CLI bridge model: "${model}". Use "cli-gemini/<model>" or "cli-claude/<model>".`
   );
 }
 
@@ -268,7 +266,6 @@ export async function routeToCliRunner(
 // Helpers
 // ──────────────────────────────────────────────────────────────────────────────
 
-/** Strip the "cli-gemini/" or "cli-claude/" prefix from a model ID. */
 function stripPrefix(modelId: string): string {
   const slash = modelId.indexOf("/");
   return slash === -1 ? modelId : modelId.slice(slash + 1);
