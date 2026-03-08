@@ -30,7 +30,17 @@ package.json / tsconfig.json
 ### Before release
 1. `npm run typecheck` — must pass
 2. `npm test` — all tests must pass
-3. Bump version in `package.json` AND `openclaw.plugin.json`
+3. Bump version in ALL of these (grep to find all occurrences first!):
+   - `package.json`
+   - `openclaw.plugin.json`
+   - `README.md` → `**Current version:** \`X.Y.Z\``
+   - `SKILL.md` → `**Version:** X.Y.Z` (at the bottom)
+   - `.ai/handoff/STATUS.md` → header line + npm/ClawHub lines
+   - Add changelog entry for new version in `README.md`
+   ```bash
+   grep -rn "X\.Y\.Z\|Current version\|Version:" \
+     --include="*.md" --include="*.json" --exclude-dir=node_modules --exclude-dir=dist --exclude-dir=.git
+   ```
 
 ### Publish (all three platforms, no exceptions)
 4. `git tag vX.Y.Z && git push origin main && git push origin vX.Y.Z`
