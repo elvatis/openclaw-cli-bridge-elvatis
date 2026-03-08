@@ -2,12 +2,12 @@
   "aahp_version": "3.0",
   "project": "openclaw-cli-bridge-elvatis",
   "last_session": {
-    "agent": "openai-codex/gpt-5.3-codex",
+    "agent": "claude-opus-4-6",
     "session_id": "main",
-    "timestamp": "2026-03-07T21:29:00Z",
-    "commit": "16fca7c",
+    "timestamp": "2026-03-08T09:07:00Z",
+    "commit": "30be8ae",
     "phase": "integration",
-    "duration_minutes": 60
+    "duration_minutes": 15
   },
   "files": {
     "STATUS.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "Auth bridge done; request bridge implemented; pending runtime validation." },
@@ -18,7 +18,7 @@
     "CONVENTIONS.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "TypeScript strict + AAHP v3 + multi-platform release discipline." },
     "WORKFLOW.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "Validate → harden → publish (GitHub, npm, ClawHub)." }
   },
-  "quick_context": "Codex auth bridge is working and repo is live. gpt-5.4 fails due to OpenAI scope limitations, so development is on gpt-5.3-codex. Request-bridge code for Gemini/Claude via vllm-compatible proxy exists; next is end-to-end validation.",
+  "quick_context": "All providers validated end-to-end. 28 automated tests (unit + e2e proxy) pass. Proxy endpoints, vllm/ prefix stripping, auth, streaming, error handling all verified. Next: publish to npm + ClawHub.",
   "token_budget": { "manifest_only": 90, "manifest_plus_core": 350, "full_read": 700 },
   "next_task_id": 9,
   "tasks": {
@@ -29,7 +29,7 @@
     "T-005": { "title": "Implement Gemini CLI request bridge", "status": "done", "priority": "medium", "depends_on": ["T-003"], "created": "2026-03-07T20:56:00Z", "completed": "2026-03-07T21:23:00Z" },
     "T-006": { "title": "Implement Claude Code CLI request bridge", "status": "done", "priority": "medium", "depends_on": ["T-003"], "created": "2026-03-07T20:56:00Z", "completed": "2026-03-07T21:23:00Z" },
     "T-007": { "title": "Create GitHub repo and push initial code", "status": "done", "priority": "high", "depends_on": ["T-004"], "created": "2026-03-07T21:20:00Z", "completed": "2026-03-07T21:24:00Z" },
-    "T-008": { "title": "Validate proxy endpoints + vllm model calls end-to-end", "status": "ready", "priority": "high", "depends_on": ["T-005", "T-006"], "created": "2026-03-07T21:29:00Z" },
-    "T-009": { "title": "Publish to npm + ClawHub", "status": "blocked", "priority": "medium", "depends_on": ["T-008"], "created": "2026-03-07T21:29:00Z" }
+    "T-008": { "title": "Validate proxy endpoints + vllm model calls end-to-end", "status": "done", "priority": "high", "depends_on": ["T-005", "T-006"], "created": "2026-03-07T21:29:00Z", "completed": "2026-03-08T09:07:00Z" },
+    "T-009": { "title": "Publish to npm + ClawHub", "status": "ready", "priority": "medium", "depends_on": ["T-008"], "created": "2026-03-07T21:29:00Z" }
   }
 }

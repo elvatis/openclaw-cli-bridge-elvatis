@@ -1,42 +1,49 @@
 # NEXT_ACTIONS.md — openclaw-cli-bridge-elvatis
 
-_Last updated: 2026-03-07_
+_Last updated: 2026-03-08_
 
 ## Status Summary
 
-| Status | Count |
-|--------|-------|
-| Done   | 6     |
-| Ready  | 3     |
-| Blocked | 0   |
+| Status  | Count |
+|---------|-------|
+| Done    | 8     |
+| Ready   | 1     |
+| Blocked | 0     |
 
 ---
 
-## Ready — Work These Next
+## ⚡ Ready — Work These Next
 
-### T-101: [medium] — Unit tests for prompt formatter + model router
-- **Goal:** Cover `src/cli-runner.ts` message formatting and model routing logic with vitest tests.
-- **Files:** `test/cli-runner.test.ts`, `src/cli-runner.ts`
-- **Definition of done:** Prompt truncation, stdin format, and model→CLI mapping covered by tests.
+### T-009: [medium] — Publish to npm + ClawHub
 
-### T-102: [low] — Proxy auth key rotation via config
-- **Goal:** Allow `proxyApiKey` to be rotated without code change via config reload.
-- **Files:** `index.ts`, `src/proxy-server.ts`
-
-### T-103: [low] — Explicit model allowlist for CLI execution
-- **Goal:** Config-driven allowlist of which model IDs are permitted to spawn CLI subprocesses.
-- **Files:** `index.ts`, `src/cli-runner.ts`
+- **Goal:** Publish the next release to all distribution channels (GitHub, npm, ClawHub).
+- **Context:** All providers are validated end-to-end. 28 automated tests pass (unit + e2e proxy). The codebase is stable at v0.2.15. If changes were made since the last publish, bump the version first.
+- **What to do:**
+  1. Check if any code changes since v0.2.15 warrant a version bump
+  2. If bumping: update version in `package.json`, `openclaw.plugin.json`, `README.md`, `SKILL.md`, `STATUS.md` (see CONVENTIONS.md release checklist)
+  3. Run `npm run typecheck && npm test` — must pass
+  4. `git tag vX.Y.Z && git push origin main && git push origin vX.Y.Z`
+  5. `gh release create vX.Y.Z --title "..." --notes "..."`
+  6. `npm publish --access public`
+  7. ClawHub publish via rsync workaround (see CONVENTIONS.md)
+  8. Update all handoff docs (STATUS.md, DASHBOARD.md, LOG.md, NEXT_ACTIONS.md, README.md, SKILL.md)
+- **Files:** `package.json`, `openclaw.plugin.json`, `README.md`, `SKILL.md`, `.ai/handoff/STATUS.md`, `.ai/handoff/CONVENTIONS.md`
+- **Definition of done:** Package published on npm + ClawHub at matching version. GitHub release created. All docs updated.
 
 ---
 
-## Recently Completed
+## 🚫 Blocked
 
-| Task | Title | Date |
-|------|-------|------|
-| T-007 | Critical: remove fuser -k, safe proxy reuse via health probe | 2026-03-08 |
-| T-006 | Fix port leak: registerService stop() hook + closeAllConnections | 2026-03-07 |
-| T-005 | Add openclaw.extensions to package.json | 2026-03-07 |
-| T-004 | /cli-codex + /cli-codex-mini | 2026-03-07 |
-| T-003 | /cli-back + /cli-test | 2026-03-07 |
-| T-002 | /cli-* model switch commands | 2026-03-07 |
-| T-001 | Phase 1+2: auth + proxy + config patcher | 2026-03-07 |
+_No blocked tasks._
+
+---
+
+## ✅ Recently Completed
+
+| Task  | Title                                                        | Date       |
+|-------|--------------------------------------------------------------|------------|
+| T-008 | Validate proxy endpoints + vllm model calls end-to-end       | 2026-03-08 |
+| T-007 | Create GitHub repo and push initial code                     | 2026-03-07 |
+| T-006 | Implement Claude Code CLI request bridge                     | 2026-03-07 |
+| T-005 | Implement Gemini CLI request bridge                          | 2026-03-07 |
+| T-004 | Verify model call: test gpt-5.2 or gpt-5.3-codex responds   | 2026-03-07 |
