@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, and health testing.
 
-**Current version:** `0.2.17`
+**Current version:** `0.2.18`
 
 ---
 
@@ -234,6 +234,11 @@ npm test            # vitest run (5 unit tests for formatPrompt)
 
 ## Changelog
 
+### v0.2.18
+- **feat:** Add `/cli-gemini3-flash` → `gemini-3-flash-preview`
+- **feat:** Add `/cli-codex-spark` → `gpt-5.3-codex-spark`, `/cli-codex52` → `gpt-5.2-codex`, `/cli-codex54` → `gpt-5.4`
+- **fix:** Update `DEFAULT_ALLOWED_CLI_MODELS` with `gemini-3-flash-preview`
+
 ### v0.2.17
 - **fix:** `/cli-gemini3` model corrected to `gemini-3-pro-preview` (was `gemini-3-pro`, which returns 404 from Gemini API)
 
@@ -257,7 +262,7 @@ npm test            # vitest run (5 unit tests for formatPrompt)
 - **docs:** Fix changelog continuity — v0.2.10 entry was lost, v0.2.11 description was wrong; all entries now accurate
 
 ### v0.2.11
-- **docs:** Fix README `Current version:** `0.2.17`
+- **docs:** Fix README `Current version:** `0.2.18`
 
 ### v0.2.10
 - **docs:** Fix version labels — SKILL.md was showing 0.2.2, README changelog ended at v0.2.5; add entries for v0.2.6–v0.2.9

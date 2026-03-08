@@ -14,7 +14,8 @@
  *   /cli-haiku        → vllm/cli-claude/claude-haiku-4-5       (Claude Code CLI proxy)
  *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro         (Gemini CLI proxy)
  *   /cli-gemini-flash → vllm/cli-gemini/gemini-2.5-flash       (Gemini CLI proxy)
- *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro-preview           (Gemini CLI proxy)
+ *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro-preview   (Gemini CLI proxy)
+ *   /cli-gemini3-flash→ vllm/cli-gemini/gemini-3-flash-preview (Gemini CLI proxy)
  *   /cli-codex        → openai-codex/gpt-5.3-codex             (Codex CLI OAuth, direct API)
  *   /cli-codex-mini   → openai-codex/gpt-5.1-codex-mini        (Codex CLI OAuth, direct API)
  *   /cli-back         → restore model that was active before last /cli-* switch
@@ -153,8 +154,14 @@ const CLI_MODEL_COMMANDS = [
   {
     name: "cli-gemini3",
     model: "vllm/cli-gemini/gemini-3-pro-preview",
-    description: "Switch to Gemini 3 Pro (Gemini CLI via local proxy)",
-    label: "Gemini 3 Pro (CLI)",
+    description: "Switch to Gemini 3 Pro Preview (Gemini CLI via local proxy)",
+    label: "Gemini 3 Pro Preview (CLI)",
+  },
+  {
+    name: "cli-gemini3-flash",
+    model: "vllm/cli-gemini/gemini-3-flash-preview",
+    description: "Switch to Gemini 3 Flash Preview (Gemini CLI via local proxy)",
+    label: "Gemini 3 Flash Preview (CLI)",
   },
   // ── Codex (via openai-codex provider — Codex CLI OAuth auth, direct API) ────
   {
@@ -162,6 +169,24 @@ const CLI_MODEL_COMMANDS = [
     model: "openai-codex/gpt-5.3-codex",
     description: "Switch to GPT-5.3 Codex (openai-codex provider, Codex CLI auth)",
     label: "GPT-5.3 Codex",
+  },
+  {
+    name: "cli-codex-spark",
+    model: "openai-codex/gpt-5.3-codex-spark",
+    description: "Switch to GPT-5.3 Codex Spark (openai-codex provider, Codex CLI auth)",
+    label: "GPT-5.3 Codex Spark",
+  },
+  {
+    name: "cli-codex52",
+    model: "openai-codex/gpt-5.2-codex",
+    description: "Switch to GPT-5.2 Codex (openai-codex provider, Codex CLI auth)",
+    label: "GPT-5.2 Codex",
+  },
+  {
+    name: "cli-codex54",
+    model: "openai-codex/gpt-5.4",
+    description: "Switch to GPT-5.4 (openai-codex provider, Codex CLI auth — may require upgraded scope)",
+    label: "GPT-5.4 (Codex)",
   },
   {
     name: "cli-codex-mini",
