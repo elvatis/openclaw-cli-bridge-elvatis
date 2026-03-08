@@ -1,7 +1,7 @@
 {
   "id": "openclaw-cli-bridge-elvatis",
   "name": "OpenClaw CLI Bridge",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Phase 1: openai-codex auth bridge. Phase 2: local HTTP proxy routing model calls through gemini/claude CLIs (vllm provider).",
   "providers": [
     "openai-codex"
