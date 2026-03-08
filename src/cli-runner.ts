@@ -24,9 +24,15 @@ const MAX_MSG_CHARS = 4000;
 // Message formatting
 // ──────────────────────────────────────────────────────────────────────────────
 
+export interface ContentPart {
+  type: string;
+  text?: string;
+}
+
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  /** Plain string or OpenAI-style content array (multimodal / structured). */
+  content: string | ContentPart[] | unknown;
 }
 
 /**
@@ -61,7 +67,30 @@ export function formatPrompt(messages: ChatMessage[]): string {
     .join("\n\n");
 }
 
-function truncateContent(s: string): string {
+/**
+ * Coerce any message content value to a plain string.
+ *
+ * Handles:
+ *  - string          → as-is
+ *  - ContentPart[]   → join text parts (OpenAI multimodal format)
+ *  - other object    → JSON.stringify (prevents "[object Object]" from reaching the CLI)
+ *  - null/undefined  → ""
+ */
+function contentToString(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (content === null || content === undefined) return "";
+  if (Array.isArray(content)) {
+    return (content as ContentPart[])
+      .filter((c) => c?.type === "text" && typeof c.text === "string")
+      .map((c) => c.text!)
+      .join("\n");
+  }
+  if (typeof content === "object") return JSON.stringify(content);
+  return String(content);
+}
+
+function truncateContent(raw: unknown): string {
+  const s = contentToString(raw);
   if (s.length <= MAX_MSG_CHARS) return s;
   return s.slice(0, MAX_MSG_CHARS) + `\n...[truncated ${s.length - MAX_MSG_CHARS} chars]`;
 }

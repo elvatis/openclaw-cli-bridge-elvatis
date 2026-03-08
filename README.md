@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.19`
+**Current version:** `0.2.20`
 
 ---
 
@@ -280,6 +280,11 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v0.2.20
+- **fix:** `formatPrompt` now defensively coerces `content` to string via `contentToString()` — prevents `[object Object]` reaching the CLI when WhatsApp group messages contain structured content objects instead of plain strings
+- **feat:** `ChatMessage.content` now accepts `string | ContentPart[] | unknown` (OpenAI multimodal content arrays supported)
+- **feat:** New `contentToString()` helper: handles string, OpenAI ContentPart arrays, arbitrary objects (JSON.stringify), null/undefined
 
 ### v0.2.19
 - **feat:** `/cli-list` command — formatted overview of all registered models grouped by provider

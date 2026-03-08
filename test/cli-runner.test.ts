@@ -99,6 +99,60 @@ describe("formatPrompt", () => {
     expect(result).toContain("[System]");
     expect(result).toContain("[User]");
   });
+
+  // contentToString coercion tests (fix: [object Object] in WhatsApp group messages)
+  it("coerces ContentPart array to plain text", () => {
+    const result = formatPrompt([
+      { role: "user", content: [{ type: "text", text: "Hello from WA group" }] },
+    ]);
+    expect(result).toBe("Hello from WA group");
+    expect(result).not.toContain("[object Object]");
+  });
+
+  it("joins multiple text ContentParts with newline", () => {
+    const result = formatPrompt([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Part one" },
+          { type: "text", text: "Part two" },
+        ],
+      },
+    ]);
+    expect(result).toContain("Part one");
+    expect(result).toContain("Part two");
+  });
+
+  it("ignores non-text ContentParts (e.g. image)", () => {
+    const result = formatPrompt([
+      {
+        role: "user",
+        content: [
+          { type: "image_url", url: "https://example.com/img.png" },
+          { type: "text", text: "describe this" },
+        ],
+      },
+    ]);
+    expect(result).toBe("describe this");
+  });
+
+  it("coerces plain object content to JSON string (not [object Object])", () => {
+    const result = formatPrompt([
+      { role: "user", content: { text: "structured", extra: 42 } as any },
+    ]);
+    expect(result).not.toBe("[object Object]");
+    expect(result).toContain("structured");
+  });
+
+  it("handles null content gracefully", () => {
+    const result = formatPrompt([{ role: "user", content: null as any }]);
+    expect(result).toBe("");
+  });
+
+  it("handles undefined content gracefully", () => {
+    const result = formatPrompt([{ role: "user", content: undefined as any }]);
+    expect(result).toBe("");
+  });
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
