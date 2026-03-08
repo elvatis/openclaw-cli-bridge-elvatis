@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { formatPrompt } from "../src/cli-runner.js";
+import { describe, it, expect, vi } from "vitest";
+import { formatPrompt, routeToCliRunner } from "../src/cli-runner.js";
 
 describe("formatPrompt", () => {
   it("returns empty string for empty messages", () => {
@@ -42,5 +42,33 @@ describe("formatPrompt", () => {
     const result = formatPrompt([{ role: "user", content: longContent }]);
     expect(result.length).toBeLessThan(5000);
     expect(result).toContain("truncated");
+  });
+});
+
+describe("routeToCliRunner — model normalization", () => {
+  it("rejects unknown model without vllm prefix", async () => {
+    await expect(
+      routeToCliRunner("unknown/model", [], 1000)
+    ).rejects.toThrow("Unknown CLI bridge model");
+  });
+
+  it("rejects unknown model with vllm prefix", async () => {
+    await expect(
+      routeToCliRunner("vllm/unknown/model", [], 1000)
+    ).rejects.toThrow("Unknown CLI bridge model");
+  });
+
+  it("accepts cli-claude/ without vllm prefix (calls runClaude path)", async () => {
+    // Should throw CLI spawn error (no real claude), not "Unknown CLI bridge model"
+    await expect(
+      routeToCliRunner("cli-claude/claude-sonnet-4-6", [{ role: "user", content: "hi" }], 500)
+    ).rejects.not.toThrow("Unknown CLI bridge model");
+  });
+
+  it("accepts vllm/cli-claude/ — strips vllm prefix before routing", async () => {
+    // Should throw CLI spawn error (no real claude), not "Unknown CLI bridge model"
+    await expect(
+      routeToCliRunner("vllm/cli-claude/claude-sonnet-4-6", [{ role: "user", content: "hi" }], 500)
+    ).rejects.not.toThrow("Unknown CLI bridge model");
   });
 });

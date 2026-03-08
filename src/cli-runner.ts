@@ -254,11 +254,16 @@ export async function routeToCliRunner(
 ): Promise<string> {
   const prompt = formatPrompt(messages);
 
-  if (model.startsWith("cli-gemini/")) return runGemini(prompt, model, timeoutMs);
-  if (model.startsWith("cli-claude/")) return runClaude(prompt, model, timeoutMs);
+  // Strip "vllm/" prefix if present — OpenClaw sends the full provider path
+  // (e.g. "vllm/cli-claude/claude-sonnet-4-6") but the router only needs the
+  // "cli-<type>/<model>" portion.
+  const normalized = model.startsWith("vllm/") ? model.slice(5) : model;
+
+  if (normalized.startsWith("cli-gemini/")) return runGemini(prompt, normalized, timeoutMs);
+  if (normalized.startsWith("cli-claude/")) return runClaude(prompt, normalized, timeoutMs);
 
   throw new Error(
-    `Unknown CLI bridge model: "${model}". Use "cli-gemini/<model>" or "cli-claude/<model>".`
+    `Unknown CLI bridge model: "${model}". Use "vllm/cli-gemini/<model>" or "vllm/cli-claude/<model>".`
   );
 }
 
