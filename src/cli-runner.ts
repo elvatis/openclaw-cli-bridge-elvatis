@@ -239,18 +239,54 @@ export async function runClaude(
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Model allowlist (T-103)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Default set of permitted models for the CLI bridge.
+ * Matches the models registered as slash commands in index.ts.
+ * Expressed as normalized "cli-<type>/<model-id>" strings (vllm/ prefix already stripped).
+ *
+ * To extend: pass a custom set to routeToCliRunner via the `allowedModels` option.
+ * To disable the check: pass `null` for `allowedModels`.
+ */
+export const DEFAULT_ALLOWED_CLI_MODELS: ReadonlySet<string> = new Set([
+  // Claude Code CLI
+  "cli-claude/claude-sonnet-4-6",
+  "cli-claude/claude-opus-4-6",
+  "cli-claude/claude-haiku-4-5",
+  // Gemini CLI
+  "cli-gemini/gemini-2.5-pro",
+  "cli-gemini/gemini-2.5-flash",
+  "cli-gemini/gemini-3-pro",
+]);
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Router
 // ──────────────────────────────────────────────────────────────────────────────
+
+export interface RouteOptions {
+  /**
+   * Explicit model allowlist (normalized, vllm/ stripped).
+   * Pass `null` to disable the allowlist check entirely.
+   * Defaults to DEFAULT_ALLOWED_CLI_MODELS.
+   */
+  allowedModels?: ReadonlySet<string> | null;
+}
 
 /**
  * Route a chat completion to the correct CLI based on model prefix.
  *   cli-gemini/<id>  → gemini CLI
  *   cli-claude/<id>  → claude CLI
+ *
+ * Enforces DEFAULT_ALLOWED_CLI_MODELS by default (T-103).
+ * Pass `allowedModels: null` to skip the allowlist check.
  */
 export async function routeToCliRunner(
   model: string,
   messages: ChatMessage[],
-  timeoutMs: number
+  timeoutMs: number,
+  opts: RouteOptions = {}
 ): Promise<string> {
   const prompt = formatPrompt(messages);
 
@@ -258,6 +294,18 @@ export async function routeToCliRunner(
   // (e.g. "vllm/cli-claude/claude-sonnet-4-6") but the router only needs the
   // "cli-<type>/<model>" portion.
   const normalized = model.startsWith("vllm/") ? model.slice(5) : model;
+
+  // T-103: enforce allowlist unless explicitly disabled
+  const allowedModels = opts.allowedModels === undefined
+    ? DEFAULT_ALLOWED_CLI_MODELS
+    : opts.allowedModels;
+
+  if (allowedModels !== null && !allowedModels.has(normalized)) {
+    const known = [...(allowedModels)].join(", ");
+    throw new Error(
+      `CLI bridge model not allowed: "${model}". Allowed: ${known || "(none)"}.`
+    );
+  }
 
   if (normalized.startsWith("cli-gemini/")) return runGemini(prompt, normalized, timeoutMs);
   if (normalized.startsWith("cli-claude/")) return runClaude(prompt, normalized, timeoutMs);

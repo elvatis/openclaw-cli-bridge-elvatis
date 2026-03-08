@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, and health testing.
 
-**Current version:** `0.2.15`
+**Current version:** `0.2.16`
 
 ---
 
@@ -233,6 +233,10 @@ npm test            # vitest run (5 unit tests for formatPrompt)
 ---
 
 ## Changelog
+
+### v0.2.16
+- **feat(T-101):** Expand test suite to 45 tests — new cases for `formatPrompt` (mixed roles, boundary values, system messages) and `routeToCliRunner` (gemini paths, edge cases)
+- **feat(T-103):** Add `DEFAULT_ALLOWED_CLI_MODELS` allowlist; `routeToCliRunner` now rejects unregistered models by default; pass `allowedModels: null` to opt out
 
 ### v0.2.15
 - **docs:** Rewrite changelog (entries for v0.2.12–v0.2.14 were corrupted by repeated sed version bumps); all providers verified working (Claude, Gemini, Codex)

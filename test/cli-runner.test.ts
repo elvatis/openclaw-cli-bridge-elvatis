@@ -1,5 +1,13 @@
-import { describe, it, expect, vi } from "vitest";
-import { formatPrompt, routeToCliRunner } from "../src/cli-runner.js";
+import { describe, it, expect } from "vitest";
+import {
+  formatPrompt,
+  routeToCliRunner,
+  DEFAULT_ALLOWED_CLI_MODELS,
+} from "../src/cli-runner.js";
+
+// ──────────────────────────────────────────────────────────────────────────────
+// formatPrompt
+// ──────────────────────────────────────────────────────────────────────────────
 
 describe("formatPrompt", () => {
   it("returns empty string for empty messages", () => {
@@ -17,10 +25,8 @@ describe("formatPrompt", () => {
       content: `msg ${i}`,
     }));
     const result = formatPrompt(messages);
-    // Should contain last 20 messages, not first 10
     expect(result).toContain("msg 29");
     expect(result).not.toContain("msg 0\n");
-    // Single-turn mode doesn't apply when there are multiple messages
     expect(result).toContain("[User]");
   });
 
@@ -33,8 +39,8 @@ describe("formatPrompt", () => {
     const result = formatPrompt([sys, ...msgs]);
     expect(result).toContain("[System]");
     expect(result).toContain("You are helpful");
-    expect(result).toContain("msg 24"); // last
-    expect(result).not.toContain("msg 0\n"); // first (truncated)
+    expect(result).toContain("msg 24");
+    expect(result).not.toContain("msg 0\n");
   });
 
   it("truncates individual message content at MAX_MSG_CHARS (4000)", () => {
@@ -43,32 +49,176 @@ describe("formatPrompt", () => {
     expect(result.length).toBeLessThan(5000);
     expect(result).toContain("truncated");
   });
+
+  // T-101: additional formatPrompt cases
+
+  it("formats a multi-turn user/assistant conversation with role labels", () => {
+    const messages = [
+      { role: "user" as const, content: "What is 2+2?" },
+      { role: "assistant" as const, content: "4" },
+      { role: "user" as const, content: "And 3+3?" },
+    ];
+    const result = formatPrompt(messages);
+    expect(result).toContain("[User]\nWhat is 2+2?");
+    expect(result).toContain("[Assistant]\n4");
+    expect(result).toContain("[User]\nAnd 3+3?");
+  });
+
+  it("single assistant message gets role label (not bare)", () => {
+    const result = formatPrompt([{ role: "assistant", content: "I am an assistant" }]);
+    expect(result).toContain("[Assistant]");
+  });
+
+  it("content exactly at MAX_MSG_CHARS (4000) is NOT truncated", () => {
+    const exact = "a".repeat(4000);
+    const result = formatPrompt([{ role: "user", content: exact }]);
+    expect(result).toBe(exact);
+    expect(result).not.toContain("truncated");
+  });
+
+  it("content well above MAX_MSG_CHARS is truncated to a shorter result", () => {
+    // Use 6000 chars — truncation suffix (~23 chars) + 4000 body = 4023, well below 6000
+    const over = "a".repeat(6000);
+    const result = formatPrompt([{ role: "user", content: over }]);
+    expect(result).toContain("truncated");
+    expect(result.length).toBeLessThan(over.length);
+    expect(result.startsWith("a".repeat(4000))).toBe(true);
+  });
+
+  it("system-only message uses role label (not bare)", () => {
+    const result = formatPrompt([{ role: "system", content: "Be concise" }]);
+    expect(result).toContain("[System]");
+    expect(result).toContain("Be concise");
+  });
+
+  it("system + single user message uses role labels (not bare)", () => {
+    const result = formatPrompt([
+      { role: "system", content: "Be concise" },
+      { role: "user", content: "Hi" },
+    ]);
+    expect(result).toContain("[System]");
+    expect(result).toContain("[User]");
+  });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// routeToCliRunner — model normalization + routing (T-101)
+// ──────────────────────────────────────────────────────────────────────────────
 
 describe("routeToCliRunner — model normalization", () => {
   it("rejects unknown model without vllm prefix", async () => {
     await expect(
-      routeToCliRunner("unknown/model", [], 1000)
+      routeToCliRunner("unknown/model", [], 1000, { allowedModels: null })
     ).rejects.toThrow("Unknown CLI bridge model");
   });
 
   it("rejects unknown model with vllm prefix", async () => {
     await expect(
-      routeToCliRunner("vllm/unknown/model", [], 1000)
+      routeToCliRunner("vllm/unknown/model", [], 1000, { allowedModels: null })
     ).rejects.toThrow("Unknown CLI bridge model");
   });
 
   it("accepts cli-claude/ without vllm prefix (calls runClaude path)", async () => {
-    // Should throw CLI spawn error (no real claude), not "Unknown CLI bridge model"
     await expect(
       routeToCliRunner("cli-claude/claude-sonnet-4-6", [{ role: "user", content: "hi" }], 500)
     ).rejects.not.toThrow("Unknown CLI bridge model");
   });
 
   it("accepts vllm/cli-claude/ — strips vllm prefix before routing", async () => {
-    // Should throw CLI spawn error (no real claude), not "Unknown CLI bridge model"
     await expect(
       routeToCliRunner("vllm/cli-claude/claude-sonnet-4-6", [{ role: "user", content: "hi" }], 500)
     ).rejects.not.toThrow("Unknown CLI bridge model");
+  });
+
+  // T-101: gemini routing paths
+
+  it("accepts cli-gemini/ without vllm prefix (routes to gemini, not 'unknown')", async () => {
+    // gemini CLI may resolve or reject — what matters is it doesn't throw "Unknown CLI bridge model"
+    let errorMsg = "";
+    try {
+      await routeToCliRunner("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }], 500);
+    } catch (e: any) {
+      errorMsg = e?.message ?? "";
+    }
+    expect(errorMsg).not.toContain("Unknown CLI bridge model");
+  });
+
+  it("accepts vllm/cli-gemini/ — strips vllm prefix before routing", async () => {
+    let errorMsg = "";
+    try {
+      await routeToCliRunner("vllm/cli-gemini/gemini-2.5-flash", [{ role: "user", content: "hi" }], 500);
+    } catch (e: any) {
+      errorMsg = e?.message ?? "";
+    }
+    expect(errorMsg).not.toContain("Unknown CLI bridge model");
+  });
+
+  it("rejects bare 'vllm/' with no type segment", async () => {
+    await expect(
+      routeToCliRunner("vllm/", [], 1000, { allowedModels: null })
+    ).rejects.toThrow("Unknown CLI bridge model");
+  });
+
+  it("rejects empty model string", async () => {
+    await expect(
+      routeToCliRunner("", [], 1000, { allowedModels: null })
+    ).rejects.toThrow("Unknown CLI bridge model");
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// routeToCliRunner — model allowlist (T-103)
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe("routeToCliRunner — model allowlist (T-103)", () => {
+  it("DEFAULT_ALLOWED_CLI_MODELS includes all registered claude models", () => {
+    expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-claude/claude-sonnet-4-6")).toBe(true);
+    expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-claude/claude-opus-4-6")).toBe(true);
+    expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-claude/claude-haiku-4-5")).toBe(true);
+  });
+
+  it("DEFAULT_ALLOWED_CLI_MODELS includes all registered gemini models", () => {
+    expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-gemini/gemini-2.5-pro")).toBe(true);
+    expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-gemini/gemini-2.5-flash")).toBe(true);
+    expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-gemini/gemini-3-pro")).toBe(true);
+  });
+
+  it("rejects a model not in the default allowlist", async () => {
+    await expect(
+      routeToCliRunner("vllm/cli-claude/claude-unknown-99", [{ role: "user", content: "hi" }], 500)
+    ).rejects.toThrow("CLI bridge model not allowed");
+  });
+
+  it("rejects an unregistered gemini model", async () => {
+    await expect(
+      routeToCliRunner("vllm/cli-gemini/gemini-1.0-pro", [{ role: "user", content: "hi" }], 500)
+    ).rejects.toThrow("CLI bridge model not allowed");
+  });
+
+  it("error message lists allowed models", async () => {
+    try {
+      await routeToCliRunner("vllm/cli-claude/bad-model", [{ role: "user", content: "hi" }], 500);
+    } catch (e: any) {
+      expect(e.message).toContain("cli-claude/claude-sonnet-4-6");
+    }
+  });
+
+  it("allowedModels: null disables the check — only routing matters", async () => {
+    // With null allowlist, unknown-prefix models still throw "Unknown CLI bridge model"
+    await expect(
+      routeToCliRunner("vllm/cli-claude/any-model", [{ role: "user", content: "hi" }], 500, {
+        allowedModels: null,
+      })
+    ).rejects.not.toThrow("CLI bridge model not allowed");
+  });
+
+  it("custom allowlist overrides defaults", async () => {
+    const custom = new Set(["cli-claude/claude-sonnet-4-6"]);
+    // claude-opus is in defaults but NOT in custom — should be rejected
+    await expect(
+      routeToCliRunner("vllm/cli-claude/claude-opus-4-6", [{ role: "user", content: "hi" }], 500, {
+        allowedModels: custom,
+      })
+    ).rejects.toThrow("CLI bridge model not allowed");
   });
 });
