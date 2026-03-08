@@ -277,7 +277,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.5",
+  version: "0.2.13",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -458,7 +458,7 @@ const plugin = {
       api.registerCommand({
         name,
         description,
-        requireAuth: true,
+        requireAuth: false,
         handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
           api.logger.info(`[cli-bridge] /${name} by ${ctx.senderId ?? "?"}`);
           return switchModel(api, model, label);
@@ -470,7 +470,7 @@ const plugin = {
     api.registerCommand({
       name: "cli-back",
       description: "Restore the model that was active before the last /cli-* switch",
-      requireAuth: true,
+      requireAuth: false,
       handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
         api.logger.info(`[cli-bridge] /cli-back by ${ctx.senderId ?? "?"}`);
 
@@ -508,7 +508,7 @@ const plugin = {
       name: "cli-test",
       description: "Test the CLI bridge proxy without switching your active model. Usage: /cli-test [model]",
       acceptsArgs: true,
-      requireAuth: true,
+      requireAuth: false,
       handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
         const targetModel = ctx.args?.trim() || CLI_TEST_DEFAULT_MODEL;
         // Accept short names like "cli-sonnet" or full "vllm/cli-claude/claude-sonnet-4-6"
