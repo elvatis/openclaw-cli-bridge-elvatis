@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, and health testing.
 
-**Current version:** `0.2.11`
+**Current version:** `0.2.12`
 
 ---
 
@@ -234,8 +234,14 @@ npm test            # vitest run (5 unit tests for formatPrompt)
 
 ## Changelog
 
+### v0.2.12
+- **docs:** Fix changelog (v0.2.10 entry was lost by sed, v0.2.11 description was wrong); enforce single-commit publish discipline
+
 ### v0.2.11
-- **docs:** Fix version labels in SKILL.md and README changelog (were stuck at 0.2.2/0.2.5)
+- **docs:** Fix README `Current version` header (was stuck at 0.2.9 after 0.2.10 bump)
+
+### v0.2.10
+- **docs:** Fix version labels — SKILL.md was showing 0.2.2, README changelog ended at v0.2.5; add entries for v0.2.6–v0.2.9
 
 ### v0.2.9
 - **fix:** Critical — replace `fuser -k 31337/tcp` with safe health probe (`GET /v1/models`)
