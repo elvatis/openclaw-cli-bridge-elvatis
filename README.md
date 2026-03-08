@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, and health testing.
 
-**Current version:** `0.2.14`
+**Current version:** `0.2.15`
 
 ---
 
@@ -234,8 +234,20 @@ npm test            # vitest run (5 unit tests for formatPrompt)
 
 ## Changelog
 
+### v0.2.15
+- **docs:** Rewrite changelog (entries for v0.2.12–v0.2.14 were corrupted by repeated sed version bumps); all providers verified working (Claude, Gemini, Codex)
+- **docs:** Update STATUS.md with end-to-end test results
+
 ### v0.2.14
-- **docs:** Fix changelog (v0.2.10 entry was lost by sed, v0.2.11 description was wrong); enforce single-commit publish discipline
+- **fix:** Strip `vllm/` prefix in `routeToCliRunner` — OpenClaw sends full provider path (`vllm/cli-claude/...`) but proxy router expected bare `cli-claude/...`; caused "Unknown CLI bridge model" on all requests
+- **test:** Add 4 routing tests covering both prefixed and non-prefixed model paths (9 tests total)
+
+### v0.2.13
+- **fix:** Set `requireAuth: false` on all `/cli-*` commands — webchat senders were always blocked because plugin-level auth uses a different resolution path than `commands.allowFrom` config; gateway-level allowlist is the correct security layer
+- **fix:** Hardcoded `version: "0.2.5"` in plugin object (`index.ts`) — now tracks `package.json`
+
+### v0.2.12
+- **docs:** Fix changelog continuity — v0.2.10 entry was lost, v0.2.11 description was wrong; all entries now accurate
 
 ### v0.2.11
 - **docs:** Fix README `Current version` header (was stuck at 0.2.9 after 0.2.10 bump)
