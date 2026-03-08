@@ -14,7 +14,7 @@
  *   /cli-haiku        → vllm/cli-claude/claude-haiku-4-5       (Claude Code CLI proxy)
  *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro         (Gemini CLI proxy)
  *   /cli-gemini-flash → vllm/cli-gemini/gemini-2.5-flash       (Gemini CLI proxy)
- *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro           (Gemini CLI proxy)
+ *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro-preview           (Gemini CLI proxy)
  *   /cli-codex        → openai-codex/gpt-5.3-codex             (Codex CLI OAuth, direct API)
  *   /cli-codex-mini   → openai-codex/gpt-5.1-codex-mini        (Codex CLI OAuth, direct API)
  *   /cli-back         → restore model that was active before last /cli-* switch
@@ -152,7 +152,7 @@ const CLI_MODEL_COMMANDS = [
   },
   {
     name: "cli-gemini3",
-    model: "vllm/cli-gemini/gemini-3-pro",
+    model: "vllm/cli-gemini/gemini-3-pro-preview",
     description: "Switch to Gemini 3 Pro (Gemini CLI via local proxy)",
     label: "Gemini 3 Pro (CLI)",
   },

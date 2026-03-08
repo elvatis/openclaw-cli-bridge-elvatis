@@ -258,7 +258,7 @@ export const DEFAULT_ALLOWED_CLI_MODELS: ReadonlySet<string> = new Set([
   // Gemini CLI
   "cli-gemini/gemini-2.5-pro",
   "cli-gemini/gemini-2.5-flash",
-  "cli-gemini/gemini-3-pro",
+  "cli-gemini/gemini-3-pro-preview",
 ]);
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -180,7 +180,7 @@ describe("routeToCliRunner — model allowlist (T-103)", () => {
   it("DEFAULT_ALLOWED_CLI_MODELS includes all registered gemini models", () => {
     expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-gemini/gemini-2.5-pro")).toBe(true);
     expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-gemini/gemini-2.5-flash")).toBe(true);
-    expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-gemini/gemini-3-pro")).toBe(true);
+    expect(DEFAULT_ALLOWED_CLI_MODELS.has("cli-gemini/gemini-3-pro-preview")).toBe(true);
   });
 
   it("rejects a model not in the default allowlist", async () => {
