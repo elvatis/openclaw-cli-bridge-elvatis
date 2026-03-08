@@ -20,6 +20,7 @@
  *   /cli-codex-mini   → openai-codex/gpt-5.1-codex-mini        (Codex CLI OAuth, direct API)
  *   /cli-back         → restore model that was active before last /cli-* switch
  *   /cli-test [model] → one-shot proxy health check (does NOT switch global model)
+ *   /cli-list         → list all registered CLI bridge models with commands
  *
  * Provider / model naming:
  *   vllm/cli-gemini/gemini-2.5-pro  → `gemini -m gemini-2.5-pro @<tmpfile>`
@@ -575,10 +576,51 @@ const plugin = {
       },
     } satisfies OpenClawPluginCommandDefinition);
 
+    // ── Phase 3d: /cli-list — formatted model overview ────────────────────────
+    api.registerCommand({
+      name: "cli-list",
+      description: "List all registered CLI bridge models and their commands.",
+      requireAuth: false,
+      handler: async (): Promise<PluginCommandResult> => {
+        const groups: Record<string, { cmd: string; model: string }[]> = {
+          "Claude Code CLI": [],
+          "Gemini CLI": [],
+          "Codex (OAuth)": [],
+        };
+
+        for (const c of CLI_MODEL_COMMANDS) {
+          const entry = { cmd: `/${c.name}`, model: c.model };
+          if (c.model.startsWith("vllm/cli-claude/")) groups["Claude Code CLI"].push(entry);
+          else if (c.model.startsWith("vllm/cli-gemini/")) groups["Gemini CLI"].push(entry);
+          else groups["Codex (OAuth)"].push(entry);
+        }
+
+        const lines: string[] = ["🤖 *CLI Bridge Models*", ""];
+        for (const [group, entries] of Object.entries(groups)) {
+          if (entries.length === 0) continue;
+          lines.push(`*${group}*`);
+          for (const { cmd, model } of entries) {
+            const modelId = model.replace(/^vllm\/cli-(claude|gemini)\//, "").replace(/^openai-codex\//, "");
+            lines.push(`  ${cmd.padEnd(20)} ${modelId}`);
+          }
+          lines.push("");
+        }
+        lines.push("*Utility*");
+        lines.push("  /cli-back            Restore previous model");
+        lines.push("  /cli-test [model]    Health check (no model switch)");
+        lines.push("  /cli-list            This overview");
+        lines.push("");
+        lines.push(`Proxy: \`127.0.0.1:${port}\``);
+
+        return { text: lines.join("\n") };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
     const allCommands = [
       ...CLI_MODEL_COMMANDS.map((c) => `/${c.name}`),
       "/cli-back",
       "/cli-test",
+      "/cli-list",
     ];
     api.logger.info(`[cli-bridge] registered ${allCommands.length} commands: ${allCommands.join(", ")}`);
   },

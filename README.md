@@ -1,8 +1,8 @@
 # openclaw-cli-bridge-elvatis
 
-> OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, and health testing.
+> OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.18`
+**Current version:** `0.2.19`
 
 ---
 
@@ -20,13 +20,15 @@ Starts a local OpenAI-compatible HTTP proxy on `127.0.0.1:31337` and configures 
 |---|---|---|
 | `vllm/cli-gemini/gemini-2.5-pro` | `gemini -m gemini-2.5-pro -p ""` (stdin, cwd=/tmp) | ~8–10s |
 | `vllm/cli-gemini/gemini-2.5-flash` | `gemini -m gemini-2.5-flash -p ""` (stdin, cwd=/tmp) | ~4–6s |
-| `vllm/cli-gemini/gemini-3-pro` | `gemini -m gemini-3-pro -p ""` (stdin, cwd=/tmp) | ~8–10s |
+| `vllm/cli-gemini/gemini-3-pro-preview` | `gemini -m gemini-3-pro-preview -p ""` (stdin, cwd=/tmp) | ~8–10s |
+| `vllm/cli-gemini/gemini-3-flash-preview` | `gemini -m gemini-3-flash-preview -p ""` (stdin, cwd=/tmp) | ~4–6s |
 | `vllm/cli-claude/claude-sonnet-4-6` | `claude -p --output-format text --model claude-sonnet-4-6` (stdin) | ~2–4s |
 | `vllm/cli-claude/claude-opus-4-6` | `claude -p --output-format text --model claude-opus-4-6` (stdin) | ~3–5s |
 | `vllm/cli-claude/claude-haiku-4-5` | `claude -p --output-format text --model claude-haiku-4-5` (stdin) | ~1–3s |
 
 ### Phase 3 — Slash commands
-Ten plugin-registered commands (all `requireAuth: true`):
+
+All commands use gateway-level `commands.allowFrom` for authorization (`requireAuth: false` at plugin level).
 
 **Claude Code CLI** (routed via local proxy on `:31337`):
 
@@ -42,14 +44,18 @@ Ten plugin-registered commands (all `requireAuth: true`):
 |---|---|
 | `/cli-gemini` | `vllm/cli-gemini/gemini-2.5-pro` |
 | `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` |
-| `/cli-gemini3` | `vllm/cli-gemini/gemini-3-pro` |
+| `/cli-gemini3` | `vllm/cli-gemini/gemini-3-pro-preview` |
+| `/cli-gemini3-flash` | `vllm/cli-gemini/gemini-3-flash-preview` |
 
-**Codex CLI** (via `openai-codex` provider — Codex CLI OAuth auth, calls OpenAI API directly, **not** through the local proxy):
+**Codex CLI** (via `openai-codex` provider — OAuth auth, calls OpenAI API directly, **not** through the local proxy):
 
-| Command | Model |
-|---|---|
-| `/cli-codex` | `openai-codex/gpt-5.3-codex` |
-| `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` |
+| Command | Model | Notes |
+|---|---|---|
+| `/cli-codex` | `openai-codex/gpt-5.3-codex` | ✅ Tested |
+| `/cli-codex-spark` | `openai-codex/gpt-5.3-codex-spark` | |
+| `/cli-codex52` | `openai-codex/gpt-5.2-codex` | |
+| `/cli-codex54` | `openai-codex/gpt-5.4` | May require upgraded OAuth scope |
+| `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` | ✅ Tested |
 
 **Utility:**
 
@@ -57,6 +63,7 @@ Ten plugin-registered commands (all `requireAuth: true`):
 |---|---|
 | `/cli-back` | Restore the model active **before** the last `/cli-*` switch |
 | `/cli-test [model]` | One-shot proxy health check — **does NOT switch your active model** |
+| `/cli-list` | Show all registered CLI bridge models with commands |
 
 **`/cli-back` details:**
 - Before every `/cli-*` switch the current model is saved to `~/.openclaw/cli-bridge-state.json`
@@ -67,6 +74,10 @@ Ten plugin-registered commands (all `requireAuth: true`):
 - Accepts short form (`cli-sonnet`) or full path (`vllm/cli-claude/claude-sonnet-4-6`)
 - Default when no arg given: `cli-claude/claude-sonnet-4-6`
 - Reports response content, latency, and confirms your active model is unchanged
+
+**`/cli-list` details:**
+- Lists all registered models grouped by provider (Claude CLI, Gemini CLI, Codex)
+- No arguments required
 
 ---
 
@@ -111,8 +122,10 @@ openclaw gateway restart
 
 ```
 [cli-bridge] proxy ready on :31337
-[cli-bridge] registered 8 commands: /cli-sonnet, /cli-opus, /cli-haiku,
-             /cli-gemini, /cli-gemini-flash, /cli-gemini3, /cli-back, /cli-test
+[cli-bridge] registered 14 commands: /cli-sonnet, /cli-opus, /cli-haiku,
+             /cli-gemini, /cli-gemini-flash, /cli-gemini3, /cli-gemini3-flash,
+             /cli-codex, /cli-codex-spark, /cli-codex52, /cli-codex54, /cli-codex-mini,
+             /cli-back, /cli-test, /cli-list
 ```
 
 ### 3. Register Codex auth (optional — Phase 1 only)
@@ -122,7 +135,39 @@ openclaw models auth login --provider openai-codex
 # Select: "Codex CLI (existing login)"
 ```
 
-### 4. Test without switching your model
+### 4. List available models
+
+```
+/cli-list
+→ 🤖 CLI Bridge Models
+
+  Claude Code CLI
+    /cli-sonnet          claude-sonnet-4-6
+    /cli-opus            claude-opus-4-6
+    /cli-haiku           claude-haiku-4-5
+
+  Gemini CLI
+    /cli-gemini          gemini-2.5-pro
+    /cli-gemini-flash    gemini-2.5-flash
+    /cli-gemini3         gemini-3-pro-preview
+    /cli-gemini3-flash   gemini-3-flash-preview
+
+  Codex (OAuth)
+    /cli-codex           gpt-5.3-codex
+    /cli-codex-spark     gpt-5.3-codex-spark
+    /cli-codex52         gpt-5.2-codex
+    /cli-codex54         gpt-5.4
+    /cli-codex-mini      gpt-5.1-codex-mini
+
+  Utility
+    /cli-back            Restore previous model
+    /cli-test [model]    Health check (no model switch)
+    /cli-list            This overview
+
+  Proxy: 127.0.0.1:31337
+```
+
+### 5. Test without switching your model
 
 ```
 /cli-test
@@ -140,7 +185,7 @@ openclaw models auth login --provider openai-codex
   Active model unchanged: anthropic/claude-sonnet-4-6
 ```
 
-### 5. Switch and restore
+### 6. Switch and restore
 
 ```
 /cli-sonnet
@@ -173,15 +218,22 @@ In `~/.openclaw/openclaw.json` → `plugins.entries.openclaw-cli-bridge-elvatis.
 
 ---
 
+## Model Allowlist
+
+`routeToCliRunner` enforces `DEFAULT_ALLOWED_CLI_MODELS` — only models registered in the plugin are accepted by the proxy. Unregistered models receive a clear error listing allowed options.
+
+To disable the check (e.g. for custom vllm routing): pass `allowedModels: null` in `RouteOptions`.
+
+---
+
 ## Architecture
 
 ```
 OpenClaw agent
   │
   ├─ openai-codex/*  ──────────────────────────► OpenAI API (direct)
-  │    auth: ~/.codex/auth.json OAuth tokens        ▲
-  │                                                 │
-  │    /cli-codex, /cli-codex-mini ─────────────────┘  (switch to this provider)
+  │    auth: ~/.codex/auth.json OAuth tokens
+  │    /cli-codex, /cli-codex-spark, /cli-codex52, /cli-codex54, /cli-codex-mini
   │
   └─ vllm/cli-gemini/*  ─┐
      vllm/cli-claude/*   ─┤─► localhost:31337  (openclaw-cli-bridge proxy)
@@ -190,21 +242,16 @@ OpenClaw agent
                           │       │                 (neutral cwd prevents agentic mode)
                           │       └─ cli-claude/* → claude -p --model <model>
                           │                         stdin=prompt
-                          └───────────────────────────────────────────────────
 
-Slash commands (bypass agent, requireAuth=true):
-  /cli-sonnet|opus|haiku|gemini|gemini-flash|gemini3|codex|codex-mini
+Slash commands (requireAuth=false, gateway commands.allowFrom is the auth layer):
+  /cli-sonnet|opus|haiku|gemini|gemini-flash|gemini3|gemini3-flash
+  /cli-codex|codex-spark|codex52|codex54|codex-mini
      └─► saves current model → ~/.openclaw/cli-bridge-state.json
-     └─► openclaw models set <model>  (~1s, atomic)
+     └─► openclaw models set <model>
 
-  /cli-back
-     └─► reads ~/.openclaw/cli-bridge-state.json
-     └─► openclaw models set <previous>
-
-  /cli-test [model]
-     └─► HTTP POST → localhost:31337  (no global model change)
-     └─► reports response + latency
-     └─► NOTE: only tests the proxy — Codex models bypass the proxy
+  /cli-back   → reads state file, restores previous model, clears state
+  /cli-test   → HTTP POST → localhost:31337, no global model change
+  /cli-list   → formatted table of all registered models
 ```
 
 ---
@@ -218,8 +265,8 @@ Slash commands (bypass agent, requireAuth=true):
 
 ### Gemini agentic mode / hangs (fixed in v0.2.4)
 **Symptom:** Gemini hangs, returns wrong answers, or says "directory does not exist".
-**Cause:** `@file` syntax (`gemini -p @/tmp/xxx.txt`) triggers agentic mode — Gemini scans the working directory for project context and treats prompts as task instructions. Running from the workspace root makes this worse.
-**Fix:** Stdin delivery (`gemini -p ""` with prompt via stdin) + `cwd=/tmp`. Same pattern as Claude.
+**Cause:** `@file` syntax (`gemini -p @/tmp/xxx.txt`) triggers agentic mode — Gemini scans the working directory for project context and treats prompts as task instructions.
+**Fix:** Stdin delivery (`gemini -p ""` with prompt via stdin) + `cwd=/tmp`.
 
 ---
 
@@ -227,12 +274,16 @@ Slash commands (bypass agent, requireAuth=true):
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (5 unit tests for formatPrompt)
+npm test            # vitest run (45 tests)
 ```
 
 ---
 
 ## Changelog
+
+### v0.2.19
+- **feat:** `/cli-list` command — formatted overview of all registered models grouped by provider
+- **docs:** Rewrite README to reflect current state (correct model names, command count, requireAuth, test count, /cli-list docs)
 
 ### v0.2.18
 - **feat:** Add `/cli-gemini3-flash` → `gemini-3-flash-preview`
@@ -240,74 +291,49 @@ npm test            # vitest run (5 unit tests for formatPrompt)
 - **fix:** Update `DEFAULT_ALLOWED_CLI_MODELS` with `gemini-3-flash-preview`
 
 ### v0.2.17
-- **fix:** `/cli-gemini3` model corrected to `gemini-3-pro-preview` (was `gemini-3-pro`, which returns 404 from Gemini API)
+- **fix:** `/cli-gemini3` model corrected to `gemini-3-pro-preview` (was `gemini-3-pro`, returns 404 from Gemini API)
 
 ### v0.2.16
 - **feat(T-101):** Expand test suite to 45 tests — new cases for `formatPrompt` (mixed roles, boundary values, system messages) and `routeToCliRunner` (gemini paths, edge cases)
 - **feat(T-103):** Add `DEFAULT_ALLOWED_CLI_MODELS` allowlist; `routeToCliRunner` now rejects unregistered models by default; pass `allowedModels: null` to opt out
 
 ### v0.2.15
-- **docs:** Rewrite changelog (entries for v0.2.12–v0.2.14 were corrupted by repeated sed version bumps); all providers verified working (Claude, Gemini, Codex)
-- **docs:** Update STATUS.md with end-to-end test results
+- **docs:** Rewrite changelog (entries for v0.2.12–v0.2.14 were corrupted); all providers verified working end-to-end
 
 ### v0.2.14
-- **fix:** Strip `vllm/` prefix in `routeToCliRunner` — OpenClaw sends full provider path (`vllm/cli-claude/...`) but proxy router expected bare `cli-claude/...`; caused "Unknown CLI bridge model" on all requests
-- **test:** Add 4 routing tests covering both prefixed and non-prefixed model paths (9 tests total)
+- **fix:** Strip `vllm/` prefix in `routeToCliRunner` — OpenClaw sends full provider path (`vllm/cli-claude/...`) but proxy router expected bare `cli-claude/...`
+- **test:** Add 4 routing tests (9 total)
 
 ### v0.2.13
-- **fix:** Set `requireAuth: false` on all `/cli-*` commands — webchat senders were always blocked because plugin-level auth uses a different resolution path than `commands.allowFrom` config; gateway-level allowlist is the correct security layer
-- **fix:** Hardcoded `version: "0.2.5"` in plugin object (`index.ts`) — now tracks `package.json`
-
-### v0.2.12
-- **docs:** Fix changelog continuity — v0.2.10 entry was lost, v0.2.11 description was wrong; all entries now accurate
-
-### v0.2.11
-- **docs:** Fix README `Current version:** `0.2.18`
-
-### v0.2.10
-- **docs:** Fix version labels — SKILL.md was showing 0.2.2, README changelog ended at v0.2.5; add entries for v0.2.6–v0.2.9
+- **fix:** Set `requireAuth: false` on all `/cli-*` commands — plugin-level auth uses different resolution path than `commands.allowFrom`; gateway allowlist is the correct security layer
+- **fix:** Hardcoded `version: "0.2.5"` in plugin object now tracks `package.json`
 
 ### v0.2.9
-- **fix:** Critical — replace `fuser -k 31337/tcp` with safe health probe (`GET /v1/models`)
-- Prevents gateway SIGKILL on in-process hot-reloads (systemd `status=9/KILL` was caused by `fuser` finding gateway itself holding the port)
-- If proxy responds → reuse it; if EADDRINUSE but no response → wait 1s, retry once
+- **fix:** Critical — replace `fuser -k 31337/tcp` with safe health probe to prevent gateway SIGKILL on hot-reloads
 
-### v0.2.8
-- **fix:** EADDRINUSE on every gateway restart — `closeAllConnections()` + `registerService` stop() hook (partially; superseded by v0.2.9 health-probe approach)
-
-### v0.2.7
-- **fix:** Port leak on gateway hot-reload — added `registerService` stop() callback to close proxy server on plugin teardown
+### v0.2.7–v0.2.8
+- **fix:** Port leak on hot-reload — `registerService` stop() hook + `closeAllConnections()`
 
 ### v0.2.6
-- **fix:** `openclaw.extensions` added to `package.json` (required for `openclaw plugins install`)
-- Config patcher: auto-adds vllm provider to `openclaw.json` on first startup
+- **fix:** `openclaw.extensions` added to `package.json`; config patcher auto-adds vllm provider
 
 ### v0.2.5
-- **feat:** `/cli-codex` → `openai-codex/gpt-5.3-codex`
-- **feat:** `/cli-codex-mini` → `openai-codex/gpt-5.1-codex-mini`
-- Codex commands use the `openai-codex` provider (Codex CLI OAuth auth, direct OpenAI API — not the local proxy)
+- **feat:** `/cli-codex` + `/cli-codex-mini` (Codex OAuth provider, direct API)
 
 ### v0.2.4
-- **fix:** Gemini agentic mode — replaced `@file` with stdin delivery (`-p ""`) + `cwd=/tmp`
-- **fix:** Filter `[WARN]` and `Loaded cached credentials` noise from Gemini stderr
-- Added `RunCliOptions` interface with optional `cwd` field
+- **fix:** Gemini agentic mode — stdin delivery + `cwd=/tmp`
 
 ### v0.2.3
-- **feat:** `/cli-back` — restore previous model (state persisted in `~/.openclaw/cli-bridge-state.json`)
-- **feat:** `/cli-test [model]` — one-shot proxy health check without changing active model
+- **feat:** `/cli-back` + `/cli-test`
 
 ### v0.2.2
-- **feat:** Phase 3 — `/cli-*` slash commands for instant model switching
-- All 6 model commands via `api.registerCommand` with `requireAuth: true`
+- **feat:** Phase 3 — `/cli-*` slash commands
 
 ### v0.2.1
-- **fix:** `spawn E2BIG` — `buildMinimalEnv()` instead of spreading full `process.env`
-- **feat:** Unit tests (`test/cli-runner.test.ts`)
+- **fix:** `spawn E2BIG` + unit tests
 
 ### v0.2.0
-- **feat:** Phase 2 — local OpenAI-compatible proxy server
-- Stdin prompt delivery, `MAX_MESSAGES=20` + `MAX_MSG_CHARS=4000` truncation
-- Auto-patch of `openclaw.json` vllm provider config
+- **feat:** Phase 2 — local OpenAI-compatible proxy, stdin delivery, prompt truncation
 
 ### v0.1.x
 - Phase 1: Codex CLI OAuth auth bridge
