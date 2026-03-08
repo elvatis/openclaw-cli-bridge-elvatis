@@ -38,6 +38,10 @@ Six instant model-switch commands (authorized senders only):
 | `/cli-gemini` | `vllm/cli-gemini/gemini-2.5-pro` |
 | `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` |
 | `/cli-gemini3` | `vllm/cli-gemini/gemini-3-pro` |
+| `/cli-codex` | `openai-codex/gpt-5.3-codex` |
+| `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` |
+| `/cli-back` | Restore previous model |
+| `/cli-test [model]` | Health check (no model switch) |
 
 Each command runs `openclaw models set <model>` atomically and replies with a confirmation.
 
@@ -49,4 +53,4 @@ Each command runs `openclaw models set <model>` atomically and replies with a co
 
 See `README.md` for full configuration reference and architecture diagram.
 
-**Version:** 0.2.2
+**Version:** 0.2.10

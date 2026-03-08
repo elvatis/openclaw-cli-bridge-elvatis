@@ -234,6 +234,24 @@ npm test            # vitest run (5 unit tests for formatPrompt)
 
 ## Changelog
 
+### v0.2.10
+- **docs:** Fix version labels in SKILL.md and README changelog (were stuck at 0.2.2/0.2.5)
+
+### v0.2.9
+- **fix:** Critical — replace `fuser -k 31337/tcp` with safe health probe (`GET /v1/models`)
+- Prevents gateway SIGKILL on in-process hot-reloads (systemd `status=9/KILL` was caused by `fuser` finding gateway itself holding the port)
+- If proxy responds → reuse it; if EADDRINUSE but no response → wait 1s, retry once
+
+### v0.2.8
+- **fix:** EADDRINUSE on every gateway restart — `closeAllConnections()` + `registerService` stop() hook (partially; superseded by v0.2.9 health-probe approach)
+
+### v0.2.7
+- **fix:** Port leak on gateway hot-reload — added `registerService` stop() callback to close proxy server on plugin teardown
+
+### v0.2.6
+- **fix:** `openclaw.extensions` added to `package.json` (required for `openclaw plugins install`)
+- Config patcher: auto-adds vllm provider to `openclaw.json` on first startup
+
 ### v0.2.5
 - **feat:** `/cli-codex` → `openai-codex/gpt-5.3-codex`
 - **feat:** `/cli-codex-mini` → `openai-codex/gpt-5.1-codex-mini`
