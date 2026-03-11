@@ -48,6 +48,16 @@ import {
 } from "./src/codex-auth.js";
 import { startProxyServer } from "./src/proxy-server.js";
 import { patchOpencllawConfig } from "./src/config-patcher.js";
+import {
+  loadSession,
+  deleteSession,
+  isSessionExpiredByAge,
+  verifySession,
+  runInteractiveLogin,
+  createContextFromSession,
+  DEFAULT_SESSION_PATH,
+} from "./src/grok-session.js";
+import type { BrowserContext, Browser } from "playwright";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types derived from SDK (not re-exported by the package)
@@ -66,6 +76,46 @@ interface CliPluginConfig {
   proxyPort?: number;
   proxyApiKey?: string;
   proxyTimeoutMs?: number;
+  grokSessionPath?: string;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Grok web-session state (module-level, persists across commands)
+// ──────────────────────────────────────────────────────────────────────────────
+
+let grokBrowser: Browser | null = null;
+let grokContext: BrowserContext | null = null;
+
+async function launchGrokBrowser(): Promise<Browser> {
+  const { chromium } = await import("playwright");
+  return chromium.launch({ headless: false });
+}
+
+async function tryRestoreGrokSession(
+  sessionPath: string,
+  log: (msg: string) => void
+): Promise<boolean> {
+  const saved = loadSession(sessionPath);
+  if (!saved || isSessionExpiredByAge(saved)) {
+    log("[cli-bridge:grok] no valid saved session");
+    return false;
+  }
+  try {
+    if (!grokBrowser) grokBrowser = await launchGrokBrowser();
+    const ctx = await createContextFromSession(grokBrowser, saved);
+    const check = await verifySession(ctx, log);
+    if (!check.valid) {
+      log(`[cli-bridge:grok] saved session invalid: ${check.reason}`);
+      await ctx.close().catch(() => {});
+      return false;
+    }
+    grokContext = ctx;
+    log("[cli-bridge:grok] session restored ✅");
+    return true;
+  } catch (err) {
+    log(`[cli-bridge:grok] session restore error: ${(err as Error).message}`);
+    return false;
+  }
 }
 
 const DEFAULT_PROXY_PORT = 31337;
@@ -393,7 +443,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.25",
+  version: "0.2.26",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -407,6 +457,10 @@ const plugin = {
     const apiKey = cfg.proxyApiKey ?? DEFAULT_PROXY_API_KEY;
     const timeoutMs = cfg.proxyTimeoutMs ?? 120_000;
     const codexAuthPath = cfg.codexAuthPath ?? DEFAULT_CODEX_AUTH_PATH;
+    const grokSessionPath = cfg.grokSessionPath ?? DEFAULT_SESSION_PATH;
+
+    // ── Grok session restore (non-blocking) ───────────────────────────────────
+    void tryRestoreGrokSession(grokSessionPath, (msg) => api.logger.info(msg));
 
     // ── Phase 1: openai-codex auth bridge ─────────────────────────────────────
     if (enableCodex) {
@@ -503,6 +557,7 @@ const plugin = {
             timeoutMs,
             log: (msg) => api.logger.info(msg),
             warn: (msg) => api.logger.warn(msg),
+            getGrokContext: () => grokContext,
           });
           proxyServer = server;
           api.logger.info(
@@ -526,6 +581,7 @@ const plugin = {
                 port, apiKey, timeoutMs,
                 log: (msg) => api.logger.info(msg),
                 warn: (msg) => api.logger.warn(msg),
+                getGrokContext: () => grokContext,
               });
               proxyServer = server;
               api.logger.info(`[cli-bridge] proxy ready on :${port} (retry)`);
@@ -771,11 +827,64 @@ const plugin = {
       },
     } satisfies OpenClawPluginCommandDefinition);
 
+    // ── Phase 4: Grok web-session commands ────────────────────────────────────
+
+    api.registerCommand({
+      name: "grok-login",
+      description: "Open browser to log in to grok.com (X/Twitter account)",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (grokContext) {
+          return { text: "✅ Already logged in to grok.com. Use /grok-logout first to re-authenticate." };
+        }
+        api.logger.info("[cli-bridge:grok] starting interactive login...");
+        try {
+          if (!grokBrowser) grokBrowser = await launchGrokBrowser();
+          const session = await runInteractiveLogin(grokBrowser, grokSessionPath, (msg) => api.logger.info(msg));
+          grokContext = await createContextFromSession(grokBrowser, session);
+          return { text: "✅ Logged in to grok.com!\n\nGrok models available:\n• `vllm/web-grok/grok-3`\n• `vllm/web-grok/grok-3-fast`\n• `vllm/web-grok/grok-3-mini`\n\nUse `/cli-grok` to switch." };
+        } catch (err) {
+          return { text: `❌ Login failed: ${(err as Error).message}` };
+        }
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "grok-status",
+      description: "Check grok.com session status",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (!grokContext) {
+          return { text: "❌ No active grok.com session\nRun `/grok-login` to authenticate." };
+        }
+        const check = await verifySession(grokContext, (msg) => api.logger.info(msg));
+        if (check.valid) {
+          return { text: `✅ grok.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-grok/grok-3, web-grok/grok-3-fast, web-grok/grok-3-mini, web-grok/grok-3-mini-fast` };
+        }
+        grokContext = null;
+        return { text: `❌ Session expired: ${check.reason}\nRun \`/grok-login\` to re-authenticate.` };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "grok-logout",
+      description: "Clear saved grok.com session",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (grokContext) {
+          await grokContext.close().catch(() => {});
+          grokContext = null;
+        }
+        deleteSession(grokSessionPath);
+        return { text: "✅ Logged out from grok.com. Session file deleted." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
     const allCommands = [
       ...CLI_MODEL_COMMANDS.map((c) => `/${c.name}`),
       "/cli-back",
       "/cli-test",
       "/cli-list",
+      "/grok-login",
+      "/grok-status",
+      "/grok-logout",
     ];
     api.logger.info(`[cli-bridge] registered ${allCommands.length} commands: ${allCommands.join(", ")}`);
   },
