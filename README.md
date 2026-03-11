@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.26`
+**Current version:** `0.2.27`
 
 ---
 
@@ -286,6 +286,13 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v0.2.27
+- **feat:** Grok persistent Chromium profile (`~/.openclaw/grok-profile/`) — cookies survive gateway restarts
+- **feat:** `/grok-login` imports cookies from OpenClaw browser into persistent profile automatically
+- **fix:** `verifySession` reuses existing grok.com page instead of opening a new one (avoids Cloudflare 403)
+- **fix:** DOM-polling strategy instead of direct fetch API — bypasses `x-statsig-id` anti-bot check completely
+- **fix:** Lazy-connect: `connectGrokContext` callback auto-reconnects on first request after restart
 
 ### v0.2.26
 - **feat:** Grok web-session bridge integrated into cli-bridge proxy — routes `web-grok/*` models through grok.com browser session (SuperGrok subscription, no API credits needed)

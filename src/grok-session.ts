@@ -87,51 +87,51 @@ export async function verifySession(
   context: BrowserContext,
   log: (msg: string) => void
 ): Promise<SessionCheckResult> {
+  log("verifying grok session...");
+
+  // Prefer an existing grok.com page — don't open a new one (new pages can
+  // trigger Cloudflare checks and displace the authenticated session page).
+  const existingPages = context.pages().filter((p) => p.url().startsWith("https://grok.com"));
+  if (existingPages.length > 0) {
+    const page = existingPages[0];
+    // Check for sign-in link on existing page
+    const signIn = page.locator('a[href*="sign-in"], a[href*="/login"]');
+    const signInVisible = await signIn.isVisible().catch(() => false);
+    if (signInVisible) return { valid: false, reason: "sign-in link visible — session expired" };
+    // Check for editor (logged in indicator)
+    const editor = page.locator('.ProseMirror, [contenteditable="true"]');
+    const editorVisible = await editor.isVisible().catch(() => false);
+    if (editorVisible) {
+      log("session valid ✅");
+      return { valid: true };
+    }
+  }
+
+  // No existing page — open one to check, then leave it open for reuse
   const page = await context.newPage();
   try {
     log("verifying grok session...");
     await page.goto(GROK_HOME, { waitUntil: "domcontentloaded", timeout: 15_000 });
 
-    // If we see Sign In link → not logged in
     const signIn = page.locator('a[href*="sign-in"], a[href*="/login"]');
-    const signInVisible = await signIn.isVisible().catch(() => false);
-    if (signInVisible) {
+    if (await signIn.isVisible().catch(() => false)) {
+      await page.close();
       return { valid: false, reason: "sign-in link visible — session expired" };
     }
 
-    // If we see the chat input → logged in
-    const chatInput = page.locator('textarea, [placeholder*="mind"], [aria-label*="message"]');
-    const chatVisible = await chatInput.isVisible().catch(() => false);
-    if (chatVisible) {
+    const editor = page.locator('.ProseMirror, [contenteditable="true"]');
+    if (await editor.isVisible().catch(() => false)) {
+      // Keep page open — grokComplete will reuse it
       log("session valid ✅");
       return { valid: true };
     }
 
-    // Ambiguous — try API endpoint
-    const resp = await page.evaluate(async () => {
-      try {
-        const r = await fetch("https://grok.com/rest/app-chat/conversations", {
-          method: "GET",
-          credentials: "include",
-        });
-        return { status: r.status };
-      } catch (e: unknown) {
-        return { status: 0, error: String(e) };
-      }
-    });
-
-    if (resp.status === 200 || resp.status === 204) {
-      log("session valid via API check ✅");
-      return { valid: true };
-    }
-    if (resp.status === 401 || resp.status === 403) {
-      return { valid: false, reason: `API returned ${resp.status}` };
-    }
-
-    log(`session check ambiguous (status ${resp.status}) — assuming valid`);
+    // Ambiguous — assume valid, keep page open
+    log("session check ambiguous — assuming valid");
     return { valid: true };
-  } finally {
-    await page.close();
+  } catch (err) {
+    await page.close().catch(() => {});
+    return { valid: false, reason: (err as Error).message };
   }
 }
 

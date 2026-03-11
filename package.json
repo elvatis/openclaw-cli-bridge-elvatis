@@ -1,6 +1,6 @@
 {
   "name": "@elvatis_com/openclaw-cli-bridge-elvatis",
-  "version": "0.2.26",
+  "version": "0.2.27",
   "description": "Bridges gemini, claude, and codex CLI tools as OpenClaw model providers. Reads existing CLI auth without re-login.",
   "type": "module",
   "openclaw": {
