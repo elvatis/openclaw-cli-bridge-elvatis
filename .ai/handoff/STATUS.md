@@ -1,50 +1,78 @@
 # STATUS.md — openclaw-cli-bridge-elvatis
 
-_Last updated: 2026-03-11 by Akido (claude-sonnet-4-6)_
+<!-- SECTION: summary -->
+v0.2.25 built + tested (51/51). Staged model switching + token refresh stability. Ready to publish.
+<!-- /SECTION: summary -->
 
-## Current Version: 0.2.21 — STABLE
+<!-- SECTION: version -->
+## Current Version: 0.2.25 — STABLE (unpublished)
 
-## What is done
+_Last session: 2026-03-11 — Akido (claude-sonnet-4-6)_
 
-- ✅ Repo: `https://github.com/elvatis/openclaw-cli-bridge-elvatis`
-- ✅ npm: `@elvatis_com/openclaw-cli-bridge-elvatis@0.2.21`
-- ✅ ClawHub: `openclaw-cli-bridge-elvatis@0.2.21`
-- ✅ **v0.2.21 fix:** `buildMinimalEnv()` forwards `XDG_RUNTIME_DIR` + `DBUS_SESSION_BUS_ADDRESS` — fixes Claude Code OAuth (Gnome Keyring) 401 timeout
-- ✅ Phase 1: `openai-codex` provider via `~/.codex/auth.json` (no re-login)
-- ✅ Phase 2: Local OpenAI-compatible proxy on `127.0.0.1:31337` (Gemini + Claude CLI)
-- ✅ Phase 3: 10 slash commands (`/cli-sonnet`, `/cli-opus`, `/cli-haiku`, `/cli-gemini`, `/cli-gemini-flash`, `/cli-gemini3`, `/cli-codex`, `/cli-codex-mini`, `/cli-back`, `/cli-test`)
-- ✅ Config patcher: auto-adds vllm provider to `openclaw.json` on first startup
-- ✅ Prompt delivery via stdin (no E2BIG, no Gemini agentic mode)
-- ✅ `registerService` stop() hook: closes proxy server on plugin teardown
-- ✅ `requireAuth: false` on all commands — webchat + WhatsApp authorized via gateway `commands.allowFrom`
-- ✅ `vllm/` prefix stripping in `routeToCliRunner` — accepts both `vllm/cli-claude/...` and bare `cli-claude/...`
-- ✅ End-to-end tested (2026-03-08): claude-sonnet-4-6 ✅ claude-haiku-4-5 ✅ gemini-2.5-flash ✅ gemini-2.5-pro ✅ codex ✅
+| Platform | Version | Status |
+|----------|---------|--------|
+| GitHub | v0.2.23 | ✅ Tagged + Release (last published) |
+| npm | 0.2.23 | ✅ Published (last published) |
+| ClawHub | 0.2.23 | ✅ Published (last published) |
+| Local | 0.2.25 | ⏳ Built + tested, not yet published |
+<!-- /SECTION: version -->
 
-## Known Operational Notes
+<!-- SECTION: build_health -->
+## Build Health
 
-- **Claude CLI auth expires** — token lifetime ~90 days. When `/cli-test` returns 401, run `claude auth login` on the server to refresh.
-- Config patcher writes `openclaw.json` directly → triggers one gateway restart on first install (expected, one-time only)
-- ClawHub publish ignores `.clawhubignore` — use rsync workaround (see CONVENTIONS.md)
+| Check | Result | Notes |
+|-------|--------|-------|
+| `npm run build` | ✅ | TypeScript compiles clean, no errors |
+| `npm test` | ✅ 51/51 | All tests pass |
+| `npm run typecheck` | ✅ | Implied by build |
+| Plugin loads in gateway | ✅ | Verified at v0.2.21; no structural changes |
+<!-- /SECTION: build_health -->
 
-## Bugs Fixed
+<!-- SECTION: what_is_done -->
+## What Is Done
 
-### v0.2.14 — vllm/ prefix not stripped in model router
-`routeToCliRunner` received full provider path `vllm/cli-claude/...` from OpenClaw
-but only checked for `cli-claude/...` — caused "Unknown CLI bridge model" on all requests.
-Fixed by stripping the `vllm/` prefix before routing.
+### Session-Safety: Staged Model Switching (v0.2.25)
+- ✅ **`/cli-*` stages by default** — switch saved to `~/.openclaw/cli-bridge-pending.json`, NOT applied. Shows warning + instructions.
+- ✅ **`/cli-* --now`** — immediate switch (user's explicit choice; only use between sessions)
+- ✅ **`/cli-apply`** — apply staged switch after finishing current task
+- ✅ **`/cli-pending`** — show staged switch state
+- ✅ **`/cli-back`** — restore previous model + clear any staged switch
+- ✅ **`/cli-list`** — updated to show pending state + switching instructions
 
-### v0.2.13 — requireAuth blocking webchat commands
-All `/cli-*` commands had `requireAuth: true`. Plugin-level auth checks `isAuthorizedSender`
-via a different resolution path than `commands.allowFrom` config — webchat senders were
-never authorized. Fixed by setting `requireAuth: false`; gateway-level `commands.allowFrom`
-is the correct security layer.
+### Token Refresh Stability (v0.2.25 — merged from v0.2.24)
+- ✅ Sleep-resilient: `setInterval(10min)` polling instead of long `setTimeout`
+- ✅ No timer-leak: `stopTokenRefresh()` called at top of `scheduleTokenRefresh()`
+- ✅ `stopTokenRefresh()` exported; called via `server.on("close")`
 
-### v0.2.9 — Critical: Gateway SIGKILL via fuser
-`fuser -k 31337/tcp` was sending SIGKILL to the gateway process itself during
-in-process hot-reloads. Fixed by replacing `fuser -k` with a safe health probe.
+### Previously Validated (v0.2.23 and below)
+- ✅ Phase 1: `openai-codex` provider via `~/.codex/auth.json`
+- ✅ Phase 2: Local proxy on `127.0.0.1:31337` (Gemini + Claude CLI)
+- ✅ Phase 3: 15 slash commands (all `/cli-*`)
+- ✅ Model allowlist, vllm prefix stripping, buildMinimalEnv XDG vars
+- ✅ End-to-end tested: claude-sonnet-4-6 ✅ claude-haiku-4-5 ✅ gemini-2.5-flash ✅ gemini-2.5-pro ✅ codex ✅
+<!-- /SECTION: what_is_done -->
 
-### v0.2.7–v0.2.8 — EADDRINUSE on hot-reload
-Added `closeAllConnections()` + `registerService` stop() hook.
+<!-- SECTION: what_is_missing -->
+## What Is Missing / Open
 
-### v0.2.6 — Port leak on gateway hot-reload
-HTTP proxy server had no cleanup handler.
+- ⏳ **Publish v0.2.25** — GitHub tag + release, npm publish, ClawHub publish (T-010)
+- ℹ️ **Claude CLI auth expires ~90 days** — when `/cli-test` returns 401, run `claude auth login`
+- ℹ️ **Config patcher writes `openclaw.json` directly** — triggers one gateway restart on first install
+- ℹ️ **ClawHub publish ignores `.clawhubignore`** — use rsync workaround (see CONVENTIONS.md)
+<!-- /SECTION: what_is_missing -->
+
+<!-- SECTION: bugs_fixed -->
+## Bug History
+
+| Version | Bug | Fix |
+|---------|-----|-----|
+| 0.2.25 | `/cli-*` mid-session breaks active agent (silent tool-call failures) | Staged switch by default; --now for explicit immediate |
+| 0.2.25 | Timer-leak in scheduleTokenRefresh | stopTokenRefresh() clears interval on every call |
+| 0.2.25 | Long setTimeout missed after system sleep/resume | setInterval(10min) polling |
+| 0.2.25 | Token refresh interval leaked on proxy close | server.on("close", stopTokenRefresh) |
+| 0.2.21 | Claude Code OAuth 401 on Gnome Keyring | buildMinimalEnv forwards XDG_RUNTIME_DIR |
+| 0.2.14 | vllm/ prefix not stripped → unknown model | Strip prefix before routing |
+| 0.2.13 | requireAuth:true blocked webchat commands | requireAuth:false |
+| 0.2.9 | fuser -k SIGKILL'd gateway process | Safe health probe |
+| 0.2.7–8 | EADDRINUSE on hot-reload | closeAllConnections() + registerService |
+<!-- /SECTION: bugs_fixed -->

@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.23`
+**Current version:** `0.2.25`
 
 ---
 
@@ -286,6 +286,17 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v0.2.25
+- **feat:** Staged model switching — `/cli-*` now stages the switch instead of applying it immediately. Prevents silent session corruption when switching models mid-conversation.
+  - `/cli-sonnet` → stages switch, shows warning, does NOT apply
+  - `/cli-sonnet --now` → immediate switch (use only between sessions!)
+  - `/cli-apply` → apply staged switch after finishing current task
+  - `/cli-pending` → show staged switch (if any)
+  - `/cli-back` → restore previous model + clear staged switch
+- **fix:** Sleep-resilient OAuth token refresh — replaced single long `setTimeout` with `setInterval(10min)` polling. Token refresh no longer misses its window after system sleep/resume.
+- **fix:** Timer leak in `scheduleTokenRefresh()` — old interval now reliably cleared via `stopTokenRefresh()` before scheduling a new one.
+- **fix:** `stopTokenRefresh()` exported from `claude-auth.ts`; called automatically via `server.on("close")` when the proxy server closes.
 
 ### v0.2.23
 - **feat:** Proactive OAuth token management (`src/claude-auth.ts`) — the proxy now reads `~/.claude/.credentials.json` at startup, schedules a refresh 30 minutes before expiry, and calls `ensureClaudeToken()` before every `claude` subprocess invocation. On 401 responses, automatically retries once after refreshing. Eliminates the need for manual re-login after token expiry in headless/systemd deployments.

@@ -201,14 +201,53 @@ const CLI_MODEL_COMMANDS = [
 const CLI_TEST_DEFAULT_MODEL = "cli-claude/claude-sonnet-4-6";
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Helper: switch global model, saving previous for /cli-back
+// Staged-switch state file
+// Stores a pending model switch that has not yet been applied.
+// Written by /cli-* (default), applied by /cli-apply or /cli-* --now.
+// Located at ~/.openclaw/cli-bridge-pending.json
 // ──────────────────────────────────────────────────────────────────────────────
-async function switchModel(
+const PENDING_FILE = join(homedir(), ".openclaw", "cli-bridge-pending.json");
+
+interface CliBridgePending {
+  model: string;
+  label: string;
+  requestedAt: string;
+}
+
+function readPending(): CliBridgePending | null {
+  try {
+    return JSON.parse(readFileSync(PENDING_FILE, "utf8")) as CliBridgePending;
+  } catch {
+    return null;
+  }
+}
+
+function writePending(pending: CliBridgePending): void {
+  try {
+    mkdirSync(join(homedir(), ".openclaw"), { recursive: true });
+    writeFileSync(PENDING_FILE, JSON.stringify(pending, null, 2) + "\n", "utf8");
+  } catch {
+    // non-fatal
+  }
+}
+
+function clearPending(): void {
+  try {
+    const { unlinkSync } = require("node:fs");
+    unlinkSync(PENDING_FILE);
+  } catch {
+    // non-fatal — file may not exist
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Helper: immediately apply the model switch (no safety checks)
+// ──────────────────────────────────────────────────────────────────────────────
+async function applyModelSwitch(
   api: OpenClawPluginApi,
   model: string,
   label: string,
 ): Promise<PluginCommandResult> {
-  // Save current model BEFORE switching so /cli-back can restore it
   const current = readCurrentModel();
   if (current && current !== model) {
     writeState({ previousModel: current });
@@ -227,15 +266,66 @@ async function switchModel(
       return { text: `❌ Failed to switch to ${label}: ${err}` };
     }
 
+    clearPending();
     api.logger.info(`[cli-bridge] switched model → ${model}`);
     return {
-      text: `✅ Switched to **${label}**\n\`${model}\`\n\nUse \`/cli-back\` to restore previous model.`,
+      text:
+        `✅ Switched to **${label}**\n` +
+        `\`${model}\`\n\n` +
+        `Use \`/cli-back\` to restore previous model.`,
     };
   } catch (err) {
     const msg = (err as Error).message;
     api.logger.warn(`[cli-bridge] models set error: ${msg}`);
     return { text: `❌ Error switching model: ${msg}` };
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Helper: staged switch (default behavior)
+//
+// ⚠️  SAFETY: /cli-* mid-session bricht den aktiven Agenten.
+//
+// `openclaw models set` ist ein **sofortiger, globaler Switch**.
+// Der laufende Agent verliert seinen Kontext — Tool-Calls werden nicht
+// ausgeführt, Planfiles werden nicht geschrieben, keine Rückmeldung.
+//
+// Default: Switch wird nur gespeichert (nicht angewendet).
+// Mit --now: sofortiger Switch (nur zwischen Sessions verwenden!).
+// Mit /cli-apply: gespeicherten Switch anwenden (nach Session-Ende).
+// ──────────────────────────────────────────────────────────────────────────────
+async function switchModel(
+  api: OpenClawPluginApi,
+  model: string,
+  label: string,
+  forceNow: boolean,
+): Promise<PluginCommandResult> {
+  // --now: sofortiger Switch, volle Verantwortung beim User
+  if (forceNow) {
+    api.logger.warn(`[cli-bridge] --now switch to ${model} (immediate, session may break)`);
+    return applyModelSwitch(api, model, label);
+  }
+
+  // Default: staged switch — speichern, warnen, nicht anwenden
+  const current = readCurrentModel();
+
+  if (current === model) {
+    return { text: `ℹ️ Already on **${label}**\n\`${model}\`` };
+  }
+
+  writePending({ model, label, requestedAt: new Date().toISOString() });
+  api.logger.info(`[cli-bridge] staged switch → ${model} (pending, not applied yet)`);
+
+  return {
+    text:
+      `📋 **Model switch staged: ${label}**\n` +
+      `\`${model}\`\n\n` +
+      `⚠️ **NOT applied yet** — switching mid-session breaks the active agent:\n` +
+      `tool calls fail silently, plan files don't get written, no feedback.\n\n` +
+      `**To apply:**\n` +
+      `• \`/cli-apply\` — apply after finishing your current task\n` +
+      `• \`/cli-* --now\` — force immediate switch (only between sessions!)`,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -303,7 +393,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.15",
+  version: "0.2.25",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -483,11 +573,13 @@ const plugin = {
       const { name, model, description, label } = entry;
       api.registerCommand({
         name,
-        description,
+        description: `${description}. Pass --now to apply immediately (only between sessions!).`,
+        acceptsArgs: true,
         requireAuth: false,
         handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
-          api.logger.info(`[cli-bridge] /${name} by ${ctx.senderId ?? "?"}`);
-          return switchModel(api, model, label);
+          const forceNow = (ctx.args ?? "").trim().toLowerCase() === "--now";
+          api.logger.info(`[cli-bridge] /${name} by ${ctx.senderId ?? "?"} forceNow=${forceNow}`);
+          return switchModel(api, model, label, forceNow);
         },
       } satisfies OpenClawPluginCommandDefinition);
     }
@@ -495,10 +587,13 @@ const plugin = {
     // ── Phase 3b: /cli-back — restore previous model ──────────────────────────
     api.registerCommand({
       name: "cli-back",
-      description: "Restore the model that was active before the last /cli-* switch",
+      description: "Restore the model active before the last /cli-* switch. Clears any pending staged switch.",
       requireAuth: false,
       handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
         api.logger.info(`[cli-bridge] /cli-back by ${ctx.senderId ?? "?"}`);
+
+        // Clear any pending staged switch
+        clearPending();
 
         const state = readState();
         if (!state?.previousModel) {
@@ -526,6 +621,57 @@ const plugin = {
         } catch (err) {
           return { text: `❌ Error: ${(err as Error).message}` };
         }
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    // ── Phase 3b2: /cli-apply — apply staged model switch ─────────────────────
+    api.registerCommand({
+      name: "cli-apply",
+      description: "Apply a staged /cli-* model switch. Use this AFTER finishing your current task.",
+      requireAuth: false,
+      handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
+        api.logger.info(`[cli-bridge] /cli-apply by ${ctx.senderId ?? "?"}`);
+
+        const pending = readPending();
+        if (!pending) {
+          const current = readCurrentModel();
+          return {
+            text:
+              `ℹ️ No staged switch pending.\n` +
+              `Current model: \`${current ?? "unknown"}\`\n\n` +
+              `Use \`/cli-sonnet\`, \`/cli-opus\` etc. to stage a switch.`,
+          };
+        }
+
+        api.logger.info(`[cli-bridge] applying staged switch → ${pending.model}`);
+        return applyModelSwitch(api, pending.model, pending.label);
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    // ── Phase 3b3: /cli-pending — show staged switch ───────────────────────────
+    api.registerCommand({
+      name: "cli-pending",
+      description: "Show the currently staged model switch (if any).",
+      requireAuth: false,
+      handler: async (): Promise<PluginCommandResult> => {
+        const pending = readPending();
+        const current = readCurrentModel();
+        if (!pending) {
+          return {
+            text:
+              `✅ No pending switch.\n` +
+              `Current model: \`${current ?? "unknown"}\``,
+          };
+        }
+        return {
+          text:
+            `📋 **Staged switch pending:**\n` +
+            `→ \`${pending.model}\` (${pending.label})\n` +
+            `Requested: ${pending.requestedAt}\n\n` +
+            `Current: \`${current ?? "unknown"}\`\n\n` +
+            `Run \`/cli-apply\` to apply after finishing your current task.\n` +
+            `Run \`/cli-sonnet --now\` etc. to discard and switch immediately.`,
+        };
       },
     } satisfies OpenClawPluginCommandDefinition);
 
@@ -605,10 +751,19 @@ const plugin = {
           }
           lines.push("");
         }
+        const pending = readPending();
+        const pendingNote = pending ? ` ← pending: ${pending.label}` : "";
+
         lines.push("*Utility*");
-        lines.push("  /cli-back            Restore previous model");
+        lines.push(`  /cli-apply           Apply staged switch${pendingNote}`);
+        lines.push("  /cli-pending         Show staged switch (if any)");
+        lines.push("  /cli-back            Restore previous model + clear staged");
         lines.push("  /cli-test [model]    Health check (no model switch)");
         lines.push("  /cli-list            This overview");
+        lines.push("");
+        lines.push("*Switching safely:*");
+        lines.push("  /cli-sonnet          → stages switch (safe, apply later)");
+        lines.push("  /cli-sonnet --now    → immediate switch (only between sessions!)");
         lines.push("");
         lines.push(`Proxy: \`127.0.0.1:${port}\``);
 
