@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.28`
+**Current version:** `0.2.29`
 
 ---
 
@@ -286,6 +286,13 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v0.2.29
+- **feat:** `claude-browser.ts` — claude.ai DOM-automation (ProseMirror + `[data-test-render-count]` polling)
+- **feat:** `web-claude/*` models in proxy (web-claude/claude-sonnet, claude-opus, claude-haiku)
+- **feat:** `/claude-login`, `/claude-status`, `/claude-logout` commands
+- **feat:** Claude cookie-expiry tracking (`~/.openclaw/claude-cookie-expiry.json`)
+- **test:** 84/84 tests green (+7 claude-proxy tests, +8 claude-browser unit tests)
 
 ### v0.2.28
 - **feat:** `/grok-login` scans auth cookie expiry (sso cookie) and saves to `~/.openclaw/grok-cookie-expiry.json`
