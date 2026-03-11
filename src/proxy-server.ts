@@ -64,42 +64,14 @@ export interface ProxyServerOptions {
 
 /** Available CLI bridge models for GET /v1/models */
 export const CLI_MODELS = [
-  {
-    id: "cli-gemini/gemini-2.5-pro",
-    name: "Gemini 2.5 Pro (CLI)",
-    contextWindow: 1_000_000,
-    maxTokens: 8192,
-  },
-  {
-    id: "cli-gemini/gemini-2.5-flash",
-    name: "Gemini 2.5 Flash (CLI)",
-    contextWindow: 1_000_000,
-    maxTokens: 8192,
-  },
-  {
-    id: "cli-gemini/gemini-3-pro",
-    name: "Gemini 3 Pro (CLI)",
-    contextWindow: 1_000_000,
-    maxTokens: 8192,
-  },
-  {
-    id: "cli-claude/claude-opus-4-6",
-    name: "Claude Opus 4.6 (CLI)",
-    contextWindow: 200_000,
-    maxTokens: 8192,
-  },
-  {
-    id: "cli-claude/claude-sonnet-4-6",
-    name: "Claude Sonnet 4.6 (CLI)",
-    contextWindow: 200_000,
-    maxTokens: 8192,
-  },
-  {
-    id: "cli-claude/claude-haiku-4-5",
-    name: "Claude Haiku 4.5 (CLI)",
-    contextWindow: 200_000,
-    maxTokens: 8192,
-  },
+  // ── Claude Code CLI ───────────────────────────────────────────────────────
+  { id: "cli-claude/claude-sonnet-4-6", name: "Claude Sonnet 4.6 (CLI)",  contextWindow: 200_000,   maxTokens: 8_192 },
+  { id: "cli-claude/claude-opus-4-6",   name: "Claude Opus 4.6 (CLI)",    contextWindow: 200_000,   maxTokens: 8_192 },
+  { id: "cli-claude/claude-haiku-4-5",  name: "Claude Haiku 4.5 (CLI)",   contextWindow: 200_000,   maxTokens: 8_192 },
+  // ── Gemini CLI ────────────────────────────────────────────────────────────
+  { id: "cli-gemini/gemini-2.5-pro",      name: "Gemini 2.5 Pro (CLI)",   contextWindow: 1_000_000, maxTokens: 8_192 },
+  { id: "cli-gemini/gemini-2.5-flash",    name: "Gemini 2.5 Flash (CLI)", contextWindow: 1_000_000, maxTokens: 8_192 },
+  { id: "cli-gemini/gemini-3-pro-preview",name: "Gemini 3 Pro (CLI)",     contextWindow: 1_000_000, maxTokens: 8_192 },
   // Grok web-session models (requires /grok-login)
   { id: "web-grok/grok-3",           name: "Grok 3 (web session)",           contextWindow: 131_072, maxTokens: 131_072 },
   { id: "web-grok/grok-3-fast",      name: "Grok 3 Fast (web session)",      contextWindow: 131_072, maxTokens: 131_072 },
