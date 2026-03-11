@@ -264,7 +264,16 @@ export async function runClaude(
   const result = await runCli("claude", args, prompt, timeoutMs);
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
-    throw new Error(`claude exited ${result.exitCode}: ${result.stderr || "(no output)"}`);
+    const stderr = result.stderr || "(no output)";
+    // Detect expired/invalid OAuth token early and give a clear actionable message
+    // instead of letting the caller time out after 30s.
+    if (stderr.includes("401") || stderr.includes("Invalid authentication credentials") || stderr.includes("authentication_error")) {
+      throw new Error(
+        "Claude CLI OAuth token expired or invalid. " +
+        "Re-login required: run `claude auth logout && claude auth login` in a terminal, then retry."
+      );
+    }
+    throw new Error(`claude exited ${result.exitCode}: ${stderr}`);
   }
 
   return result.stdout;

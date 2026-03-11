@@ -53,4 +53,4 @@ Each command runs `openclaw models set <model>` atomically and replies with a co
 
 See `README.md` for full configuration reference and architecture diagram.
 
-**Version:** 0.2.21
+**Version:** 0.2.22
