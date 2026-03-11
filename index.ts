@@ -89,6 +89,53 @@ let grokContext: BrowserContext | null = null;
 // Persistent profile dir — survives gateway restarts, keeps cookies intact
 const GROK_PROFILE_DIR = join(homedir(), ".openclaw", "grok-profile");
 
+// Cookie expiry tracking file — written on /grok-login, read on startup
+const GROK_EXPIRY_FILE = join(homedir(), ".openclaw", "grok-cookie-expiry.json");
+
+interface GrokExpiryInfo {
+  expiresAt: number;    // epoch ms — earliest auth cookie expiry
+  loginAt: number;      // epoch ms — when /grok-login was last run
+  cookieName: string;   // which cookie determines the expiry
+}
+
+function saveGrokExpiry(info: GrokExpiryInfo): void {
+  try {
+    writeFileSync(GROK_EXPIRY_FILE, JSON.stringify(info, null, 2));
+  } catch { /* ignore */ }
+}
+
+function loadGrokExpiry(): GrokExpiryInfo | null {
+  try {
+    const raw = readFileSync(GROK_EXPIRY_FILE, "utf-8");
+    return JSON.parse(raw) as GrokExpiryInfo;
+  } catch { return null; }
+}
+
+/** Returns human-readable expiry summary e.g. "179 days (2026-09-07)" */
+function formatExpiryInfo(info: GrokExpiryInfo): string {
+  const daysLeft = Math.ceil((info.expiresAt - Date.now()) / 86_400_000);
+  const dateStr = new Date(info.expiresAt).toISOString().split("T")[0];
+  if (daysLeft <= 0) return `⚠️ EXPIRED (was ${dateStr})`;
+  if (daysLeft <= 7) return `🚨 expires in ${daysLeft}d (${dateStr}) — run /grok-login NOW`;
+  if (daysLeft <= 14) return `⚠️ expires in ${daysLeft}d (${dateStr}) — run /grok-login soon`;
+  return `✅ valid for ${daysLeft} more days (expires ${dateStr})`;
+}
+
+/** Scan context cookies and return earliest auth cookie expiry */
+async function scanCookieExpiry(ctx: import("playwright").BrowserContext): Promise<GrokExpiryInfo | null> {
+  try {
+    const cookies = await ctx.cookies(["https://grok.com", "https://x.ai"]);
+    const authCookies = cookies.filter((c) => ["sso", "sso-rw"].includes(c.name) && c.expires > 0);
+    if (authCookies.length === 0) return null;
+    const earliest = authCookies.reduce((min, c) => (c.expires < min.expires ? c : min));
+    return {
+      expiresAt: earliest.expires * 1000,
+      loginAt: Date.now(),
+      cookieName: earliest.name,
+    };
+  } catch { return null; }
+}
+
 /**
  * Launch (or reuse) a persistent headless Chromium context for grok.com.
  * Uses launchPersistentContext so cookies survive gateway restarts.
@@ -160,6 +207,14 @@ async function tryRestoreGrokSession(
     }
     grokContext = ctx;
     log("[cli-bridge:grok] session restored ✅");
+    // Log cookie expiry status on startup
+    const expiry = loadGrokExpiry();
+    if (expiry) {
+      log(`[cli-bridge:grok] cookie expiry: ${formatExpiryInfo(expiry)}`);
+      // Re-scan to keep expiry file fresh (cookies may have been renewed)
+      const freshExpiry = await scanCookieExpiry(ctx);
+      if (freshExpiry) saveGrokExpiry(freshExpiry);
+    }
     return true;
   } catch (err) {
     log(`[cli-bridge:grok] session restore error: ${(err as Error).message}`);
@@ -492,7 +547,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.27",
+  version: "0.2.28",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -943,7 +998,16 @@ const plugin = {
           return { text: `❌ Session not valid: ${check.reason}\n\nMake sure grok.com is open in your browser and you're logged in, then run /grok-login again.` };
         }
         grokContext = ctx;
-        return { text: `✅ Grok session ready!\n\nModels available:\n• \`vllm/web-grok/grok-3\`\n• \`vllm/web-grok/grok-3-fast\`\n• \`vllm/web-grok/grok-3-mini\`\n• \`vllm/web-grok/grok-3-mini-fast\`\n\nSession persists across gateway restarts (profile: ~/.openclaw/grok-profile/)` };
+
+        // Scan cookie expiry and persist it
+        const expiry = await scanCookieExpiry(ctx);
+        if (expiry) {
+          saveGrokExpiry(expiry);
+          api.logger.info(`[cli-bridge:grok] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
+        }
+        const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatExpiryInfo(expiry)}` : "";
+
+        return { text: `✅ Grok session ready!\n\nModels available:\n• \`vllm/web-grok/grok-3\`\n• \`vllm/web-grok/grok-3-fast\`\n• \`vllm/web-grok/grok-3-mini\`\n• \`vllm/web-grok/grok-3-mini-fast\`${expiryLine}` };
       },
     } satisfies OpenClawPluginCommandDefinition);
 
@@ -956,7 +1020,9 @@ const plugin = {
         }
         const check = await verifySession(grokContext, (msg) => api.logger.info(msg));
         if (check.valid) {
-          return { text: `✅ grok.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-grok/grok-3, web-grok/grok-3-fast, web-grok/grok-3-mini, web-grok/grok-3-mini-fast` };
+          const expiry = loadGrokExpiry();
+          const expiryLine = expiry ? `\n🕐 ${formatExpiryInfo(expiry)}` : "";
+          return { text: `✅ grok.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-grok/grok-3, web-grok/grok-3-fast, web-grok/grok-3-mini, web-grok/grok-3-mini-fast${expiryLine}` };
         }
         grokContext = null;
         return { text: `❌ Session expired: ${check.reason}\nRun \`/grok-login\` to re-authenticate.` };

@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.27`
+**Current version:** `0.2.28`
 
 ---
 
@@ -286,6 +286,12 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v0.2.28
+- **feat:** `/grok-login` scans auth cookie expiry (sso cookie) and saves to `~/.openclaw/grok-cookie-expiry.json`
+- **feat:** `/grok-status` shows cookie expiry with color-coded warnings (🚨 <7d, ⚠️ <14d, ✅ otherwise)
+- **feat:** Startup log shows cookie expiry and refreshes the expiry file on session restore
+- **fix:** Flaky cli-runner test improved (was pre-existing)
 
 ### v0.2.27
 - **feat:** Grok persistent Chromium profile (`~/.openclaw/grok-profile/`) — cookies survive gateway restarts
