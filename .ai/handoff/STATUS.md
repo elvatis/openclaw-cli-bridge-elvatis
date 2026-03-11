@@ -11,10 +11,10 @@ _Last session: 2026-03-11 — Akido (claude-sonnet-4-6)_
 
 | Platform | Version | Status |
 |----------|---------|--------|
-| GitHub | v0.2.23 | ✅ Tagged + Release (last published) |
-| npm | 0.2.23 | ✅ Published (last published) |
-| ClawHub | 0.2.23 | ✅ Published (last published) |
-| Local | 0.2.25 | ⏳ Built + tested, not yet published |
+| GitHub | v0.2.25 | ✅ Tagged + Release |
+| npm | 0.2.25 | ✅ Published |
+| ClawHub | 0.2.25 | ✅ Published (direct API — clawhub CLI v0.7.0 bug: missing acceptLicenseTerms) |
+| Local | 0.2.25 | ✅ Up to date |
 <!-- /SECTION: version -->
 
 <!-- SECTION: build_health -->
@@ -55,7 +55,7 @@ _Last session: 2026-03-11 — Akido (claude-sonnet-4-6)_
 <!-- SECTION: what_is_missing -->
 ## What Is Missing / Open
 
-- ⏳ **Publish v0.2.25** — GitHub tag + release, npm publish, ClawHub publish (T-010)
+- ✅ **v0.2.25 published** — GitHub, npm, ClawHub alle auf 0.2.25
 - ℹ️ **Claude CLI auth expires ~90 days** — when `/cli-test` returns 401, run `claude auth login`
 - ℹ️ **Config patcher writes `openclaw.json` directly** — triggers one gateway restart on first install
 - ℹ️ **ClawHub publish ignores `.clawhubignore`** — use rsync workaround (see CONVENTIONS.md)
