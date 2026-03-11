@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.1.0`
+**Current version:** `1.2.0`
 
 ---
 
@@ -286,6 +286,11 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v1.2.0
+- **fix:** Fresh page per request — no more message accumulation across calls
+- **feat:** ChatGPT model switching via URL param (?model=gpt-4o, o3, etc.)
+- **chore:** Gemini model switching: TODO (requires UI interaction)
 
 ### v1.1.0
 - **feat:** Auto-connect all providers on startup (no manual login after restart if browser is open)
