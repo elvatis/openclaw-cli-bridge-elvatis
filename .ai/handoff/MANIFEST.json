@@ -2,34 +2,152 @@
   "aahp_version": "3.0",
   "project": "openclaw-cli-bridge-elvatis",
   "last_session": {
-    "agent": "claude-opus-4-6",
+    "agent": "claude-code",
     "session_id": "main",
-    "timestamp": "2026-03-08T09:07:00Z",
+    "timestamp": "2026-03-08T08:08:44.175Z",
     "commit": "30be8ae",
     "phase": "integration",
-    "duration_minutes": 15
+    "duration_minutes": 2
   },
   "files": {
-    "STATUS.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "Auth bridge done; request bridge implemented; pending runtime validation." },
-    "NEXT_ACTIONS.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "Top priority: validate proxy + vllm model calls, then release pipeline." },
-    "LOG.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "Repo created, provider fixed, proxy architecture added." },
-    "DASHBOARD.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "2 bridge phases implemented; validation pending." },
-    "TRUST.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "No secret output, local-only proxy, explicit scope constraints." },
-    "CONVENTIONS.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "TypeScript strict + AAHP v3 + multi-platform release discipline." },
-    "WORKFLOW.md": { "checksum": "sha256:tbd", "updated": "2026-03-07T21:29:00Z", "lines": 0, "summary": "Validate → harden → publish (GitHub, npm, ClawHub)." }
+    "STATUS.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T21:29:00Z",
+      "lines": 0,
+      "summary": "Auth bridge done; request bridge implemented; pending runtime validation."
+    },
+    "NEXT_ACTIONS.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T21:29:00Z",
+      "lines": 0,
+      "summary": "Top priority: validate proxy + vllm model calls, then release pipeline."
+    },
+    "LOG.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T21:29:00Z",
+      "lines": 0,
+      "summary": "Repo created, provider fixed, proxy architecture added."
+    },
+    "DASHBOARD.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T21:29:00Z",
+      "lines": 0,
+      "summary": "2 bridge phases implemented; validation pending."
+    },
+    "TRUST.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T21:29:00Z",
+      "lines": 0,
+      "summary": "No secret output, local-only proxy, explicit scope constraints."
+    },
+    "CONVENTIONS.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T21:29:00Z",
+      "lines": 0,
+      "summary": "TypeScript strict + AAHP v3 + multi-platform release discipline."
+    },
+    "WORKFLOW.md": {
+      "checksum": "sha256:tbd",
+      "updated": "2026-03-07T21:29:00Z",
+      "lines": 0,
+      "summary": "Validate → harden → publish (GitHub, npm, ClawHub)."
+    }
   },
   "quick_context": "All providers validated end-to-end. 28 automated tests (unit + e2e proxy) pass. Proxy endpoints, vllm/ prefix stripping, auth, streaming, error handling all verified. Next: publish to npm + ClawHub.",
-  "token_budget": { "manifest_only": 90, "manifest_plus_core": 350, "full_read": 700 },
+  "token_budget": {
+    "manifest_only": 90,
+    "manifest_plus_core": 350,
+    "full_read": 700
+  },
   "next_task_id": 9,
   "tasks": {
-    "T-001": { "title": "Scaffold plugin structure + AAHP handoff", "status": "done", "priority": "high", "depends_on": [], "created": "2026-03-07T20:40:00Z", "completed": "2026-03-07T20:56:00Z" },
-    "T-002": { "title": "Implement openai-codex provider (Codex CLI auth bridge)", "status": "done", "priority": "high", "depends_on": ["T-001"], "created": "2026-03-07T20:40:00Z", "completed": "2026-03-07T20:56:00Z" },
-    "T-003": { "title": "Test auth flow: openclaw models auth login --provider openai-codex", "status": "done", "priority": "high", "depends_on": ["T-002"], "created": "2026-03-07T20:56:00Z", "completed": "2026-03-07T21:01:00Z" },
-    "T-004": { "title": "Verify model call: test gpt-5.2 or gpt-5.3-codex responds", "status": "done", "priority": "high", "depends_on": ["T-003"], "created": "2026-03-07T20:56:00Z", "completed": "2026-03-07T21:27:00Z" },
-    "T-005": { "title": "Implement Gemini CLI request bridge", "status": "done", "priority": "medium", "depends_on": ["T-003"], "created": "2026-03-07T20:56:00Z", "completed": "2026-03-07T21:23:00Z" },
-    "T-006": { "title": "Implement Claude Code CLI request bridge", "status": "done", "priority": "medium", "depends_on": ["T-003"], "created": "2026-03-07T20:56:00Z", "completed": "2026-03-07T21:23:00Z" },
-    "T-007": { "title": "Create GitHub repo and push initial code", "status": "done", "priority": "high", "depends_on": ["T-004"], "created": "2026-03-07T21:20:00Z", "completed": "2026-03-07T21:24:00Z" },
-    "T-008": { "title": "Validate proxy endpoints + vllm model calls end-to-end", "status": "done", "priority": "high", "depends_on": ["T-005", "T-006"], "created": "2026-03-07T21:29:00Z", "completed": "2026-03-08T09:07:00Z" },
-    "T-009": { "title": "Publish to npm + ClawHub", "status": "ready", "priority": "medium", "depends_on": ["T-008"], "created": "2026-03-07T21:29:00Z" }
+    "T-001": {
+      "title": "Scaffold plugin structure + AAHP handoff",
+      "status": "done",
+      "priority": "high",
+      "depends_on": [],
+      "created": "2026-03-07T20:40:00Z",
+      "completed": "2026-03-07T20:56:00Z"
+    },
+    "T-002": {
+      "title": "Implement openai-codex provider (Codex CLI auth bridge)",
+      "status": "done",
+      "priority": "high",
+      "depends_on": [
+        "T-001"
+      ],
+      "created": "2026-03-07T20:40:00Z",
+      "completed": "2026-03-07T20:56:00Z"
+    },
+    "T-003": {
+      "title": "Test auth flow: openclaw models auth login --provider openai-codex",
+      "status": "done",
+      "priority": "high",
+      "depends_on": [
+        "T-002"
+      ],
+      "created": "2026-03-07T20:56:00Z",
+      "completed": "2026-03-07T21:01:00Z"
+    },
+    "T-004": {
+      "title": "Verify model call: test gpt-5.2 or gpt-5.3-codex responds",
+      "status": "done",
+      "priority": "high",
+      "depends_on": [
+        "T-003"
+      ],
+      "created": "2026-03-07T20:56:00Z",
+      "completed": "2026-03-07T21:27:00Z"
+    },
+    "T-005": {
+      "title": "Implement Gemini CLI request bridge",
+      "status": "done",
+      "priority": "medium",
+      "depends_on": [
+        "T-003"
+      ],
+      "created": "2026-03-07T20:56:00Z",
+      "completed": "2026-03-07T21:23:00Z"
+    },
+    "T-006": {
+      "title": "Implement Claude Code CLI request bridge",
+      "status": "done",
+      "priority": "medium",
+      "depends_on": [
+        "T-003"
+      ],
+      "created": "2026-03-07T20:56:00Z",
+      "completed": "2026-03-07T21:23:00Z"
+    },
+    "T-007": {
+      "title": "Create GitHub repo and push initial code",
+      "status": "done",
+      "priority": "high",
+      "depends_on": [
+        "T-004"
+      ],
+      "created": "2026-03-07T21:20:00Z",
+      "completed": "2026-03-07T21:24:00Z"
+    },
+    "T-008": {
+      "title": "Validate proxy endpoints + vllm model calls end-to-end",
+      "status": "done",
+      "priority": "high",
+      "depends_on": [
+        "T-005",
+        "T-006"
+      ],
+      "created": "2026-03-07T21:29:00Z",
+      "completed": "2026-03-08T08:08:44.175Z"
+    },
+    "T-009": {
+      "title": "Publish to npm + ClawHub",
+      "status": "ready",
+      "priority": "medium",
+      "depends_on": [
+        "T-008"
+      ],
+      "created": "2026-03-07T21:29:00Z"
+    }
   }
 }

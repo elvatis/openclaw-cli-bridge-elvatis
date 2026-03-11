@@ -1,14 +1,15 @@
 # STATUS.md — openclaw-cli-bridge-elvatis
 
-_Last updated: 2026-03-08 by Akido (claude-sonnet-4-6)_
+_Last updated: 2026-03-11 by Akido (claude-sonnet-4-6)_
 
-## Current Version: 0.2.19 — STABLE
+## Current Version: 0.2.21 — STABLE
 
 ## What is done
 
 - ✅ Repo: `https://github.com/elvatis/openclaw-cli-bridge-elvatis`
-- ✅ npm: `@@@@elvatis_com/openclaw-cli-bridge-elvatis@0.2.19`
-- ✅ ClawHub: `openclaw-cli-bridge-elvatis@0.2.19`
+- ✅ npm: `@elvatis_com/openclaw-cli-bridge-elvatis@0.2.21`
+- ✅ ClawHub: `openclaw-cli-bridge-elvatis@0.2.21`
+- ✅ **v0.2.21 fix:** `buildMinimalEnv()` forwards `XDG_RUNTIME_DIR` + `DBUS_SESSION_BUS_ADDRESS` — fixes Claude Code OAuth (Gnome Keyring) 401 timeout
 - ✅ Phase 1: `openai-codex` provider via `~/.codex/auth.json` (no re-login)
 - ✅ Phase 2: Local OpenAI-compatible proxy on `127.0.0.1:31337` (Gemini + Claude CLI)
 - ✅ Phase 3: 10 slash commands (`/cli-sonnet`, `/cli-opus`, `/cli-haiku`, `/cli-gemini`, `/cli-gemini-flash`, `/cli-gemini3`, `/cli-codex`, `/cli-codex-mini`, `/cli-back`, `/cli-test`)

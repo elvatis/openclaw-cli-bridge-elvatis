@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.20`
+**Current version:** `0.2.21`
 
 ---
 
@@ -263,6 +263,12 @@ Slash commands (requireAuth=false, gateway commands.allowFrom is the auth layer)
 **Cause:** Gateway injects large values into `process.env` at runtime. Spreading it into `spawn()` exceeds Linux's `ARG_MAX` (~2MB).
 **Fix:** `buildMinimalEnv()` — only passes `HOME`, `PATH`, `USER`, and auth keys.
 
+### Claude Code 401 / timeout on OAuth login (fixed in v0.2.21)
+**Symptom:** `/cli-test cli-claude/*` times out after 30s; logs show `401 Invalid authentication credentials`.
+**Cause:** `buildMinimalEnv()` did not forward `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` to the spawned `claude` subprocess. Claude Code authenticated via `claude.ai` OAuth (Claude Max plan) stores its tokens in the system keyring (Gnome Keyring / libsecret) and needs these env vars to access it.
+**Affects:** Only systems using `claude auth` OAuth login (Claude Max / Teams). API-key users (`ANTHROPIC_API_KEY`) are not affected.
+**Fix:** Added `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` to the forwarded env keys in `buildMinimalEnv()`.
+
 ### Gemini agentic mode / hangs (fixed in v0.2.4)
 **Symptom:** Gemini hangs, returns wrong answers, or says "directory does not exist".
 **Cause:** `@file` syntax (`gemini -p @/tmp/xxx.txt`) triggers agentic mode — Gemini scans the working directory for project context and treats prompts as task instructions.
@@ -280,6 +286,9 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v0.2.21
+- **fix:** `buildMinimalEnv()` now forwards `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` to Claude Code subprocesses — required for Gnome Keyring / libsecret access when Claude Code is authenticated via `claude.ai` OAuth (Claude Max). Without these, the spawned `claude` process cannot read its OAuth token from the system keyring, resulting in `401 Invalid authentication credentials` and a 30-second timeout on `/cli-test` and all `/cli-claude/*` requests.
 
 ### v0.2.20
 - **fix:** `formatPrompt` now defensively coerces `content` to string via `contentToString()` — prevents `[object Object]` reaching the CLI when WhatsApp group messages contain structured content objects instead of plain strings

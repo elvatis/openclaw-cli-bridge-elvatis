@@ -125,6 +125,9 @@ function buildMinimalEnv(): Record<string, string> {
     "XDG_CONFIG_HOME",
     "XDG_DATA_HOME",
     "XDG_CACHE_HOME",
+    // Required for Claude Code OAuth (Gnome Keyring / libsecret access)
+    "XDG_RUNTIME_DIR",
+    "DBUS_SESSION_BUS_ADDRESS",
   ]) {
     const v = pick(key);
     if (v) env[key] = v;
