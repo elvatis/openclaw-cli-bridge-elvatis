@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.30`
+**Current version:** `1.0.0`
 
 ---
 
@@ -286,6 +286,19 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+## v1.0.0 — Full Headless Browser Bridge 🚀
+
+All four major LLM providers are now available via browser automation.
+No CLI binaries required — just authenticated browser sessions.
+
+### v1.0.0
+- **feat:** `chatgpt-browser.ts` — chatgpt.com DOM-automation (`#prompt-textarea` + `[data-message-author-role]`)
+- **feat:** `web-chatgpt/*` models: gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5
+- **feat:** `/chatgpt-login`, `/chatgpt-status`, `/chatgpt-logout` + cookie-expiry tracking
+- **feat:** All 4 providers headless: Grok ✅ Claude ✅ Gemini ✅ ChatGPT ✅
+- **test:** 96/96 tests green (8 test files)
+- **fix:** Singleton CDP connection, cleanupBrowsers() on plugin stop
 
 ### v0.2.30
 - **feat:** `gemini-browser.ts` — gemini.google.com DOM-automation (Quill editor + message-content polling)
