@@ -121,6 +121,32 @@ async function scanGeminiCookieExpiry(ctx: BrowserContext): Promise<GeminiExpiry
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── ChatGPT web-session state ─────────────────────────────────────────────────
+let chatgptContext: BrowserContext | null = null;
+const CHATGPT_EXPIRY_FILE = join(homedir(), ".openclaw", "chatgpt-cookie-expiry.json");
+interface ChatGPTExpiryInfo { expiresAt: number; loginAt: number; cookieName: string; }
+function saveChatGPTExpiry(i: ChatGPTExpiryInfo) { try { writeFileSync(CHATGPT_EXPIRY_FILE, JSON.stringify(i, null, 2)); } catch { /* ignore */ } }
+function loadChatGPTExpiry(): ChatGPTExpiryInfo | null { try { return JSON.parse(readFileSync(CHATGPT_EXPIRY_FILE, "utf-8")); } catch { return null; } }
+function formatChatGPTExpiry(i: ChatGPTExpiryInfo): string {
+  const d = Math.floor((i.expiresAt - Date.now()) / 86_400_000);
+  const dt = new Date(i.expiresAt).toISOString().substring(0, 10);
+  if (d < 0) return `⚠️ EXPIRED (${dt}) — run /chatgpt-login`;
+  if (d <= 7) return `🚨 expires in ${d}d (${dt}) — run /chatgpt-login NOW`;
+  if (d <= 14) return `⚠️ expires in ${d}d (${dt}) — run /chatgpt-login soon`;
+  return `✅ valid for ${d} more days (expires ${dt})`;
+}
+async function scanChatGPTCookieExpiry(ctx: BrowserContext): Promise<ChatGPTExpiryInfo | null> {
+  try {
+    const cookies = await ctx.cookies(["https://chatgpt.com", "https://openai.com"]);
+    const auth = cookies.filter(c => ["__Secure-next-auth.session-token", "cf_clearance", "__cf_bm"].includes(c.name) && c.expires && c.expires > 0);
+    if (!auth.length) return null;
+    auth.sort((a, b) => (a.expires ?? 0) - (b.expires ?? 0));
+    const earliest = auth[0];
+    return { expiresAt: (earliest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: earliest.name };
+  } catch { return null; }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ── Claude web-session state ──────────────────────────────────────────────────
 let claudeContext: BrowserContext | null = null;
 const CLAUDE_EXPIRY_FILE = join(homedir(), ".openclaw", "claude-cookie-expiry.json");
@@ -293,6 +319,7 @@ async function cleanupBrowsers(log: (msg: string) => void): Promise<void> {
   }
   claudeContext = null;
   geminiContext = null;
+  chatgptContext = null;
   log("[cli-bridge] browser resources cleaned up");
 }
 
@@ -651,7 +678,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.30",
+  version: "1.0.0",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -796,6 +823,17 @@ const plugin = {
               }
               return null;
             },
+            getChatGPTContext: () => chatgptContext,
+            connectChatGPTContext: async () => {
+              const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+              if (ctx) {
+                const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+                const { page } = await getOrCreateChatGPTPage(ctx);
+                const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
+                if (editor) { chatgptContext = ctx; return ctx; }
+              }
+              return null;
+            },
           });
           proxyServer = server;
           api.logger.info(
@@ -847,6 +885,17 @@ const plugin = {
                     const { page } = await getOrCreateGeminiPage(ctx);
                     const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
                     if (editor) { geminiContext = ctx; return ctx; }
+                  }
+                  return null;
+                },
+                getChatGPTContext: () => chatgptContext,
+                connectChatGPTContext: async () => {
+                  const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+                  if (ctx) {
+                    const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+                    const { page } = await getOrCreateChatGPTPage(ctx);
+                    const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
+                    if (editor) { chatgptContext = ctx; return ctx; }
                   }
                   return null;
                 },
@@ -1346,6 +1395,68 @@ const plugin = {
         return { text: "✅ Disconnected from gemini.google.com. Run `/gemini-login` to reconnect." };
       },
     } satisfies OpenClawPluginCommandDefinition);
+
+    // ── ChatGPT web-session commands ──────────────────────────────────────────
+    api.registerCommand({
+      name: "chatgpt-login",
+      description: "Authenticate chatgpt.com: imports session from OpenClaw browser",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (chatgptContext) {
+          const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+          try {
+            const { page } = await getOrCreateChatGPTPage(chatgptContext);
+            if (await page.locator("#prompt-textarea").isVisible().catch(() => false))
+              return { text: "✅ Already connected to chatgpt.com. Use `/chatgpt-logout` first to reset." };
+          } catch { /* fall through */ }
+          chatgptContext = null;
+        }
+        api.logger.info("[cli-bridge:chatgpt] /chatgpt-login: connecting to OpenClaw browser…");
+        const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+        if (!ctx) return { text: "❌ Could not connect to OpenClaw browser.\nMake sure chatgpt.com is open in your browser." };
+
+        const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+        let page;
+        try { ({ page } = await getOrCreateChatGPTPage(ctx)); }
+        catch (err) { return { text: `❌ Failed to open chatgpt.com: ${(err as Error).message}` }; }
+
+        if (!await page.locator("#prompt-textarea").isVisible().catch(() => false))
+          return { text: "❌ ChatGPT editor not visible — are you logged in?\nOpen chatgpt.com in your browser and try again." };
+
+        chatgptContext = ctx;
+        const expiry = await scanChatGPTCookieExpiry(ctx);
+        if (expiry) { saveChatGPTExpiry(expiry); api.logger.info(`[cli-bridge:chatgpt] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`); }
+        const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatChatGPTExpiry(expiry)}` : "";
+        return { text: `✅ ChatGPT session ready!\n\nModels available:\n• \`vllm/web-chatgpt/gpt-4o\`\n• \`vllm/web-chatgpt/gpt-4o-mini\`\n• \`vllm/web-chatgpt/gpt-o3\`\n• \`vllm/web-chatgpt/gpt-o4-mini\`\n• \`vllm/web-chatgpt/gpt-5\`${expiryLine}` };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "chatgpt-status",
+      description: "Check chatgpt.com session status",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (!chatgptContext) return { text: "❌ No active chatgpt.com session\nRun `/chatgpt-login` to authenticate." };
+        const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+        try {
+          const { page } = await getOrCreateChatGPTPage(chatgptContext);
+          if (await page.locator("#prompt-textarea").isVisible().catch(() => false)) {
+            const expiry = loadChatGPTExpiry();
+            const expiryLine = expiry ? `\n🕐 ${formatChatGPTExpiry(expiry)}` : "";
+            return { text: `✅ chatgpt.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-chatgpt/gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5${expiryLine}` };
+          }
+        } catch { /* fall through */ }
+        chatgptContext = null;
+        return { text: "❌ Session lost — run `/chatgpt-login` to re-authenticate." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "chatgpt-logout",
+      description: "Disconnect from chatgpt.com session",
+      handler: async (): Promise<PluginCommandResult> => {
+        chatgptContext = null;
+        return { text: "✅ Disconnected from chatgpt.com. Run `/chatgpt-login` to reconnect." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
     // ─────────────────────────────────────────────────────────────────────────
 
     const allCommands = [
@@ -1362,6 +1473,9 @@ const plugin = {
       "/gemini-login",
       "/gemini-status",
       "/gemini-logout",
+      "/chatgpt-login",
+      "/chatgpt-status",
+      "/chatgpt-logout",
     ];
     api.logger.info(`[cli-bridge] registered ${allCommands.length} commands: ${allCommands.join(", ")}`);
   },

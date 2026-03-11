@@ -15,6 +15,7 @@ import { scheduleTokenRefresh, setAuthLogger, stopTokenRefresh } from "./claude-
 import { grokComplete, grokCompleteStream, type ChatMessage as GrokChatMessage } from "./grok-client.js";
 import { claudeComplete, claudeCompleteStream, type ChatMessage as ClaudeBrowserChatMessage } from "./claude-browser.js";
 import { geminiComplete, geminiCompleteStream, type ChatMessage as GeminiBrowserChatMessage } from "./gemini-browser.js";
+import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrowserChatMessage } from "./chatgpt-browser.js";
 import type { BrowserContext } from "playwright";
 
 export type GrokCompleteOptions = Parameters<typeof grokComplete>[1];
@@ -51,6 +52,14 @@ export interface ProxyServerOptions {
   _geminiComplete?: typeof geminiComplete;
   /** Override for testing — replaces geminiCompleteStream */
   _geminiCompleteStream?: typeof geminiCompleteStream;
+  /** Returns the current authenticated ChatGPT BrowserContext */
+  getChatGPTContext?: () => BrowserContext | null;
+  /** Async lazy connect for ChatGPT */
+  connectChatGPTContext?: () => Promise<BrowserContext | null>;
+  /** Override for testing */
+  _chatgptComplete?: typeof chatgptComplete;
+  /** Override for testing */
+  _chatgptCompleteStream?: typeof chatgptCompleteStream;
 }
 
 /** Available CLI bridge models for GET /v1/models */
@@ -105,6 +114,12 @@ export const CLI_MODELS = [
   { id: "web-gemini/gemini-2-5-flash", name: "Gemini 2.5 Flash (web session)", contextWindow: 1_000_000, maxTokens: 8192 },
   { id: "web-gemini/gemini-3-pro",     name: "Gemini 3 Pro (web session)",     contextWindow: 1_000_000, maxTokens: 8192 },
   { id: "web-gemini/gemini-3-flash",   name: "Gemini 3 Flash (web session)",   contextWindow: 1_000_000, maxTokens: 8192 },
+  // ChatGPT web-session models (requires /chatgpt-login)
+  { id: "web-chatgpt/gpt-4o",       name: "GPT-4o (web session)",       contextWindow: 128_000, maxTokens: 16_384 },
+  { id: "web-chatgpt/gpt-4o-mini",  name: "GPT-4o Mini (web session)",  contextWindow: 128_000, maxTokens: 16_384 },
+  { id: "web-chatgpt/gpt-o3",       name: "o3 (web session)",           contextWindow: 200_000, maxTokens: 100_000 },
+  { id: "web-chatgpt/gpt-o4-mini",  name: "o4-mini (web session)",      contextWindow: 200_000, maxTokens: 100_000 },
+  { id: "web-chatgpt/gpt-5",        name: "GPT-5 (web session)",        contextWindow: 1_000_000, maxTokens: 32_768 },
 ];
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -369,6 +384,43 @@ async function handleRequest(
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: msg, type: "gemini_browser_error" } }));
         }
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── ChatGPT web-session routing ───────────────────────────────────────────
+    if (model.startsWith("web-chatgpt/")) {
+      let chatgptCtx = opts.getChatGPTContext?.() ?? null;
+      if (!chatgptCtx && opts.connectChatGPTContext) chatgptCtx = await opts.connectChatGPTContext();
+      if (!chatgptCtx) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "No active chatgpt.com session. Use /chatgpt-login to authenticate.", code: "no_chatgpt_session" } }));
+        return;
+      }
+      const timeoutMs = opts.timeoutMs ?? 120_000;
+      const msgs = messages as ChatGPTBrowserChatMessage[];
+      const doComplete = opts._chatgptComplete ?? chatgptComplete;
+      const doStream = opts._chatgptCompleteStream ?? chatgptCompleteStream;
+      try {
+        if (stream) {
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
+          sendSseChunk(res, { id, created, model, delta: { role: "assistant" }, finish_reason: null });
+          const result = await doStream(chatgptCtx, { messages: msgs, model, timeoutMs },
+            (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }), opts.log);
+          sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
+          res.write("data: [DONE]\n\n"); res.end();
+        } else {
+          const result = await doComplete(chatgptCtx, { messages: msgs, model, timeoutMs }, opts.log);
+          res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({ id, object: "chat.completion", created, model,
+            choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: result.finishReason }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
+        }
+      } catch (err) {
+        const msg = (err as Error).message;
+        opts.warn(`[cli-bridge] ChatGPT browser error for ${model}: ${msg}`);
+        if (!res.headersSent) { res.writeHead(500, { "Content-Type": "application/json" }); res.end(JSON.stringify({ error: { message: msg, type: "chatgpt_browser_error" } })); }
       }
       return;
     }
