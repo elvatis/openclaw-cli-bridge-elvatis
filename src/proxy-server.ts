@@ -11,6 +11,7 @@
 import http from "node:http";
 import { randomBytes } from "node:crypto";
 import { type ChatMessage, routeToCliRunner } from "./cli-runner.js";
+import { scheduleTokenRefresh, setAuthLogger } from "./claude-auth.js";
 
 export interface ProxyServerOptions {
   port: number;
@@ -81,6 +82,9 @@ export function startProxyServer(opts: ProxyServerOptions): Promise<http.Server>
       opts.log(
         `[cli-bridge] proxy server listening on http://127.0.0.1:${opts.port}`
       );
+      // Start proactive OAuth token refresh scheduler for Claude Code CLI.
+      setAuthLogger(opts.log);
+      void scheduleTokenRefresh();
       resolve(server);
     });
   });

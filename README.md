@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.22`
+**Current version:** `0.2.23`
 
 ---
 
@@ -286,6 +286,9 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v0.2.23
+- **feat:** Proactive OAuth token management (`src/claude-auth.ts`) — the proxy now reads `~/.claude/.credentials.json` at startup, schedules a refresh 30 minutes before expiry, and calls `ensureClaudeToken()` before every `claude` subprocess invocation. On 401 responses, automatically retries once after refreshing. Eliminates the need for manual re-login after token expiry in headless/systemd deployments.
 
 ### v0.2.22
 - **fix:** `runClaude()` now detects expired/invalid OAuth tokens immediately (401 in stderr) and throws a clear actionable error instead of waiting for the 30s proxy timeout. Error message includes the exact re-login command.
