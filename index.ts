@@ -89,6 +89,42 @@ let grokContext: BrowserContext | null = null;
 // Persistent profile dir — survives gateway restarts, keeps cookies intact
 const GROK_PROFILE_DIR = join(homedir(), ".openclaw", "grok-profile");
 
+// ── Claude web-session state ──────────────────────────────────────────────────
+let claudeContext: BrowserContext | null = null;
+const CLAUDE_EXPIRY_FILE = join(homedir(), ".openclaw", "claude-cookie-expiry.json");
+
+interface ClaudeExpiryInfo {
+  expiresAt: number;
+  loginAt: number;
+  cookieName: string;
+}
+
+function saveClaudeExpiry(info: ClaudeExpiryInfo): void {
+  try { writeFileSync(CLAUDE_EXPIRY_FILE, JSON.stringify(info, null, 2)); } catch { /* ignore */ }
+}
+function loadClaudeExpiry(): ClaudeExpiryInfo | null {
+  try { return JSON.parse(readFileSync(CLAUDE_EXPIRY_FILE, "utf-8")) as ClaudeExpiryInfo; } catch { return null; }
+}
+function formatClaudeExpiry(info: ClaudeExpiryInfo): string {
+  const daysLeft = Math.floor((info.expiresAt - Date.now()) / 86_400_000);
+  const dateStr = new Date(info.expiresAt).toISOString().substring(0, 10);
+  if (daysLeft < 0)  return `⚠️ EXPIRED (${dateStr}) — run /claude-login`;
+  if (daysLeft <= 7) return `🚨 expires in ${daysLeft}d (${dateStr}) — run /claude-login NOW`;
+  if (daysLeft <= 14) return `⚠️ expires in ${daysLeft}d (${dateStr}) — run /claude-login soon`;
+  return `✅ valid for ${daysLeft} more days (expires ${dateStr})`;
+}
+async function scanClaudeCookieExpiry(ctx: BrowserContext): Promise<ClaudeExpiryInfo | null> {
+  try {
+    const cookies = await ctx.cookies(["https://claude.ai", "https://anthropic.com"]);
+    const authCookies = cookies.filter(c => ["sessionKey", "intercom-session-igviqkfk"].includes(c.name) && c.expires && c.expires > 0);
+    if (!authCookies.length) return null;
+    authCookies.sort((a, b) => (a.expires ?? 0) - (b.expires ?? 0));
+    const earliest = authCookies[0];
+    return { expiresAt: (earliest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: earliest.name };
+  } catch { return null; }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Cookie expiry tracking file — written on /grok-login, read on startup
 const GROK_EXPIRY_FILE = join(homedir(), ".openclaw", "grok-cookie-expiry.json");
 
@@ -547,7 +583,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.28",
+  version: "0.2.29",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -670,6 +706,17 @@ const plugin = {
               }
               return null;
             },
+            getClaudeContext: () => claudeContext,
+            connectClaudeContext: async () => {
+              const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+              if (ctx) {
+                const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+                const { page } = await getOrCreateClaudePage(ctx);
+                const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+                if (editor) { claudeContext = ctx; return ctx; }
+              }
+              return null;
+            },
           });
           proxyServer = server;
           api.logger.info(
@@ -699,6 +746,17 @@ const plugin = {
                   if (ctx) {
                     const check = await verifySession(ctx, (msg) => api.logger.info(msg));
                     if (check.valid) { grokContext = ctx; return ctx; }
+                  }
+                  return null;
+                },
+                getClaudeContext: () => claudeContext,
+                connectClaudeContext: async () => {
+                  const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+                  if (ctx) {
+                    const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+                    const { page } = await getOrCreateClaudePage(ctx);
+                    const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+                    if (editor) { claudeContext = ctx; return ctx; }
                   }
                   return null;
                 },
@@ -1033,12 +1091,108 @@ const plugin = {
       name: "grok-logout",
       description: "Disconnect from grok.com session (does not close the browser)",
       handler: async (): Promise<PluginCommandResult> => {
-        // Don't close the context — it belongs to the OpenClaw browser, not us
         grokContext = null;
         deleteSession(grokSessionPath);
         return { text: "✅ Disconnected from grok.com. Run `/grok-login` to reconnect." };
       },
     } satisfies OpenClawPluginCommandDefinition);
+
+    // ── Claude web-session commands ───────────────────────────────────────────
+    api.registerCommand({
+      name: "claude-login",
+      description: "Authenticate claude.ai: imports session from OpenClaw browser",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (claudeContext) {
+          const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+          try {
+            const { page } = await getOrCreateClaudePage(claudeContext);
+            const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+            if (editor) return { text: "✅ Already connected to claude.ai. Use `/claude-logout` first to reset." };
+          } catch { /* fall through */ }
+          claudeContext = null;
+        }
+
+        api.logger.info("[cli-bridge:claude] /claude-login: connecting to OpenClaw browser…");
+        const { chromium } = await import("playwright");
+
+        // Import cookies from OpenClaw browser
+        let importedCookies: unknown[] = [];
+        try {
+          const ocBrowser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 3000 });
+          const ocCtx = ocBrowser.contexts()[0];
+          if (ocCtx) {
+            importedCookies = await ocCtx.cookies(["https://claude.ai", "https://anthropic.com"]);
+            api.logger.info(`[cli-bridge:claude] imported ${importedCookies.length} cookies`);
+          }
+          await ocBrowser.close().catch(() => {});
+        } catch {
+          api.logger.info("[cli-bridge:claude] OpenClaw browser not available");
+        }
+
+        // Connect to OpenClaw browser context for session
+        const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+        if (!ctx) return { text: "❌ Could not connect to OpenClaw browser.\nMake sure claude.ai is open in your browser." };
+
+        // Navigate to claude.ai/new if not already there
+        const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+        let page;
+        try {
+          ({ page } = await getOrCreateClaudePage(ctx));
+        } catch (err) {
+          return { text: `❌ Failed to open claude.ai: ${(err as Error).message}` };
+        }
+
+        // Verify editor is visible
+        const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+        if (!editor) {
+          return { text: "❌ claude.ai editor not visible — are you logged in?\nOpen claude.ai in your browser and try again." };
+        }
+
+        claudeContext = ctx;
+
+        // Scan cookie expiry
+        const expiry = await scanClaudeCookieExpiry(ctx);
+        if (expiry) {
+          saveClaudeExpiry(expiry);
+          api.logger.info(`[cli-bridge:claude] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
+        }
+        const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatClaudeExpiry(expiry)}` : "";
+
+        return { text: `✅ claude.ai session ready!\n\nModels available:\n• \`vllm/web-claude/claude-sonnet\`\n• \`vllm/web-claude/claude-opus\`\n• \`vllm/web-claude/claude-haiku\`${expiryLine}` };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "claude-status",
+      description: "Check claude.ai session status",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (!claudeContext) {
+          return { text: "❌ No active claude.ai session\nRun `/claude-login` to authenticate." };
+        }
+        const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+        try {
+          const { page } = await getOrCreateClaudePage(claudeContext);
+          const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+          if (editor) {
+            const expiry = loadClaudeExpiry();
+            const expiryLine = expiry ? `\n🕐 ${formatClaudeExpiry(expiry)}` : "";
+            return { text: `✅ claude.ai session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-claude/claude-sonnet, web-claude/claude-opus, web-claude/claude-haiku${expiryLine}` };
+          }
+        } catch { /* fall through */ }
+        claudeContext = null;
+        return { text: "❌ Session lost — run `/claude-login` to re-authenticate." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "claude-logout",
+      description: "Disconnect from claude.ai session",
+      handler: async (): Promise<PluginCommandResult> => {
+        claudeContext = null;
+        return { text: "✅ Disconnected from claude.ai. Run `/claude-login` to reconnect." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+    // ─────────────────────────────────────────────────────────────────────────
 
     const allCommands = [
       ...CLI_MODEL_COMMANDS.map((c) => `/${c.name}`),
@@ -1048,6 +1202,9 @@ const plugin = {
       "/grok-login",
       "/grok-status",
       "/grok-logout",
+      "/claude-login",
+      "/claude-status",
+      "/claude-logout",
     ];
     api.logger.info(`[cli-bridge] registered ${allCommands.length} commands: ${allCommands.join(", ")}`);
   },
