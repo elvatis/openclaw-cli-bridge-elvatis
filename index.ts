@@ -172,60 +172,95 @@ async function scanCookieExpiry(ctx: import("playwright").BrowserContext): Promi
   } catch { return null; }
 }
 
+// Singleton CDP connection — one browser object shared across grok + claude
+let _cdpBrowser: import("playwright").Browser | null = null;
+let _cdpBrowserLaunchPromise: Promise<import("playwright").BrowserContext | null> | null = null;
+
+/**
+ * Connect to the OpenClaw managed browser (CDP port 18800).
+ * Singleton: reuses the same connection. Falls back to persistent Chromium for Grok only.
+ * NEVER launches a new browser for Claude — Claude requires the OpenClaw browser.
+ */
+async function connectToOpenClawBrowser(
+  log: (msg: string) => void
+): Promise<BrowserContext | null> {
+  // Reuse existing CDP connection if still alive
+  if (_cdpBrowser) {
+    try {
+      _cdpBrowser.contexts(); // ping
+      return _cdpBrowser.contexts()[0] ?? null;
+    } catch {
+      _cdpBrowser = null;
+    }
+  }
+  const { chromium } = await import("playwright");
+  try {
+    const browser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 3000 });
+    _cdpBrowser = browser;
+    browser.on("disconnected", () => { _cdpBrowser = null; log("[cli-bridge] OpenClaw browser disconnected"); });
+    log("[cli-bridge] connected to OpenClaw browser via CDP");
+    return browser.contexts()[0] ?? null;
+  } catch {
+    log("[cli-bridge] OpenClaw browser not available (CDP 18800)");
+    return null;
+  }
+}
+
 /**
  * Launch (or reuse) a persistent headless Chromium context for grok.com.
- * Uses launchPersistentContext so cookies survive gateway restarts.
- * The profile lives at ~/.openclaw/grok-profile/
+ * ONLY used for Grok — Grok has a saved persistent profile with cookies.
+ * Claude does NOT use this — it requires the OpenClaw browser.
  */
 async function getOrLaunchGrokContext(
   log: (msg: string) => void
 ): Promise<BrowserContext | null> {
   // Already have a live context?
   if (grokContext) {
+    try { grokContext.pages(); return grokContext; } catch { grokContext = null; }
+  }
+
+  // Try OpenClaw browser first (singleton CDP)
+  const cdpCtx = await connectToOpenClawBrowser(log);
+  if (cdpCtx) return cdpCtx;
+
+  // Coalesce concurrent launch requests into one
+  if (_cdpBrowserLaunchPromise) return _cdpBrowserLaunchPromise;
+
+  _cdpBrowserLaunchPromise = (async () => {
+    const { chromium } = await import("playwright");
+    log("[cli-bridge:grok] launching persistent Chromium…");
     try {
-      // Quick check: can we still enumerate pages?
-      grokContext.pages();
-      return grokContext;
-    } catch {
-      grokContext = null;
-    }
-  }
-
-  const { chromium } = await import("playwright");
-
-  // 1. Try connecting to the OpenClaw managed browser first (user may have grok.com open)
-  try {
-    const browser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 2000 });
-    grokBrowser = browser;
-    const ctx = browser.contexts()[0];
-    if (ctx) {
-      log("[cli-bridge:grok] connected to OpenClaw browser");
+      const ctx = await chromium.launchPersistentContext(GROK_PROFILE_DIR, {
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      });
+      grokContext = ctx;
+      // Auto-cleanup on browser crash
+      ctx.on("close", () => { grokContext = null; log("[cli-bridge:grok] persistent context closed"); });
+      log("[cli-bridge:grok] persistent context ready");
       return ctx;
+    } catch (err) {
+      log(`[cli-bridge:grok] failed to launch browser: ${(err as Error).message}`);
+      return null;
+    } finally {
+      _cdpBrowserLaunchPromise = null;
     }
-  } catch {
-    // OpenClaw browser not available — fall through to persistent context
-  }
-
-  // 2. Launch our own persistent headless Chromium with saved profile
-  log("[cli-bridge:grok] launching persistent Chromium…");
-  try {
-    const ctx = await chromium.launchPersistentContext(GROK_PROFILE_DIR, {
-      headless: true,
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-    grokContext = ctx;
-    log("[cli-bridge:grok] persistent context ready");
-    return ctx;
-  } catch (err) {
-    log(`[cli-bridge:grok] failed to launch browser: ${(err as Error).message}`);
-    return null;
-  }
+  })();
+  return _cdpBrowserLaunchPromise;
 }
 
-async function connectToOpenClawBrowser(
-  log: (msg: string) => void
-): Promise<BrowserContext | null> {
-  return getOrLaunchGrokContext(log);
+/** Clean up all browser resources — call on plugin teardown */
+async function cleanupBrowsers(log: (msg: string) => void): Promise<void> {
+  if (grokContext) {
+    try { await grokContext.close(); } catch { /* ignore */ }
+    grokContext = null;
+  }
+  if (_cdpBrowser) {
+    try { await _cdpBrowser.close(); } catch { /* ignore */ }
+    _cdpBrowser = null;
+  }
+  claudeContext = null;
+  log("[cli-bridge] browser resources cleaned up");
 }
 
 async function tryRestoreGrokSession(
@@ -781,6 +816,9 @@ const plugin = {
       id: "cli-bridge-proxy",
       start: async () => { /* proxy already started above */ },
       stop: async () => {
+        // Clean up browser resources first
+        await cleanupBrowsers((msg) => api.logger.info(msg));
+
         if (proxyServer) {
           // closeAllConnections() forcefully terminates keep-alive connections
           // so that server.close() releases the port immediately rather than
@@ -1113,23 +1151,8 @@ const plugin = {
         }
 
         api.logger.info("[cli-bridge:claude] /claude-login: connecting to OpenClaw browser…");
-        const { chromium } = await import("playwright");
 
-        // Import cookies from OpenClaw browser
-        let importedCookies: unknown[] = [];
-        try {
-          const ocBrowser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 3000 });
-          const ocCtx = ocBrowser.contexts()[0];
-          if (ocCtx) {
-            importedCookies = await ocCtx.cookies(["https://claude.ai", "https://anthropic.com"]);
-            api.logger.info(`[cli-bridge:claude] imported ${importedCookies.length} cookies`);
-          }
-          await ocBrowser.close().catch(() => {});
-        } catch {
-          api.logger.info("[cli-bridge:claude] OpenClaw browser not available");
-        }
-
-        // Connect to OpenClaw browser context for session
+        // Connect to OpenClaw browser context for session (singleton CDP)
         const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
         if (!ctx) return { text: "❌ Could not connect to OpenClaw browser.\nMake sure claude.ai is open in your browser." };
 
