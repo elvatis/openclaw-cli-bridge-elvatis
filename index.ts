@@ -89,6 +89,38 @@ let grokContext: BrowserContext | null = null;
 // Persistent profile dir — survives gateway restarts, keeps cookies intact
 const GROK_PROFILE_DIR = join(homedir(), ".openclaw", "grok-profile");
 
+// ── Gemini web-session state ──────────────────────────────────────────────────
+let geminiContext: BrowserContext | null = null;
+const GEMINI_EXPIRY_FILE = join(homedir(), ".openclaw", "gemini-cookie-expiry.json");
+
+interface GeminiExpiryInfo { expiresAt: number; loginAt: number; cookieName: string; }
+
+function saveGeminiExpiry(info: GeminiExpiryInfo): void {
+  try { writeFileSync(GEMINI_EXPIRY_FILE, JSON.stringify(info, null, 2)); } catch { /* ignore */ }
+}
+function loadGeminiExpiry(): GeminiExpiryInfo | null {
+  try { return JSON.parse(readFileSync(GEMINI_EXPIRY_FILE, "utf-8")) as GeminiExpiryInfo; } catch { return null; }
+}
+function formatGeminiExpiry(info: GeminiExpiryInfo): string {
+  const daysLeft = Math.floor((info.expiresAt - Date.now()) / 86_400_000);
+  const dateStr = new Date(info.expiresAt).toISOString().substring(0, 10);
+  if (daysLeft < 0)   return `⚠️ EXPIRED (${dateStr}) — run /gemini-login`;
+  if (daysLeft <= 7)  return `🚨 expires in ${daysLeft}d (${dateStr}) — run /gemini-login NOW`;
+  if (daysLeft <= 14) return `⚠️ expires in ${daysLeft}d (${dateStr}) — run /gemini-login soon`;
+  return `✅ valid for ${daysLeft} more days (expires ${dateStr})`;
+}
+async function scanGeminiCookieExpiry(ctx: BrowserContext): Promise<GeminiExpiryInfo | null> {
+  try {
+    const cookies = await ctx.cookies(["https://gemini.google.com", "https://accounts.google.com"]);
+    const auth = cookies.filter(c => ["__Secure-1PSID", "__Secure-3PSID", "SID"].includes(c.name) && c.expires && c.expires > 0);
+    if (!auth.length) return null;
+    auth.sort((a, b) => (a.expires ?? 0) - (b.expires ?? 0));
+    const earliest = auth[0];
+    return { expiresAt: (earliest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: earliest.name };
+  } catch { return null; }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 // ── Claude web-session state ──────────────────────────────────────────────────
 let claudeContext: BrowserContext | null = null;
 const CLAUDE_EXPIRY_FILE = join(homedir(), ".openclaw", "claude-cookie-expiry.json");
@@ -260,6 +292,7 @@ async function cleanupBrowsers(log: (msg: string) => void): Promise<void> {
     _cdpBrowser = null;
   }
   claudeContext = null;
+  geminiContext = null;
   log("[cli-bridge] browser resources cleaned up");
 }
 
@@ -618,7 +651,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.29",
+  version: "0.2.30",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -752,6 +785,17 @@ const plugin = {
               }
               return null;
             },
+            getGeminiContext: () => geminiContext,
+            connectGeminiContext: async () => {
+              const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+              if (ctx) {
+                const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
+                const { page } = await getOrCreateGeminiPage(ctx);
+                const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
+                if (editor) { geminiContext = ctx; return ctx; }
+              }
+              return null;
+            },
           });
           proxyServer = server;
           api.logger.info(
@@ -792,6 +836,17 @@ const plugin = {
                     const { page } = await getOrCreateClaudePage(ctx);
                     const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
                     if (editor) { claudeContext = ctx; return ctx; }
+                  }
+                  return null;
+                },
+                getGeminiContext: () => geminiContext,
+                connectGeminiContext: async () => {
+                  const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+                  if (ctx) {
+                    const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
+                    const { page } = await getOrCreateGeminiPage(ctx);
+                    const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
+                    if (editor) { geminiContext = ctx; return ctx; }
                   }
                   return null;
                 },
@@ -1215,6 +1270,82 @@ const plugin = {
         return { text: "✅ Disconnected from claude.ai. Run `/claude-login` to reconnect." };
       },
     } satisfies OpenClawPluginCommandDefinition);
+
+    // ── Gemini web-session commands ───────────────────────────────────────────
+    api.registerCommand({
+      name: "gemini-login",
+      description: "Authenticate gemini.google.com: imports session from OpenClaw browser",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (geminiContext) {
+          const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
+          try {
+            const { page } = await getOrCreateGeminiPage(geminiContext);
+            const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
+            if (editor) return { text: "✅ Already connected to gemini.google.com. Use `/gemini-logout` first to reset." };
+          } catch { /* fall through */ }
+          geminiContext = null;
+        }
+
+        api.logger.info("[cli-bridge:gemini] /gemini-login: connecting to OpenClaw browser…");
+        const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+        if (!ctx) return { text: "❌ Could not connect to OpenClaw browser.\nMake sure gemini.google.com is open in your browser." };
+
+        const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
+        let page;
+        try {
+          ({ page } = await getOrCreateGeminiPage(ctx));
+        } catch (err) {
+          return { text: `❌ Failed to open gemini.google.com: ${(err as Error).message}` };
+        }
+
+        const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
+        if (!editor) {
+          return { text: "❌ Gemini editor not visible — are you logged in?\nOpen gemini.google.com in your browser and try again." };
+        }
+
+        geminiContext = ctx;
+
+        const expiry = await scanGeminiCookieExpiry(ctx);
+        if (expiry) {
+          saveGeminiExpiry(expiry);
+          api.logger.info(`[cli-bridge:gemini] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
+        }
+        const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatGeminiExpiry(expiry)}` : "";
+
+        return { text: `✅ Gemini session ready!\n\nModels available:\n• \`vllm/web-gemini/gemini-2-5-pro\`\n• \`vllm/web-gemini/gemini-2-5-flash\`\n• \`vllm/web-gemini/gemini-3-pro\`\n• \`vllm/web-gemini/gemini-3-flash\`${expiryLine}` };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "gemini-status",
+      description: "Check gemini.google.com session status",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (!geminiContext) {
+          return { text: "❌ No active gemini.google.com session\nRun `/gemini-login` to authenticate." };
+        }
+        const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
+        try {
+          const { page } = await getOrCreateGeminiPage(geminiContext);
+          const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
+          if (editor) {
+            const expiry = loadGeminiExpiry();
+            const expiryLine = expiry ? `\n🕐 ${formatGeminiExpiry(expiry)}` : "";
+            return { text: `✅ gemini.google.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-gemini/gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash${expiryLine}` };
+          }
+        } catch { /* fall through */ }
+        geminiContext = null;
+        return { text: "❌ Session lost — run `/gemini-login` to re-authenticate." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "gemini-logout",
+      description: "Disconnect from gemini.google.com session",
+      handler: async (): Promise<PluginCommandResult> => {
+        geminiContext = null;
+        return { text: "✅ Disconnected from gemini.google.com. Run `/gemini-login` to reconnect." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
     // ─────────────────────────────────────────────────────────────────────────
 
     const allCommands = [
@@ -1228,6 +1359,9 @@ const plugin = {
       "/claude-login",
       "/claude-status",
       "/claude-logout",
+      "/gemini-login",
+      "/gemini-status",
+      "/gemini-logout",
     ];
     api.logger.info(`[cli-bridge] registered ${allCommands.length} commands: ${allCommands.join(", ")}`);
   },
