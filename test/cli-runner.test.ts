@@ -173,15 +173,26 @@ describe("routeToCliRunner — model normalization", () => {
   });
 
   it("accepts cli-claude/ without vllm prefix (calls runClaude path)", async () => {
-    await expect(
-      routeToCliRunner("cli-claude/claude-sonnet-4-6", [{ role: "user", content: "hi" }], 500)
-    ).rejects.not.toThrow("Unknown CLI bridge model");
+    // Claude CLI may resolve (empty) or reject — what matters is it doesn't throw "Unknown CLI bridge model"
+    let errorMsg = "";
+    try {
+      await routeToCliRunner("cli-claude/claude-sonnet-4-6", [{ role: "user", content: "hi" }], 500);
+    } catch (e: any) {
+      errorMsg = (e as Error).message ?? String(e);
+    }
+    expect(errorMsg).not.toContain("Unknown CLI bridge model");
+    expect(errorMsg).not.toContain("CLI bridge model not allowed");
   });
 
   it("accepts vllm/cli-claude/ — strips vllm prefix before routing", async () => {
-    await expect(
-      routeToCliRunner("vllm/cli-claude/claude-sonnet-4-6", [{ role: "user", content: "hi" }], 500)
-    ).rejects.not.toThrow("Unknown CLI bridge model");
+    let errorMsg = "";
+    try {
+      await routeToCliRunner("vllm/cli-claude/claude-sonnet-4-6", [{ role: "user", content: "hi" }], 500);
+    } catch (e: any) {
+      errorMsg = (e as Error).message ?? String(e);
+    }
+    expect(errorMsg).not.toContain("Unknown CLI bridge model");
+    expect(errorMsg).not.toContain("CLI bridge model not allowed");
   });
 
   // T-101: gemini routing paths
@@ -258,12 +269,17 @@ describe("routeToCliRunner — model allowlist (T-103)", () => {
   });
 
   it("allowedModels: null disables the check — only routing matters", async () => {
-    // With null allowlist, unknown-prefix models still throw "Unknown CLI bridge model"
-    await expect(
-      routeToCliRunner("vllm/cli-claude/any-model", [{ role: "user", content: "hi" }], 500, {
+    // With null allowlist, the allowlist check is skipped — routing still happens
+    // Claude CLI may resolve (empty) or reject for other reasons — should NOT throw "CLI bridge model not allowed"
+    let errorMsg = "";
+    try {
+      await routeToCliRunner("vllm/cli-claude/any-model", [{ role: "user", content: "hi" }], 500, {
         allowedModels: null,
-      })
-    ).rejects.not.toThrow("CLI bridge model not allowed");
+      });
+    } catch (e: any) {
+      errorMsg = (e as Error).message ?? String(e);
+    }
+    expect(errorMsg).not.toContain("CLI bridge model not allowed");
   });
 
   it("custom allowlist overrides defaults", async () => {
