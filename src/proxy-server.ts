@@ -11,7 +11,7 @@
 import http from "node:http";
 import { randomBytes } from "node:crypto";
 import { type ChatMessage, routeToCliRunner } from "./cli-runner.js";
-import { scheduleTokenRefresh, setAuthLogger } from "./claude-auth.js";
+import { scheduleTokenRefresh, setAuthLogger, stopTokenRefresh } from "./claude-auth.js";
 
 export interface ProxyServerOptions {
   port: number;
@@ -75,6 +75,11 @@ export function startProxyServer(opts: ProxyServerOptions): Promise<http.Server>
           res.end(JSON.stringify({ error: { message: err.message, type: "internal_error" } }));
         }
       });
+    });
+
+    // Stop the token refresh interval when the server closes (timer-leak prevention)
+    server.on("close", () => {
+      stopTokenRefresh();
     });
 
     server.on("error", (err) => reject(err));

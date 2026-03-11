@@ -47,7 +47,8 @@ const CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
 // State
 // ──────────────────────────────────────────────────────────────────────────────
 
-let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let refreshTimer: ReturnType<typeof setInterval> | null = null;
+let nextRefreshAt = 0; // epoch ms when the next refresh is due
 let refreshInProgress: Promise<void> | null = null;
 let log: (msg: string) => void = () => {};
 
@@ -58,6 +59,19 @@ let log: (msg: string) => void = () => {};
 /** Configure the logger (call once at startup). */
 export function setAuthLogger(logger: (msg: string) => void): void {
   log = logger;
+}
+
+/**
+ * Stop the background token refresh interval.
+ * Call in plugin deactivate / proxy server close to avoid timer leaks.
+ */
+export function stopTokenRefresh(): void {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+    nextRefreshAt = 0;
+    log("[cli-bridge:auth] Token refresh scheduler stopped");
+  }
 }
 
 /**
@@ -80,13 +94,14 @@ export async function readTokenExpiry(): Promise<number | null> {
 
 /**
  * Schedule a proactive token refresh 30 minutes before expiry.
- * Call once at proxy startup. Safe to call multiple times (clears old timer).
+ * Call once at proxy startup. Safe to call multiple times (restarts the interval).
+ *
+ * Uses a 10-minute polling interval instead of a single long setTimeout so that
+ * the scheduler survives system sleep/resume without missing its window.
  */
 export async function scheduleTokenRefresh(): Promise<void> {
-  if (refreshTimer) {
-    clearTimeout(refreshTimer);
-    refreshTimer = null;
-  }
+  // Clear any existing interval before (re-)starting
+  stopTokenRefresh();
 
   const expiresAt = await readTokenExpiry();
   if (expiresAt === null) {
@@ -96,7 +111,6 @@ export async function scheduleTokenRefresh(): Promise<void> {
 
   const now = Date.now();
   const msUntilExpiry = expiresAt - now;
-  const msUntilRefresh = msUntilExpiry - REFRESH_BEFORE_EXPIRY_MS;
 
   if (msUntilExpiry <= 0) {
     log("[cli-bridge:auth] Token already expired — refreshing now");
@@ -104,22 +118,33 @@ export async function scheduleTokenRefresh(): Promise<void> {
     return;
   }
 
-  if (msUntilRefresh <= 0) {
+  if (msUntilExpiry <= REFRESH_BEFORE_EXPIRY_MS) {
     // Expires within the next 30 min — refresh immediately
     log(`[cli-bridge:auth] Token expires in ${Math.round(msUntilExpiry / 60000)}min — refreshing now`);
     await refreshClaudeToken();
     return;
   }
 
-  const refreshInMin = Math.round(msUntilRefresh / 60000);
+  // Set the target time for the first scheduled refresh (30 min before expiry)
+  nextRefreshAt = expiresAt - REFRESH_BEFORE_EXPIRY_MS;
+  const refreshInMin = Math.round((nextRefreshAt - now) / 60000);
   log(`[cli-bridge:auth] Token valid for ${Math.round(msUntilExpiry / 60000)}min — refresh scheduled in ${refreshInMin}min`);
 
-  refreshTimer = setTimeout(async () => {
+  // Poll every 10 minutes instead of a single long setTimeout.
+  // This survives laptop sleep/resume without missing the refresh window.
+  const POLL_INTERVAL_MS = 10 * 60 * 1000;
+  refreshTimer = setInterval(async () => {
+    if (Date.now() < nextRefreshAt) return; // not yet due
     log("[cli-bridge:auth] Scheduled token refresh triggered");
     await refreshClaudeToken();
-    // Re-schedule for the next cycle after refresh
-    await scheduleTokenRefresh();
-  }, msUntilRefresh);
+    // Recompute next refresh target from the freshly written credentials
+    const newExpiry = await readTokenExpiry();
+    if (newExpiry) {
+      nextRefreshAt = newExpiry - REFRESH_BEFORE_EXPIRY_MS;
+      const nextInMin = Math.round((nextRefreshAt - Date.now()) / 60000);
+      log(`[cli-bridge:auth] Next refresh in ${nextInMin}min`);
+    }
+  }, POLL_INTERVAL_MS);
 
   // Don't block process exit
   if (refreshTimer.unref) refreshTimer.unref();
@@ -189,13 +214,12 @@ async function doRefresh(): Promise<void> {
     return;
   }
 
-  // Re-read expiry and reschedule timer
+  // Re-read expiry and update the next refresh target for the running interval
   const newExpiry = await readTokenExpiry();
   if (newExpiry) {
     const validForMin = Math.round((newExpiry - Date.now()) / 60000);
     log(`[cli-bridge:auth] Token refreshed — valid for ${validForMin}min`);
-    // Reschedule the proactive timer for the new expiry
-    void scheduleTokenRefresh();
+    nextRefreshAt = newExpiry - REFRESH_BEFORE_EXPIRY_MS;
   }
 }
 
