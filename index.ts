@@ -322,6 +322,101 @@ async function cleanupBrowsers(log: (msg: string) => void): Promise<void> {
   log("[cli-bridge] browser resources cleaned up");
 }
 
+/**
+ * Ensure all browser provider contexts are connected.
+ * 1. Try the shared OpenClaw browser (CDP 18800)
+ * 2. Fallback: launch a persistent headless Chromium per provider (saved profile with cookies)
+ */
+async function ensureAllProviderContexts(log: (msg: string) => void): Promise<void> {
+  const { chromium } = await import("playwright");
+
+  // Try CDP first (OpenClaw browser)
+  let sharedCtx: BrowserContext | null = null;
+  try {
+    const b = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 2000 });
+    sharedCtx = b.contexts()[0] ?? null;
+    if (sharedCtx) log("[cli-bridge] using OpenClaw browser for all providers");
+  } catch { /* not available */ }
+
+  // For each provider: if no context yet, try shared ctx or launch own persistent context
+  const providerConfigs = [
+    {
+      name: "claude",
+      profileDir: join(homedir(), ".openclaw", "claude-profile"),
+      getCtx: () => claudeContext,
+      setCtx: (c: BrowserContext) => { claudeContext = c; },
+      homeUrl: "https://claude.ai/new",
+      verifySelector: ".ProseMirror",
+    },
+    {
+      name: "gemini",
+      profileDir: join(homedir(), ".openclaw", "gemini-profile"),
+      getCtx: () => geminiContext,
+      setCtx: (c: BrowserContext) => { geminiContext = c; },
+      homeUrl: "https://gemini.google.com/app",
+      verifySelector: ".ql-editor",
+    },
+    {
+      name: "chatgpt",
+      profileDir: join(homedir(), ".openclaw", "chatgpt-profile"),
+      getCtx: () => chatgptContext,
+      setCtx: (c: BrowserContext) => { chatgptContext = c; },
+      homeUrl: "https://chatgpt.com",
+      verifySelector: "#prompt-textarea",
+    },
+  ];
+
+  for (const cfg of providerConfigs) {
+    if (cfg.getCtx()) continue; // already connected
+
+    let ctx: BrowserContext | null = null;
+
+    // 1. Try shared OpenClaw browser context
+    if (sharedCtx) {
+      try {
+        const pages = sharedCtx.pages();
+        const existing = pages.find(p => p.url().includes(new URL(cfg.homeUrl).hostname));
+        const page = existing ?? await sharedCtx.newPage();
+        if (!existing) {
+          await page.goto(cfg.homeUrl, { waitUntil: "domcontentloaded", timeout: 10_000 });
+          await new Promise(r => setTimeout(r, 2000));
+        }
+        const visible = await page.locator(cfg.verifySelector).isVisible().catch(() => false);
+        if (visible) {
+          ctx = sharedCtx;
+          log(`[cli-bridge:${cfg.name}] connected via OpenClaw browser ✅`);
+        }
+      } catch { /* fall through */ }
+    }
+
+    // 2. Launch own persistent context (has saved cookies)
+    if (!ctx) {
+      try {
+        mkdirSync(cfg.profileDir, { recursive: true });
+        const pCtx = await chromium.launchPersistentContext(cfg.profileDir, {
+          headless: true,
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        });
+        const page = await pCtx.newPage();
+        await page.goto(cfg.homeUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
+        await new Promise(r => setTimeout(r, 3000));
+        const visible = await page.locator(cfg.verifySelector).isVisible().catch(() => false);
+        if (visible) {
+          ctx = pCtx;
+          log(`[cli-bridge:${cfg.name}] launched persistent context ✅`);
+        } else {
+          await pCtx.close().catch(() => {});
+          log(`[cli-bridge:${cfg.name}] persistent context: editor not visible (not logged in?)`);
+        }
+      } catch (err) {
+        log(`[cli-bridge:${cfg.name}] could not launch browser: ${(err as Error).message}`);
+      }
+    }
+
+    if (ctx) cfg.setCtx(ctx);
+  }
+}
+
 async function tryRestoreGrokSession(
   _sessionPath: string,
   log: (msg: string) => void
@@ -613,7 +708,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.2.0",
+  version: "1.3.0",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -634,49 +729,8 @@ const plugin = {
 
     // ── Auto-connect all browser providers on startup (non-blocking) ──────────
     void (async () => {
-      // Wait for proxy to start first
-      await new Promise(r => setTimeout(r, 3000));
-      const log = (msg: string) => api.logger.info(msg);
-      const ctx = await connectToOpenClawBrowser(log);
-      if (!ctx) { log("[cli-bridge] startup auto-connect: OpenClaw browser not available"); return; }
-      const pages = ctx.pages().map(p => p.url());
-      log(`[cli-bridge] startup auto-connect: ${pages.length} pages open`);
-
-      // Claude
-      if (pages.some(u => u.includes("claude.ai")) && !claudeContext) {
-        try {
-          const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
-          const { page } = await getOrCreateClaudePage(ctx);
-          if (await page.locator(".ProseMirror").isVisible().catch(() => false)) {
-            claudeContext = ctx;
-            log("[cli-bridge:claude] auto-connected ✅");
-          }
-        } catch { /* not available */ }
-      }
-
-      // Gemini
-      if (pages.some(u => u.includes("gemini.google.com")) && !geminiContext) {
-        try {
-          const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
-          const { page } = await getOrCreateGeminiPage(ctx);
-          if (await page.locator(".ql-editor").isVisible().catch(() => false)) {
-            geminiContext = ctx;
-            log("[cli-bridge:gemini] auto-connected ✅");
-          }
-        } catch { /* not available */ }
-      }
-
-      // ChatGPT
-      if (pages.some(u => u.includes("chatgpt.com")) && !chatgptContext) {
-        try {
-          const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
-          const { page } = await getOrCreateChatGPTPage(ctx);
-          if (await page.locator("#prompt-textarea").isVisible().catch(() => false)) {
-            chatgptContext = ctx;
-            log("[cli-bridge:chatgpt] auto-connected ✅");
-          }
-        } catch { /* not available */ }
-      }
+      await new Promise(r => setTimeout(r, 3000)); // wait for proxy to start
+      await ensureAllProviderContexts((msg) => api.logger.info(msg));
     })();
 
     // ── Phase 1: openai-codex auth bridge ─────────────────────────────────────
@@ -792,7 +846,9 @@ const plugin = {
                 const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
                 if (editor) { claudeContext = ctx; return ctx; }
               }
-              return null;
+              // Fallback: try persistent context
+              await ensureAllProviderContexts((msg) => api.logger.info(msg));
+              return claudeContext;
             },
             getGeminiContext: () => geminiContext,
             connectGeminiContext: async () => {
@@ -803,7 +859,9 @@ const plugin = {
                 const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
                 if (editor) { geminiContext = ctx; return ctx; }
               }
-              return null;
+              // Fallback: try persistent context
+              await ensureAllProviderContexts((msg) => api.logger.info(msg));
+              return geminiContext;
             },
             getChatGPTContext: () => chatgptContext,
             connectChatGPTContext: async () => {
@@ -814,7 +872,9 @@ const plugin = {
                 const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
                 if (editor) { chatgptContext = ctx; return ctx; }
               }
-              return null;
+              // Fallback: try persistent context
+              await ensureAllProviderContexts((msg) => api.logger.info(msg));
+              return chatgptContext;
             },
           });
           proxyServer = server;
@@ -857,7 +917,9 @@ const plugin = {
                     const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
                     if (editor) { claudeContext = ctx; return ctx; }
                   }
-                  return null;
+                  // Fallback: try persistent context
+                  await ensureAllProviderContexts((msg) => api.logger.info(msg));
+                  return claudeContext;
                 },
                 getGeminiContext: () => geminiContext,
                 connectGeminiContext: async () => {
@@ -868,7 +930,9 @@ const plugin = {
                     const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
                     if (editor) { geminiContext = ctx; return ctx; }
                   }
-                  return null;
+                  // Fallback: try persistent context
+                  await ensureAllProviderContexts((msg) => api.logger.info(msg));
+                  return geminiContext;
                 },
                 getChatGPTContext: () => chatgptContext,
                 connectChatGPTContext: async () => {
@@ -879,7 +943,9 @@ const plugin = {
                     const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
                     if (editor) { chatgptContext = ctx; return ctx; }
                   }
-                  return null;
+                  // Fallback: try persistent context
+                  await ensureAllProviderContexts((msg) => api.logger.info(msg));
+                  return chatgptContext;
                 },
               });
               proxyServer = server;

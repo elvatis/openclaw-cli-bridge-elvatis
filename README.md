@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.2.0`
+**Current version:** `1.3.0`
 
 ---
 
@@ -286,6 +286,11 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v1.3.0
+- **fix:** Browser persistence after gateway restart — each provider launches its own persistent Chromium if OpenClaw browser is unavailable
+- **feat:** `ensureAllProviderContexts()` — unified startup connect for all 4 providers
+- **feat:** Lazy-connect fallback to persistent context when CDP unavailable
 
 ### v1.2.0
 - **fix:** Fresh page per request — no more message accumulation across calls
