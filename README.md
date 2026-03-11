@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.0.0`
+**Current version:** `1.1.0`
 
 ---
 
@@ -287,12 +287,26 @@ npm test            # vitest run (45 tests)
 
 ## Changelog
 
+### v1.1.0
+- **feat:** Auto-connect all providers on startup (no manual login after restart if browser is open)
+- **feat:** `/bridge-status` — all 4 providers at a glance with expiry info
+- **fix:** Removed obsolete CLI models: gpt-5.2-codex, gpt-5.3-codex-spark, gpt-5.1-codex-mini, gemini-3-flash-preview
+- **fix:** Removed duplicate cli-gemini3-flash (was same as gemini-3-flash-preview)
+- **chore:** Cleaned up CLI_MODEL_COMMANDS (8 models, down from 13)
+
 ## v1.0.0 — Full Headless Browser Bridge 🚀
 
 All four major LLM providers are now available via browser automation.
 No CLI binaries required — just authenticated browser sessions.
 
-### v1.0.0
+#### v1.1.0
+- **feat:** Auto-connect all providers on startup (no manual login after restart if browser is open)
+- **feat:** `/bridge-status` — all 4 providers at a glance with expiry info
+- **fix:** Removed obsolete CLI models: gpt-5.2-codex, gpt-5.3-codex-spark, gpt-5.1-codex-mini, gemini-3-flash-preview
+- **fix:** Removed duplicate cli-gemini3-flash (was same as gemini-3-flash-preview)
+- **chore:** Cleaned up CLI_MODEL_COMMANDS (8 models, down from 13)
+
+## v1.0.0
 - **feat:** `chatgpt-browser.ts` — chatgpt.com DOM-automation (`#prompt-textarea` + `[data-message-author-role]`)
 - **feat:** `web-chatgpt/*` models: gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5
 - **feat:** `/chatgpt-login`, `/chatgpt-status`, `/chatgpt-logout` + cookie-expiry tracking

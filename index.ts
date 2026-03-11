@@ -6,7 +6,7 @@
  *
  * Phase 2 (request bridge): starts a local OpenAI-compatible HTTP proxy server
  *   and configures OpenClaw's vllm provider to route through it. Model calls
- *   are handled by the Gemini CLI and Claude Code CLI subprocesses.
+ *   are routed to CLI tools or browser-session providers.
  *
  * Phase 3 (slash commands): registers /cli-* commands for instant model switching.
  *   /cli-sonnet       → vllm/cli-claude/claude-sonnet-4-6      (Claude Code CLI proxy)
@@ -15,9 +15,8 @@
  *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro         (Gemini CLI proxy)
  *   /cli-gemini-flash → vllm/cli-gemini/gemini-2.5-flash       (Gemini CLI proxy)
  *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro-preview   (Gemini CLI proxy)
- *   /cli-gemini3-flash→ vllm/cli-gemini/gemini-3-flash-preview (Gemini CLI proxy)
  *   /cli-codex        → openai-codex/gpt-5.3-codex             (Codex CLI OAuth, direct API)
- *   /cli-codex-mini   → openai-codex/gpt-5.1-codex-mini        (Codex CLI OAuth, direct API)
+ *   /cli-codex54      → openai-codex/gpt-5.4                   (Codex CLI OAuth, direct API)
  *   /cli-back         → restore model that was active before last /cli-* switch
  *   /cli-test [model] → one-shot proxy health check (does NOT switch global model)
  *   /cli-list         → list all registered CLI bridge models with commands
@@ -405,81 +404,17 @@ function readCurrentModel(): string | null {
 // Phase 3: model command table
 // ──────────────────────────────────────────────────────────────────────────────
 const CLI_MODEL_COMMANDS = [
-  // ── Claude (via local proxy → Claude Code CLI) ──────────────────────────────
-  {
-    name: "cli-sonnet",
-    model: "vllm/cli-claude/claude-sonnet-4-6",
-    description: "Switch to Claude Sonnet 4.6 (Claude Code CLI via local proxy)",
-    label: "Claude Sonnet 4.6 (CLI)",
-  },
-  {
-    name: "cli-opus",
-    model: "vllm/cli-claude/claude-opus-4-6",
-    description: "Switch to Claude Opus 4.6 (Claude Code CLI via local proxy)",
-    label: "Claude Opus 4.6 (CLI)",
-  },
-  {
-    name: "cli-haiku",
-    model: "vllm/cli-claude/claude-haiku-4-5",
-    description: "Switch to Claude Haiku 4.5 (Claude Code CLI via local proxy)",
-    label: "Claude Haiku 4.5 (CLI)",
-  },
-  // ── Gemini (via local proxy → Gemini CLI) ───────────────────────────────────
-  {
-    name: "cli-gemini",
-    model: "vllm/cli-gemini/gemini-2.5-pro",
-    description: "Switch to Gemini 2.5 Pro (Gemini CLI via local proxy)",
-    label: "Gemini 2.5 Pro (CLI)",
-  },
-  {
-    name: "cli-gemini-flash",
-    model: "vllm/cli-gemini/gemini-2.5-flash",
-    description: "Switch to Gemini 2.5 Flash (Gemini CLI via local proxy)",
-    label: "Gemini 2.5 Flash (CLI)",
-  },
-  {
-    name: "cli-gemini3",
-    model: "vllm/cli-gemini/gemini-3-pro-preview",
-    description: "Switch to Gemini 3 Pro Preview (Gemini CLI via local proxy)",
-    label: "Gemini 3 Pro Preview (CLI)",
-  },
-  {
-    name: "cli-gemini3-flash",
-    model: "vllm/cli-gemini/gemini-3-flash-preview",
-    description: "Switch to Gemini 3 Flash Preview (Gemini CLI via local proxy)",
-    label: "Gemini 3 Flash Preview (CLI)",
-  },
-  // ── Codex (via openai-codex provider — Codex CLI OAuth auth, direct API) ────
-  {
-    name: "cli-codex",
-    model: "openai-codex/gpt-5.3-codex",
-    description: "Switch to GPT-5.3 Codex (openai-codex provider, Codex CLI auth)",
-    label: "GPT-5.3 Codex",
-  },
-  {
-    name: "cli-codex-spark",
-    model: "openai-codex/gpt-5.3-codex-spark",
-    description: "Switch to GPT-5.3 Codex Spark (openai-codex provider, Codex CLI auth)",
-    label: "GPT-5.3 Codex Spark",
-  },
-  {
-    name: "cli-codex52",
-    model: "openai-codex/gpt-5.2-codex",
-    description: "Switch to GPT-5.2 Codex (openai-codex provider, Codex CLI auth)",
-    label: "GPT-5.2 Codex",
-  },
-  {
-    name: "cli-codex54",
-    model: "openai-codex/gpt-5.4",
-    description: "Switch to GPT-5.4 (openai-codex provider, Codex CLI auth — may require upgraded scope)",
-    label: "GPT-5.4 (Codex)",
-  },
-  {
-    name: "cli-codex-mini",
-    model: "openai-codex/gpt-5.1-codex-mini",
-    description: "Switch to GPT-5.1 Codex Mini (openai-codex provider, Codex CLI auth)",
-    label: "GPT-5.1 Codex Mini",
-  },
+  // ── Claude Code CLI (via local proxy) ────────────────────────────────────────
+  { name: "cli-sonnet",       model: "vllm/cli-claude/claude-sonnet-4-6",    description: "Claude Sonnet 4.6 (Claude Code CLI)",   label: "Claude Sonnet 4.6 (CLI)" },
+  { name: "cli-opus",         model: "vllm/cli-claude/claude-opus-4-6",      description: "Claude Opus 4.6 (Claude Code CLI)",     label: "Claude Opus 4.6 (CLI)" },
+  { name: "cli-haiku",        model: "vllm/cli-claude/claude-haiku-4-5",     description: "Claude Haiku 4.5 (Claude Code CLI)",    label: "Claude Haiku 4.5 (CLI)" },
+  // ── Gemini CLI (via local proxy) ─────────────────────────────────────────────
+  { name: "cli-gemini",       model: "vllm/cli-gemini/gemini-2.5-pro",       description: "Gemini 2.5 Pro (Gemini CLI)",           label: "Gemini 2.5 Pro (CLI)" },
+  { name: "cli-gemini-flash", model: "vllm/cli-gemini/gemini-2.5-flash",     description: "Gemini 2.5 Flash (Gemini CLI)",         label: "Gemini 2.5 Flash (CLI)" },
+  { name: "cli-gemini3",      model: "vllm/cli-gemini/gemini-3-pro-preview", description: "Gemini 3 Pro (Gemini CLI)",             label: "Gemini 3 Pro (CLI)" },
+  // ── Codex CLI (openai-codex provider, OAuth auth) ────────────────────────────
+  { name: "cli-codex",        model: "openai-codex/gpt-5.3-codex",          description: "GPT-5.3 Codex (Codex CLI auth)",        label: "GPT-5.3 Codex" },
+  { name: "cli-codex54",      model: "openai-codex/gpt-5.4",                description: "GPT-5.4 (Codex CLI auth)",              label: "GPT-5.4" },
 ] as const;
 
 /** Default model used by /cli-test when no arg is given */
@@ -678,7 +613,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.0.0",
+  version: "1.1.0",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -696,6 +631,53 @@ const plugin = {
 
     // ── Grok session restore (non-blocking) ───────────────────────────────────
     void tryRestoreGrokSession(grokSessionPath, (msg) => api.logger.info(msg));
+
+    // ── Auto-connect all browser providers on startup (non-blocking) ──────────
+    void (async () => {
+      // Wait for proxy to start first
+      await new Promise(r => setTimeout(r, 3000));
+      const log = (msg: string) => api.logger.info(msg);
+      const ctx = await connectToOpenClawBrowser(log);
+      if (!ctx) { log("[cli-bridge] startup auto-connect: OpenClaw browser not available"); return; }
+      const pages = ctx.pages().map(p => p.url());
+      log(`[cli-bridge] startup auto-connect: ${pages.length} pages open`);
+
+      // Claude
+      if (pages.some(u => u.includes("claude.ai")) && !claudeContext) {
+        try {
+          const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+          const { page } = await getOrCreateClaudePage(ctx);
+          if (await page.locator(".ProseMirror").isVisible().catch(() => false)) {
+            claudeContext = ctx;
+            log("[cli-bridge:claude] auto-connected ✅");
+          }
+        } catch { /* not available */ }
+      }
+
+      // Gemini
+      if (pages.some(u => u.includes("gemini.google.com")) && !geminiContext) {
+        try {
+          const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
+          const { page } = await getOrCreateGeminiPage(ctx);
+          if (await page.locator(".ql-editor").isVisible().catch(() => false)) {
+            geminiContext = ctx;
+            log("[cli-bridge:gemini] auto-connected ✅");
+          }
+        } catch { /* not available */ }
+      }
+
+      // ChatGPT
+      if (pages.some(u => u.includes("chatgpt.com")) && !chatgptContext) {
+        try {
+          const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+          const { page } = await getOrCreateChatGPTPage(ctx);
+          if (await page.locator("#prompt-textarea").isVisible().catch(() => false)) {
+            chatgptContext = ctx;
+            log("[cli-bridge:chatgpt] auto-connected ✅");
+          }
+        } catch { /* not available */ }
+      }
+    })();
 
     // ── Phase 1: openai-codex auth bridge ─────────────────────────────────────
     if (enableCodex) {
@@ -1457,6 +1439,93 @@ const plugin = {
         return { text: "✅ Disconnected from chatgpt.com. Run `/chatgpt-login` to reconnect." };
       },
     } satisfies OpenClawPluginCommandDefinition);
+
+    // ── /bridge-status — all providers at a glance ───────────────────────────
+    api.registerCommand({
+      name: "bridge-status",
+      description: "Show status of all headless browser providers (Grok, Claude, Gemini, ChatGPT)",
+      handler: async (): Promise<PluginCommandResult> => {
+        const lines: string[] = [`🌉 *CLI Bridge v${plugin.version} — Provider Status*\n`];
+
+        const checks = [
+          {
+            name: "Grok",
+            ctx: grokContext,
+            check: async () => {
+              if (!grokContext) return false;
+              const r = await verifySession(grokContext, () => {});
+              if (!r.valid) { grokContext = null; }
+              return r.valid;
+            },
+            models: "web-grok/grok-3, grok-3-fast, grok-3-mini",
+            loginCmd: "/grok-login",
+            expiry: () => { const e = loadGrokExpiry(); return e ? formatExpiryInfo(e) : null; },
+          },
+          {
+            name: "Claude",
+            ctx: claudeContext,
+            check: async () => {
+              if (!claudeContext) return false;
+              try {
+                const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+                const { page } = await getOrCreateClaudePage(claudeContext);
+                return page.locator(".ProseMirror").isVisible().catch(() => false);
+              } catch { claudeContext = null; return false; }
+            },
+            models: "web-claude/claude-sonnet, claude-opus, claude-haiku",
+            loginCmd: "/claude-login",
+            expiry: () => { const e = loadClaudeExpiry(); return e ? formatClaudeExpiry(e) : null; },
+          },
+          {
+            name: "Gemini",
+            ctx: geminiContext,
+            check: async () => {
+              if (!geminiContext) return false;
+              try {
+                const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
+                const { page } = await getOrCreateGeminiPage(geminiContext);
+                return page.locator(".ql-editor").isVisible().catch(() => false);
+              } catch { geminiContext = null; return false; }
+            },
+            models: "web-gemini/gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash",
+            loginCmd: "/gemini-login",
+            expiry: () => { const e = loadGeminiExpiry(); return e ? formatGeminiExpiry(e) : null; },
+          },
+          {
+            name: "ChatGPT",
+            ctx: chatgptContext,
+            check: async () => {
+              if (!chatgptContext) return false;
+              try {
+                const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+                const { page } = await getOrCreateChatGPTPage(chatgptContext);
+                return page.locator("#prompt-textarea").isVisible().catch(() => false);
+              } catch { chatgptContext = null; return false; }
+            },
+            models: "web-chatgpt/gpt-4o, gpt-o3, gpt-o4-mini, gpt-5",
+            loginCmd: "/chatgpt-login",
+            expiry: () => { const e = loadChatGPTExpiry(); return e ? formatChatGPTExpiry(e) : null; },
+          },
+        ];
+
+        for (const c of checks) {
+          const active = c.ctx !== null;
+          const ok = active ? await c.check() : false;
+          const expiry = c.expiry();
+          if (ok) {
+            lines.push(`✅ *${c.name}* — active`);
+            if (expiry) lines.push(`   🕐 ${expiry}`);
+            lines.push(`   Models: ${c.models}`);
+          } else {
+            lines.push(`❌ *${c.name}* — not connected (run \`${c.loginCmd}\`)`);
+          }
+          lines.push("");
+        }
+
+        lines.push(`🔌 Proxy: \`127.0.0.1:${port}\` | 22 models total`);
+        return { text: lines.join("\n") };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
     // ─────────────────────────────────────────────────────────────────────────
 
     const allCommands = [
@@ -1476,6 +1545,7 @@ const plugin = {
       "/chatgpt-login",
       "/chatgpt-status",
       "/chatgpt-logout",
+      "/bridge-status",
     ];
     api.logger.info(`[cli-bridge] registered ${allCommands.length} commands: ${allCommands.join(", ")}`);
   },
