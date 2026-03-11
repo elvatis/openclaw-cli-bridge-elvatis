@@ -27,6 +27,8 @@ export interface ProxyServerOptions {
   warn: (msg: string) => void;
   /** Returns the current authenticated Grok BrowserContext (null if not logged in) */
   getGrokContext?: () => BrowserContext | null;
+  /** Async lazy connect — called when getGrokContext returns null */
+  connectGrokContext?: () => Promise<BrowserContext | null>;
   /** Override for testing — replaces grokComplete */
   _grokComplete?: typeof grokComplete;
   /** Override for testing — replaces grokCompleteStream */
@@ -198,7 +200,11 @@ async function handleRequest(
 
     // ── Grok web-session routing ──────────────────────────────────────────────
     if (model.startsWith("web-grok/")) {
-      const grokCtx = opts.getGrokContext?.() ?? null;
+      let grokCtx = opts.getGrokContext?.() ?? null;
+      // Lazy connect: if context is null but a connector is provided, try now
+      if (!grokCtx && opts.connectGrokContext) {
+        grokCtx = await opts.connectGrokContext();
+      }
       if (!grokCtx) {
         res.writeHead(503, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: { message: "No active grok.com session. Use /grok-login to authenticate.", code: "no_grok_session" } }));

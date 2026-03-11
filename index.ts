@@ -86,27 +86,76 @@ interface CliPluginConfig {
 let grokBrowser: Browser | null = null;
 let grokContext: BrowserContext | null = null;
 
-async function launchGrokBrowser(): Promise<Browser> {
+// Persistent profile dir — survives gateway restarts, keeps cookies intact
+const GROK_PROFILE_DIR = join(homedir(), ".openclaw", "grok-profile");
+
+/**
+ * Launch (or reuse) a persistent headless Chromium context for grok.com.
+ * Uses launchPersistentContext so cookies survive gateway restarts.
+ * The profile lives at ~/.openclaw/grok-profile/
+ */
+async function getOrLaunchGrokContext(
+  log: (msg: string) => void
+): Promise<BrowserContext | null> {
+  // Already have a live context?
+  if (grokContext) {
+    try {
+      // Quick check: can we still enumerate pages?
+      grokContext.pages();
+      return grokContext;
+    } catch {
+      grokContext = null;
+    }
+  }
+
   const { chromium } = await import("playwright");
-  return chromium.launch({ headless: false });
+
+  // 1. Try connecting to the OpenClaw managed browser first (user may have grok.com open)
+  try {
+    const browser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 2000 });
+    grokBrowser = browser;
+    const ctx = browser.contexts()[0];
+    if (ctx) {
+      log("[cli-bridge:grok] connected to OpenClaw browser");
+      return ctx;
+    }
+  } catch {
+    // OpenClaw browser not available — fall through to persistent context
+  }
+
+  // 2. Launch our own persistent headless Chromium with saved profile
+  log("[cli-bridge:grok] launching persistent Chromium…");
+  try {
+    const ctx = await chromium.launchPersistentContext(GROK_PROFILE_DIR, {
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
+    grokContext = ctx;
+    log("[cli-bridge:grok] persistent context ready");
+    return ctx;
+  } catch (err) {
+    log(`[cli-bridge:grok] failed to launch browser: ${(err as Error).message}`);
+    return null;
+  }
+}
+
+async function connectToOpenClawBrowser(
+  log: (msg: string) => void
+): Promise<BrowserContext | null> {
+  return getOrLaunchGrokContext(log);
 }
 
 async function tryRestoreGrokSession(
-  sessionPath: string,
+  _sessionPath: string,
   log: (msg: string) => void
 ): Promise<boolean> {
-  const saved = loadSession(sessionPath);
-  if (!saved || isSessionExpiredByAge(saved)) {
-    log("[cli-bridge:grok] no valid saved session");
-    return false;
-  }
   try {
-    if (!grokBrowser) grokBrowser = await launchGrokBrowser();
-    const ctx = await createContextFromSession(grokBrowser, saved);
+    const ctx = await getOrLaunchGrokContext(log);
+    if (!ctx) return false;
+
     const check = await verifySession(ctx, log);
     if (!check.valid) {
-      log(`[cli-bridge:grok] saved session invalid: ${check.reason}`);
-      await ctx.close().catch(() => {});
+      log(`[cli-bridge:grok] session invalid: ${check.reason}`);
       return false;
     }
     grokContext = ctx;
@@ -443,7 +492,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "0.2.26",
+  version: "0.2.27",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -558,6 +607,14 @@ const plugin = {
             log: (msg) => api.logger.info(msg),
             warn: (msg) => api.logger.warn(msg),
             getGrokContext: () => grokContext,
+            connectGrokContext: async () => {
+              const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+              if (ctx) {
+                const check = await verifySession(ctx, (msg) => api.logger.info(msg));
+                if (check.valid) { grokContext = ctx; return ctx; }
+              }
+              return null;
+            },
           });
           proxyServer = server;
           api.logger.info(
@@ -582,6 +639,14 @@ const plugin = {
                 log: (msg) => api.logger.info(msg),
                 warn: (msg) => api.logger.warn(msg),
                 getGrokContext: () => grokContext,
+                connectGrokContext: async () => {
+                  const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+                  if (ctx) {
+                    const check = await verifySession(ctx, (msg) => api.logger.info(msg));
+                    if (check.valid) { grokContext = ctx; return ctx; }
+                  }
+                  return null;
+                },
               });
               proxyServer = server;
               api.logger.info(`[cli-bridge] proxy ready on :${port} (retry)`);
@@ -831,20 +896,54 @@ const plugin = {
 
     api.registerCommand({
       name: "grok-login",
-      description: "Open browser to log in to grok.com (X/Twitter account)",
+      description: "Authenticate grok.com: imports cookies from OpenClaw browser into persistent profile",
       handler: async (): Promise<PluginCommandResult> => {
         if (grokContext) {
-          return { text: "✅ Already logged in to grok.com. Use /grok-logout first to re-authenticate." };
+          const check = await verifySession(grokContext, (msg) => api.logger.info(msg));
+          if (check.valid) {
+            return { text: "✅ Already connected to grok.com. Use `/grok-logout` first to reset." };
+          }
+          grokContext = null;
         }
-        api.logger.info("[cli-bridge:grok] starting interactive login...");
+        api.logger.info("[cli-bridge:grok] /grok-login: importing session from OpenClaw browser…");
+        const { chromium } = await import("playwright");
+
+        // Step 1: try to grab cookies from the OpenClaw browser (user must have grok.com open)
+        let importedCookies: unknown[] = [];
         try {
-          if (!grokBrowser) grokBrowser = await launchGrokBrowser();
-          const session = await runInteractiveLogin(grokBrowser, grokSessionPath, (msg) => api.logger.info(msg));
-          grokContext = await createContextFromSession(grokBrowser, session);
-          return { text: "✅ Logged in to grok.com!\n\nGrok models available:\n• `vllm/web-grok/grok-3`\n• `vllm/web-grok/grok-3-fast`\n• `vllm/web-grok/grok-3-mini`\n\nUse `/cli-grok` to switch." };
-        } catch (err) {
-          return { text: `❌ Login failed: ${(err as Error).message}` };
+          const ocBrowser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 3000 });
+          const ocCtx = ocBrowser.contexts()[0];
+          if (ocCtx) {
+            importedCookies = await ocCtx.cookies(["https://grok.com", "https://x.ai", "https://accounts.x.ai"]);
+            api.logger.info(`[cli-bridge:grok] imported ${importedCookies.length} cookies from OpenClaw browser`);
+          }
+          await ocBrowser.close().catch(() => {});
+        } catch {
+          api.logger.info("[cli-bridge:grok] OpenClaw browser not available — using saved profile");
         }
+
+        // Step 2: launch/connect persistent context and inject cookies
+        const ctx = await getOrLaunchGrokContext((msg) => api.logger.info(msg));
+        if (!ctx) return { text: "❌ Could not launch browser. Check server logs." };
+
+        if (importedCookies.length > 0) {
+          await ctx.addCookies(importedCookies as Parameters<typeof ctx.addCookies>[0]);
+          api.logger.info(`[cli-bridge:grok] cookies injected into persistent profile`);
+        }
+
+        // Step 3: navigate to grok.com and verify
+        const pages = ctx.pages();
+        const page = pages.find(p => p.url().includes("grok.com")) ?? await ctx.newPage();
+        if (!page.url().includes("grok.com")) {
+          await page.goto("https://grok.com", { waitUntil: "domcontentloaded", timeout: 15_000 });
+        }
+
+        const check = await verifySession(ctx, (msg) => api.logger.info(msg));
+        if (!check.valid) {
+          return { text: `❌ Session not valid: ${check.reason}\n\nMake sure grok.com is open in your browser and you're logged in, then run /grok-login again.` };
+        }
+        grokContext = ctx;
+        return { text: `✅ Grok session ready!\n\nModels available:\n• \`vllm/web-grok/grok-3\`\n• \`vllm/web-grok/grok-3-fast\`\n• \`vllm/web-grok/grok-3-mini\`\n• \`vllm/web-grok/grok-3-mini-fast\`\n\nSession persists across gateway restarts (profile: ~/.openclaw/grok-profile/)` };
       },
     } satisfies OpenClawPluginCommandDefinition);
 
@@ -866,14 +965,12 @@ const plugin = {
 
     api.registerCommand({
       name: "grok-logout",
-      description: "Clear saved grok.com session",
+      description: "Disconnect from grok.com session (does not close the browser)",
       handler: async (): Promise<PluginCommandResult> => {
-        if (grokContext) {
-          await grokContext.close().catch(() => {});
-          grokContext = null;
-        }
+        // Don't close the context — it belongs to the OpenClaw browser, not us
+        grokContext = null;
         deleteSession(grokSessionPath);
-        return { text: "✅ Logged out from grok.com. Session file deleted." };
+        return { text: "✅ Disconnected from grok.com. Run `/grok-login` to reconnect." };
       },
     } satisfies OpenClawPluginCommandDefinition);
 
