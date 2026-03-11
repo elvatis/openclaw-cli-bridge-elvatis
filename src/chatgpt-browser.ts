@@ -35,6 +35,14 @@ const STABLE_CHECKS = 3;
 const STABLE_INTERVAL_MS = 500;
 const CHATGPT_HOME = "https://chatgpt.com";
 
+const MODEL_URLS: Record<string, string> = {
+  "gpt-4o":       "https://chatgpt.com/?model=gpt-4o",
+  "gpt-4o-mini":  "https://chatgpt.com/?model=gpt-4o-mini",
+  "o3":           "https://chatgpt.com/?model=o3",
+  "o4-mini":      "https://chatgpt.com/?model=o4-mini",
+  "gpt-5":        "https://chatgpt.com/?model=gpt-5",
+};
+
 const MODEL_MAP: Record<string, string> = {
   "gpt-4o":        "gpt-4o",
   "gpt-4o-mini":   "gpt-4o-mini",
@@ -173,18 +181,21 @@ export async function chatgptComplete(
   opts: ChatGPTBrowserOptions,
   log: (msg: string) => void
 ): Promise<ChatGPTBrowserResult> {
-  const { page, owned } = await getOrCreateChatGPTPage(context);
   const model = resolveModel(opts.model);
   const prompt = flattenMessages(opts.messages);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const navUrl = MODEL_URLS[model] ?? CHATGPT_HOME;
 
   log(`chatgpt-browser: complete model=${model}`);
 
+  const page = await context.newPage();
   try {
+    await page.goto(navUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await new Promise((r) => setTimeout(r, 2_000));
     const content = await sendAndWait(page, prompt, timeoutMs, log);
     return { content, model, finishReason: "stop" };
   } finally {
-    if (owned) await page.close().catch(() => {});
+    await page.close().catch(() => {});
   }
 }
 
@@ -194,60 +205,66 @@ export async function chatgptCompleteStream(
   onToken: (token: string) => void,
   log: (msg: string) => void
 ): Promise<ChatGPTBrowserResult> {
-  const { page, owned } = await getOrCreateChatGPTPage(context);
   const model = resolveModel(opts.model);
   const prompt = flattenMessages(opts.messages);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const navUrl = MODEL_URLS[model] ?? CHATGPT_HOME;
 
   log(`chatgpt-browser: stream model=${model}`);
 
-  const countBefore = await countAssistantMessages(page);
+  const page = await context.newPage();
+  try {
+    await page.goto(navUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await new Promise((r) => setTimeout(r, 2_000));
 
-  await page.evaluate((msg: string) => {
-    const ed = document.querySelector("#prompt-textarea") as HTMLElement | null;
-    if (!ed) throw new Error("ChatGPT editor not found");
-    ed.focus();
-    document.execCommand("insertText", false, msg);
-  }, prompt);
-  await new Promise((r) => setTimeout(r, 300));
-  const sendBtn = page.locator('button[data-testid="send-button"]').first();
-  if (await sendBtn.isVisible().catch(() => false)) await sendBtn.click();
-  else await page.keyboard.press("Enter");
+    const countBefore = await countAssistantMessages(page);
 
-  const deadline = Date.now() + timeoutMs;
-  let emittedLength = 0;
-  let lastText = "";
-  let stableCount = 0;
+    await page.evaluate((msg: string) => {
+      const ed = document.querySelector("#prompt-textarea") as HTMLElement | null;
+      if (!ed) throw new Error("ChatGPT editor not found");
+      ed.focus();
+      document.execCommand("insertText", false, msg);
+    }, prompt);
+    await new Promise((r) => setTimeout(r, 300));
+    const sendBtn = page.locator('button[data-testid="send-button"]').first();
+    if (await sendBtn.isVisible().catch(() => false)) await sendBtn.click();
+    else await page.keyboard.press("Enter");
 
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, STABLE_INTERVAL_MS));
+    const deadline = Date.now() + timeoutMs;
+    let emittedLength = 0;
+    let lastText = "";
+    let stableCount = 0;
 
-    const currentCount = await countAssistantMessages(page);
-    if (currentCount <= countBefore) continue;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, STABLE_INTERVAL_MS));
 
-    const text = await getLastAssistantText(page);
+      const currentCount = await countAssistantMessages(page);
+      if (currentCount <= countBefore) continue;
 
-    if (text.length > emittedLength) {
-      onToken(text.slice(emittedLength));
-      emittedLength = text.length;
-    }
+      const text = await getLastAssistantText(page);
 
-    const streaming = await isStreaming(page);
-    if (streaming) { stableCount = 0; continue; }
-
-    if (text && text === lastText) {
-      stableCount++;
-      if (stableCount >= STABLE_CHECKS) {
-        log(`chatgpt-browser: stream done (${text.length} chars)`);
-        if (owned) await page.close().catch(() => {});
-        return { content: text, model, finishReason: "stop" };
+      if (text.length > emittedLength) {
+        onToken(text.slice(emittedLength));
+        emittedLength = text.length;
       }
-    } else {
-      stableCount = 0;
-      lastText = text;
-    }
-  }
 
-  if (owned) await page.close().catch(() => {});
-  throw new Error(`chatgpt.com stream timeout after ${timeoutMs}ms`);
+      const streaming = await isStreaming(page);
+      if (streaming) { stableCount = 0; continue; }
+
+      if (text && text === lastText) {
+        stableCount++;
+        if (stableCount >= STABLE_CHECKS) {
+          log(`chatgpt-browser: stream done (${text.length} chars)`);
+          return { content: text, model, finishReason: "stop" };
+        }
+      } else {
+        stableCount = 0;
+        lastText = text;
+      }
+    }
+
+    throw new Error(`chatgpt.com stream timeout after ${timeoutMs}ms`);
+  } finally {
+    await page.close().catch(() => {});
+  }
 }

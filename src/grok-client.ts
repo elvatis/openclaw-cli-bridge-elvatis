@@ -160,18 +160,20 @@ export async function grokComplete(
   opts: GrokCompleteOptions,
   log: (msg: string) => void
 ): Promise<GrokCompleteResult> {
-  const { page, owned } = await getOrCreateGrokPage(context);
   const model = resolveModel(opts.model);
   const prompt = flattenMessages(opts.messages);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   log(`grok-client: complete model=${model}`);
 
+  const page = await context.newPage();
   try {
+    await page.goto("https://grok.com", { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await new Promise((r) => setTimeout(r, 2_000));
     const content = await sendAndWait(page, prompt, timeoutMs, log);
     return { content, model, finishReason: "stop" };
   } finally {
-    if (owned) await page.close().catch(() => {});
+    await page.close().catch(() => {});
   }
 }
 
@@ -184,66 +186,73 @@ export async function grokCompleteStream(
   onToken: (token: string) => void,
   log: (msg: string) => void
 ): Promise<GrokCompleteResult> {
-  const { page, owned } = await getOrCreateGrokPage(context);
   const model = resolveModel(opts.model);
   const prompt = flattenMessages(opts.messages);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   log(`grok-client: stream model=${model}`);
 
-  const countBefore = await page.evaluate(
-    () => document.querySelectorAll(".message-bubble").length
-  );
+  const page = await context.newPage();
+  try {
+    await page.goto("https://grok.com", { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await new Promise((r) => setTimeout(r, 2_000));
 
-  // Send message
-  await page.evaluate((msg: string) => {
-    const ed =
-      document.querySelector(".ProseMirror") ||
-      document.querySelector('[contenteditable="true"]');
-    if (!ed) throw new Error("Grok editor not found");
-    (ed as HTMLElement).focus();
-    document.execCommand("insertText", false, msg);
-  }, prompt);
-  await new Promise((r) => setTimeout(r, 300));
-  await page.keyboard.press("Enter");
-
-  log(`grok-client: message sent, streaming…`);
-
-  // Stream: poll DOM, emit new chars as tokens
-  const deadline = Date.now() + timeoutMs;
-  let emittedLength = 0;
-  let lastText = "";
-  let stableCount = 0;
-
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, STABLE_INTERVAL_MS));
-
-    const text = await page.evaluate(
-      (before: number) => {
-        const bubbles = [...document.querySelectorAll(".message-bubble")];
-        if (bubbles.length <= before) return "";
-        return bubbles[bubbles.length - 1].textContent?.trim() ?? "";
-      },
-      countBefore
+    const countBefore = await page.evaluate(
+      () => document.querySelectorAll(".message-bubble").length
     );
 
-    if (text && text.length > emittedLength) {
-      const newChars = text.slice(emittedLength);
-      onToken(newChars);
-      emittedLength = text.length;
-    }
+    // Send message
+    await page.evaluate((msg: string) => {
+      const ed =
+        document.querySelector(".ProseMirror") ||
+        document.querySelector('[contenteditable="true"]');
+      if (!ed) throw new Error("Grok editor not found");
+      (ed as HTMLElement).focus();
+      document.execCommand("insertText", false, msg);
+    }, prompt);
+    await new Promise((r) => setTimeout(r, 300));
+    await page.keyboard.press("Enter");
 
-    if (text && text === lastText) {
-      stableCount++;
-      if (stableCount >= STABLE_CHECKS) {
-        log(`grok-client: stream done (${text.length} chars)`);
-        return { content: text, model, finishReason: "stop" };
+    log(`grok-client: message sent, streaming…`);
+
+    // Stream: poll DOM, emit new chars as tokens
+    const deadline = Date.now() + timeoutMs;
+    let emittedLength = 0;
+    let lastText = "";
+    let stableCount = 0;
+
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, STABLE_INTERVAL_MS));
+
+      const text = await page.evaluate(
+        (before: number) => {
+          const bubbles = [...document.querySelectorAll(".message-bubble")];
+          if (bubbles.length <= before) return "";
+          return bubbles[bubbles.length - 1].textContent?.trim() ?? "";
+        },
+        countBefore
+      );
+
+      if (text && text.length > emittedLength) {
+        const newChars = text.slice(emittedLength);
+        onToken(newChars);
+        emittedLength = text.length;
       }
-    } else {
-      stableCount = 0;
-      lastText = text;
-    }
-  }
 
-  throw new Error(`grok.com stream timeout after ${timeoutMs}ms`);
+      if (text && text === lastText) {
+        stableCount++;
+        if (stableCount >= STABLE_CHECKS) {
+          log(`grok-client: stream done (${text.length} chars)`);
+          return { content: text, model, finishReason: "stop" };
+        }
+      } else {
+        stableCount = 0;
+        lastText = text;
+      }
+    }
+
+    throw new Error(`grok.com stream timeout after ${timeoutMs}ms`);
+  } finally {
+    await page.close().catch(() => {});
+  }
 }

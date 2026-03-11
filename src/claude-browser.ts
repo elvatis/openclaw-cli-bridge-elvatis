@@ -160,18 +160,20 @@ export async function claudeComplete(
   opts: ClaudeBrowserOptions,
   log: (msg: string) => void
 ): Promise<ClaudeBrowserResult> {
-  const { page, owned } = await getOrCreateClaudePage(context);
   const model = resolveModel(opts.model);
   const prompt = flattenMessages(opts.messages);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   log(`claude-browser: complete model=${model}`);
 
+  const page = await context.newPage();
   try {
+    await page.goto(CLAUDE_HOME, { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await new Promise((r) => setTimeout(r, 2_000));
     const content = await sendAndWait(page, prompt, timeoutMs, log);
     return { content, model, finishReason: "stop" };
   } finally {
-    if (owned) await page.close().catch(() => {});
+    await page.close().catch(() => {});
   }
 }
 
@@ -181,53 +183,60 @@ export async function claudeCompleteStream(
   onToken: (token: string) => void,
   log: (msg: string) => void
 ): Promise<ClaudeBrowserResult> {
-  const { page, owned } = await getOrCreateClaudePage(context);
   const model = resolveModel(opts.model);
   const prompt = flattenMessages(opts.messages);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   log(`claude-browser: stream model=${model}`);
 
-  const countBefore = await countAssistantMessages(page);
+  const page = await context.newPage();
+  try {
+    await page.goto(CLAUDE_HOME, { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await new Promise((r) => setTimeout(r, 2_000));
 
-  await page.evaluate((msg: string) => {
-    const ed = document.querySelector(".ProseMirror") as HTMLElement | null;
-    if (!ed) throw new Error("Claude editor not found");
-    ed.focus();
-    document.execCommand("insertText", false, msg);
-  }, prompt);
-  await new Promise((r) => setTimeout(r, 300));
-  await page.keyboard.press("Enter");
+    const countBefore = await countAssistantMessages(page);
 
-  const deadline = Date.now() + timeoutMs;
-  let emittedLength = 0;
-  let lastText = "";
-  let stableCount = 0;
+    await page.evaluate((msg: string) => {
+      const ed = document.querySelector(".ProseMirror") as HTMLElement | null;
+      if (!ed) throw new Error("Claude editor not found");
+      ed.focus();
+      document.execCommand("insertText", false, msg);
+    }, prompt);
+    await new Promise((r) => setTimeout(r, 300));
+    await page.keyboard.press("Enter");
 
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, STABLE_INTERVAL_MS));
+    const deadline = Date.now() + timeoutMs;
+    let emittedLength = 0;
+    let lastText = "";
+    let stableCount = 0;
 
-    const currentCount = await countAssistantMessages(page);
-    if (currentCount <= countBefore) continue;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, STABLE_INTERVAL_MS));
 
-    const text = await getLastAssistantText(page);
+      const currentCount = await countAssistantMessages(page);
+      if (currentCount <= countBefore) continue;
 
-    if (text.length > emittedLength) {
-      onToken(text.slice(emittedLength));
-      emittedLength = text.length;
-    }
+      const text = await getLastAssistantText(page);
 
-    if (text && text === lastText) {
-      stableCount++;
-      if (stableCount >= STABLE_CHECKS) {
-        log(`claude-browser: stream done (${text.length} chars)`);
-        return { content: text, model, finishReason: "stop" };
+      if (text.length > emittedLength) {
+        onToken(text.slice(emittedLength));
+        emittedLength = text.length;
       }
-    } else {
-      stableCount = 0;
-      lastText = text;
-    }
-  }
 
-  throw new Error(`claude.ai stream timeout after ${timeoutMs}ms`);
+      if (text && text === lastText) {
+        stableCount++;
+        if (stableCount >= STABLE_CHECKS) {
+          log(`claude-browser: stream done (${text.length} chars)`);
+          return { content: text, model, finishReason: "stop" };
+        }
+      } else {
+        stableCount = 0;
+        lastText = text;
+      }
+    }
+
+    throw new Error(`claude.ai stream timeout after ${timeoutMs}ms`);
+  } finally {
+    await page.close().catch(() => {});
+  }
 }

@@ -167,18 +167,21 @@ export async function geminiComplete(
   opts: GeminiBrowserOptions,
   log: (msg: string) => void
 ): Promise<GeminiBrowserResult> {
-  const { page, owned } = await getOrCreateGeminiPage(context);
+  // TODO: Gemini model switching requires UI interaction (model picker dropdown), not yet implemented
   const model = resolveModel(opts.model);
   const prompt = flattenMessages(opts.messages);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   log(`gemini-browser: complete model=${model}`);
 
+  const page = await context.newPage();
   try {
+    await page.goto(GEMINI_HOME, { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await new Promise((r) => setTimeout(r, 2_000));
     const content = await sendAndWait(page, prompt, timeoutMs, log);
     return { content, model, finishReason: "stop" };
   } finally {
-    if (owned) await page.close().catch(() => {});
+    await page.close().catch(() => {});
   }
 }
 
@@ -188,55 +191,60 @@ export async function geminiCompleteStream(
   onToken: (token: string) => void,
   log: (msg: string) => void
 ): Promise<GeminiBrowserResult> {
-  const { page, owned } = await getOrCreateGeminiPage(context);
   const model = resolveModel(opts.model);
   const prompt = flattenMessages(opts.messages);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   log(`gemini-browser: stream model=${model}`);
 
-  const countBefore = await countResponses(page);
+  const page = await context.newPage();
+  try {
+    await page.goto(GEMINI_HOME, { waitUntil: "domcontentloaded", timeout: 15_000 });
+    await new Promise((r) => setTimeout(r, 2_000));
 
-  const editor = page.locator(".ql-editor");
-  await editor.click();
-  await editor.type(prompt, { delay: 10 });
-  await new Promise((r) => setTimeout(r, 300));
-  await page.keyboard.press("Enter");
+    const countBefore = await countResponses(page);
 
-  const deadline = Date.now() + timeoutMs;
-  let emittedLength = 0;
-  let lastText = "";
-  let stableCount = 0;
+    const editor = page.locator(".ql-editor");
+    await editor.click();
+    await editor.type(prompt, { delay: 10 });
+    await new Promise((r) => setTimeout(r, 300));
+    await page.keyboard.press("Enter");
 
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, STABLE_INTERVAL_MS));
+    const deadline = Date.now() + timeoutMs;
+    let emittedLength = 0;
+    let lastText = "";
+    let stableCount = 0;
 
-    const currentCount = await countResponses(page);
-    if (currentCount <= countBefore) continue;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, STABLE_INTERVAL_MS));
 
-    const text = await getLastResponseText(page);
+      const currentCount = await countResponses(page);
+      if (currentCount <= countBefore) continue;
 
-    if (text.length > emittedLength) {
-      onToken(text.slice(emittedLength));
-      emittedLength = text.length;
-    }
+      const text = await getLastResponseText(page);
 
-    const streaming = await isStreaming(page);
-    if (streaming) { stableCount = 0; continue; }
-
-    if (text && text === lastText) {
-      stableCount++;
-      if (stableCount >= STABLE_CHECKS) {
-        log(`gemini-browser: stream done (${text.length} chars)`);
-        if (owned) await page.close().catch(() => {});
-        return { content: text, model, finishReason: "stop" };
+      if (text.length > emittedLength) {
+        onToken(text.slice(emittedLength));
+        emittedLength = text.length;
       }
-    } else {
-      stableCount = 0;
-      lastText = text;
-    }
-  }
 
-  if (owned) await page.close().catch(() => {});
-  throw new Error(`gemini.google.com stream timeout after ${timeoutMs}ms`);
+      const streaming = await isStreaming(page);
+      if (streaming) { stableCount = 0; continue; }
+
+      if (text && text === lastText) {
+        stableCount++;
+        if (stableCount >= STABLE_CHECKS) {
+          log(`gemini-browser: stream done (${text.length} chars)`);
+          return { content: text, model, finishReason: "stop" };
+        }
+      } else {
+        stableCount = 0;
+        lastText = text;
+      }
+    }
+
+    throw new Error(`gemini.google.com stream timeout after ${timeoutMs}ms`);
+  } finally {
+    await page.close().catch(() => {});
+  }
 }
