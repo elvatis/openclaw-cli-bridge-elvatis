@@ -399,14 +399,16 @@ async function ensureAllProviderContexts(log: (msg: string) => void): Promise<vo
         });
         const page = await pCtx.newPage();
         await page.goto(cfg.homeUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
-        await new Promise(r => setTimeout(r, 3000));
+        await new Promise(r => setTimeout(r, 4000));
         const visible = await page.locator(cfg.verifySelector).isVisible().catch(() => false);
         if (visible) {
           ctx = pCtx;
           log(`[cli-bridge:${cfg.name}] launched persistent context ✅`);
         } else {
+          const title = await page.title().catch(() => "unknown");
+          const bodySnippet = await page.evaluate(() => document.body?.innerText?.substring(0, 100) ?? "").catch(() => "");
+          log(`[cli-bridge:${cfg.name}] persistent headless: editor not visible — title="${title}" body="${bodySnippet}"`);
           await pCtx.close().catch(() => {});
-          log(`[cli-bridge:${cfg.name}] persistent context: editor not visible (not logged in?)`);
         }
       } catch (err) {
         log(`[cli-bridge:${cfg.name}] could not launch browser: ${(err as Error).message}`);
@@ -708,7 +710,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.3.0",
+  version: "1.3.1",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -1325,6 +1327,26 @@ const plugin = {
 
         claudeContext = ctx;
 
+        // Export + bake cookies into persistent profile
+        const claudeProfileDir = join(homedir(), ".openclaw", "claude-profile");
+        mkdirSync(claudeProfileDir, { recursive: true });
+        try {
+          const allCookies = await ctx.cookies([
+            "https://claude.ai",
+            "https://anthropic.com",
+          ]);
+          const { chromium } = await import("playwright");
+          const pCtx = await chromium.launchPersistentContext(claudeProfileDir, {
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          });
+          await pCtx.addCookies(allCookies);
+          await pCtx.close();
+          api.logger.info(`[cli-bridge:claude] cookies baked into ${claudeProfileDir}`);
+        } catch (err) {
+          api.logger.warn(`[cli-bridge:claude] cookie bake failed: ${(err as Error).message}`);
+        }
+
         // Scan cookie expiry
         const expiry = await scanClaudeCookieExpiry(ctx);
         if (expiry) {
@@ -1402,6 +1424,27 @@ const plugin = {
 
         geminiContext = ctx;
 
+        // Export + bake cookies into persistent profile
+        const geminiProfileDir = join(homedir(), ".openclaw", "gemini-profile");
+        mkdirSync(geminiProfileDir, { recursive: true });
+        try {
+          const allCookies = await ctx.cookies([
+            "https://gemini.google.com",
+            "https://accounts.google.com",
+            "https://google.com",
+          ]);
+          const { chromium } = await import("playwright");
+          const pCtx = await chromium.launchPersistentContext(geminiProfileDir, {
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          });
+          await pCtx.addCookies(allCookies);
+          await pCtx.close();
+          api.logger.info(`[cli-bridge:gemini] cookies baked into ${geminiProfileDir}`);
+        } catch (err) {
+          api.logger.warn(`[cli-bridge:gemini] cookie bake failed: ${(err as Error).message}`);
+        }
+
         const expiry = await scanGeminiCookieExpiry(ctx);
         if (expiry) {
           saveGeminiExpiry(expiry);
@@ -1471,6 +1514,28 @@ const plugin = {
           return { text: "❌ ChatGPT editor not visible — are you logged in?\nOpen chatgpt.com in your browser and try again." };
 
         chatgptContext = ctx;
+
+        // Export + bake cookies into persistent profile
+        const chatgptProfileDir = join(homedir(), ".openclaw", "chatgpt-profile");
+        mkdirSync(chatgptProfileDir, { recursive: true });
+        try {
+          const allCookies = await ctx.cookies([
+            "https://chatgpt.com",
+            "https://openai.com",
+            "https://auth.openai.com",
+          ]);
+          const { chromium } = await import("playwright");
+          const pCtx = await chromium.launchPersistentContext(chatgptProfileDir, {
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          });
+          await pCtx.addCookies(allCookies);
+          await pCtx.close();
+          api.logger.info(`[cli-bridge:chatgpt] cookies baked into ${chatgptProfileDir}`);
+        } catch (err) {
+          api.logger.warn(`[cli-bridge:chatgpt] cookie bake failed: ${(err as Error).message}`);
+        }
+
         const expiry = await scanChatGPTCookieExpiry(ctx);
         if (expiry) { saveChatGPTExpiry(expiry); api.logger.info(`[cli-bridge:chatgpt] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`); }
         const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatChatGPTExpiry(expiry)}` : "";
