@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `0.2.29`
+**Current version:** `0.2.30`
 
 ---
 
@@ -286,6 +286,14 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v0.2.30
+- **feat:** `gemini-browser.ts` — gemini.google.com DOM-automation (Quill editor + message-content polling)
+- **feat:** `web-gemini/*` models in proxy (gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash)
+- **feat:** `/gemini-login`, `/gemini-status`, `/gemini-logout` commands + cookie-expiry tracking
+- **fix:** Singleton CDP connection — no more zombie Chromium processes
+- **fix:** `cleanupBrowsers()` called on plugin stop — all browser resources released
+- **test:** 90/90 tests green (+6 gemini-proxy tests)
 
 ### v0.2.29
 - **feat:** `claude-browser.ts` — claude.ai DOM-automation (ProseMirror + `[data-test-render-count]` polling)
