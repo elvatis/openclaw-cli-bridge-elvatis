@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.3.4`
+**Current version:** `1.3.5`
 
 ---
 
@@ -357,6 +357,11 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v1.3.5
+- **fix:** Startup session restore now runs only once per process lifetime — `_startupRestoreDone` module-level guard prevents re-running on every hot-reload (SIGUSR1), which was triggered every ~60s by the openclaw-control-ui dashboard poll
+- **root cause:** Gateway `reload.mode=hybrid` + dashboard status polling caused plugin to reinitialize every 60s → each reload spawned a new Gemini Chromium instance → RAM/CPU OOM loop
+- **behavior:** First load after gateway start: sequential profile restore runs once. All subsequent hot-reloads: skip restore, reuse existing in-memory contexts
 
 ### v1.3.4
 - **feat:** Safe sequential session restore on startup — if a saved profile exists, providers are reconnected automatically after gateway restart (one at a time, 3s delay between each, headless)
