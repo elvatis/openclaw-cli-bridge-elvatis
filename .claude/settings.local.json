@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(npx tsc:*)",
+      "Bash(ls node_modules/.bin/tsc*)",
+      "Bash(npm install:*)",
+      "Bash(./node_modules/.bin/tsc)",
+      "Bash(node_modules/.bin/tsc)",
+      "Bash(node_modules/.bin/tsc -p tsconfig.check.json)",
+      "Bash(node_modules/.bin/vitest run:*)"
+    ]
+  }
+}
