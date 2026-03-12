@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.3.3`
+**Current version:** `1.3.4`
 
 ---
 
@@ -286,6 +286,11 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v1.3.4
+- **feat:** Safe sequential session restore on startup — if a saved profile exists, providers are reconnected automatically after gateway restart (one at a time, 3s delay between each, headless)
+- **fix:** No manual `/xxx-login` needed after reboot if profile is already saved
+- **safety:** Profile-gated — only restores if `~/.openclaw/<provider>-profile/` or cookie file exists; never spawns a browser for an uninitialized provider
 
 ### v1.3.3
 - **fix:** Removed auto-connect of all browser providers on plugin startup — caused OOM (load 195, 30GB RAM) by spawning 4+ persistent Chromium instances on every gateway start
