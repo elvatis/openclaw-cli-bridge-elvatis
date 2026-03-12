@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.4.3`
+**Current version:** `1.5.0`
 
 ---
 
@@ -100,20 +100,6 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 | `/grok-status` | Show session validity + cookie expiry |
 | `/grok-logout` | Clear session |
 
-**Claude** (claude.ai):
-
-| Model | Notes |
-|---|---|
-| `web-claude/claude-sonnet` | Sonnet |
-| `web-claude/claude-opus` | Opus |
-| `web-claude/claude-haiku` | Haiku |
-
-| Command | What it does |
-|---|---|
-| `/claude-login` | Authenticate, save cookies to `~/.openclaw/claude-profile/` |
-| `/claude-status` | Show session validity + cookie expiry |
-| `/claude-logout` | Clear session |
-
 **Gemini** (gemini.google.com):
 
 | Model | Notes |
@@ -129,27 +115,11 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 | `/gemini-status` | Show session validity + cookie expiry |
 | `/gemini-logout` | Clear session |
 
-**ChatGPT** (chatgpt.com):
-
-| Model | Notes |
-|---|---|
-| `web-chatgpt/gpt-4o` | GPT-4o |
-| `web-chatgpt/gpt-4o-mini` | GPT-4o Mini |
-| `web-chatgpt/gpt-o3` | o3 |
-| `web-chatgpt/gpt-o4-mini` | o4-mini |
-| `web-chatgpt/gpt-5` | GPT-5 |
-
-| Command | What it does |
-|---|---|
-| `/chatgpt-login` | Authenticate, save cookies to `~/.openclaw/chatgpt-profile/` |
-| `/chatgpt-status` | Show session validity + cookie expiry |
-| `/chatgpt-logout` | Clear session |
-
 **Session lifecycle:**
 - First use: run `/xxx-login` once - authenticates and saves cookies to persistent Chromium profile
 - **No CDP required:** `/xxx-login` no longer depends on the OpenClaw browser (CDP port 18800). If CDP is available, cookies are imported from it; otherwise a standalone persistent Chromium is launched automatically.
 - After gateway restart: sessions are **automatically restored** from saved profiles on startup (sequential, ~25s after start)
-- `/bridge-status` — shows all 4 providers at a glance with login state + expiry info
+- `/bridge-status` — shows all providers at a glance with login state + expiry info
 
 ---
 
@@ -352,12 +322,19 @@ Slash commands (requireAuth=false, gateway commands.allowFrom is the auth layer)
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (96 tests)
+npm test            # vitest run (83 tests)
 ```
 
 ---
 
 ## Changelog
+
+### v1.5.0
+- **refactor:** Removed `/claude-login`, `/claude-logout`, `/claude-status`, `/chatgpt-login`, `/chatgpt-logout`, `/chatgpt-status` commands and all related browser automation code. Claude is fully covered by `cli-claude/*` via CLI proxy, ChatGPT by `openai-codex` + `copilot-proxy`.
+- **refactor:** Removed `web-claude/*` and `web-chatgpt/*` proxy routes and model entries from proxy server.
+- **refactor:** Removed `getOrLaunchClaudeContext()` and `getOrLaunchChatGPTContext()` functions, claude/chatgpt session state, cookie expiry tracking, and startup restore for these providers.
+- **cleanup:** Deleted `test/claude-proxy.test.ts` and `test/chatgpt-proxy.test.ts`.
+- **result:** Cleaner codebase, no browser timeout on startup for unused providers. Only Grok and Gemini browser providers remain.
 
 ### v1.4.3
 - **fix:** Full stealth mode for all browser launches - `ignoreDefaultArgs: ['--enable-automation']` removes Playwright's automation flag, `--disable-blink-features=AutomationControlled` hides `navigator.webdriver`, and `--disable-infobars` suppresses the "Chrome is being controlled by automated software" banner. Combined with `channel: "chrome"` (v1.4.2), this bypasses Cloudflare human verification completely.
@@ -437,7 +414,7 @@ No CLI binaries required — just authenticated browser sessions.
 - **feat:** `web-chatgpt/*` models: gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5
 - **feat:** `/chatgpt-login`, `/chatgpt-status`, `/chatgpt-logout` + cookie-expiry tracking
 - **feat:** All 4 providers headless: Grok ✅ Claude ✅ Gemini ✅ ChatGPT ✅
-- **test:** 96/96 tests green (8 test files)
+- **test:** 96/83 tests green (8 test files)
 - **fix:** Singleton CDP connection, cleanupBrowsers() on plugin stop
 
 ### v0.2.30
