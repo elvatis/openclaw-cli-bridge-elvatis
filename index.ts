@@ -233,6 +233,10 @@ async function scanCookieExpiry(ctx: import("playwright").BrowserContext): Promi
 let _cdpBrowser: import("playwright").Browser | null = null;
 let _cdpBrowserLaunchPromise: Promise<import("playwright").BrowserContext | null> | null = null;
 
+// Startup restore guard — module-level so it survives hot-reloads (SIGUSR1).
+// Set to true after first run; hot-reloads see true and skip the restore loop.
+let _startupRestoreDone = false;
+
 /**
  * Connect to the OpenClaw managed browser (CDP port 18800).
  * Singleton: reuses the same connection. Falls back to persistent Chromium for Grok only.
@@ -746,97 +750,102 @@ const plugin = {
     const codexAuthPath = cfg.codexAuthPath ?? DEFAULT_CODEX_AUTH_PATH;
     const grokSessionPath = cfg.grokSessionPath ?? DEFAULT_SESSION_PATH;
 
-    // ── Safe session restore on startup (sequential, profile-gated, non-blocking) ──
-    // Restores provider sessions from saved persistent profiles — but ONLY if the
-    // profile directory already exists (i.e. user has logged in before).
-    // Providers are launched one at a time with a delay to avoid OOM.
-    void (async () => {
-      await new Promise(r => setTimeout(r, 5000)); // wait for proxy + gateway to settle
-      const { chromium } = await import("playwright");
-      const { existsSync } = await import("node:fs");
+    // ── Session restore: only on first plugin load (not on hot-reloads) ──────
+    // The gateway polls every ~60s via openclaw status, which triggers a hot-reload
+    // (SIGUSR1 + hybrid mode). Module-level contexts (grokContext etc.) survive
+    // hot-reloads because Node keeps the module in memory — so we only need to
+    // restore once, on the very first load (when all contexts are null).
+    //
+    // Guard: _startupRestoreDone is module-level and persists across hot-reloads.
+    if (!_startupRestoreDone) {
+      _startupRestoreDone = true;
+      void (async () => {
+        await new Promise(r => setTimeout(r, 5000)); // wait for proxy + gateway to settle
+        const { chromium } = await import("playwright");
+        const { existsSync } = await import("node:fs");
 
-      const profileProviders: Array<{
-        name: string;
-        profileDir: string;
-        cookieFile: string;
-        verifySelector: string;
-        homeUrl: string;
-        setCtx: (c: BrowserContext) => void;
-        getCtx: () => BrowserContext | null;
-      }> = [
-        {
-          name: "grok",
-          profileDir: GROK_PROFILE_DIR,
-          cookieFile: join(homedir(), ".openclaw", "grok-session.json"),
-          verifySelector: "textarea",
-          homeUrl: "https://grok.com",
-          getCtx: () => grokContext,
-          setCtx: (c) => { grokContext = c; },
-        },
-        {
-          name: "claude",
-          profileDir: join(homedir(), ".openclaw", "claude-profile"),
-          cookieFile: join(homedir(), ".openclaw", "claude-cookie-expiry.json"),
-          verifySelector: ".ProseMirror",
-          homeUrl: "https://claude.ai/new",
-          getCtx: () => claudeContext,
-          setCtx: (c) => { claudeContext = c; },
-        },
-        {
-          name: "gemini",
-          profileDir: join(homedir(), ".openclaw", "gemini-profile"),
-          cookieFile: join(homedir(), ".openclaw", "gemini-cookie-expiry.json"),
-          verifySelector: ".ql-editor",
-          homeUrl: "https://gemini.google.com/app",
-          getCtx: () => geminiContext,
-          setCtx: (c) => { geminiContext = c; },
-        },
-        {
-          name: "chatgpt",
-          profileDir: join(homedir(), ".openclaw", "chatgpt-profile"),
-          cookieFile: join(homedir(), ".openclaw", "chatgpt-cookie-expiry.json"),
-          verifySelector: "#prompt-textarea",
-          homeUrl: "https://chatgpt.com",
-          getCtx: () => chatgptContext,
-          setCtx: (c) => { chatgptContext = c; },
-        },
-      ];
+        const profileProviders: Array<{
+          name: string;
+          profileDir: string;
+          cookieFile: string;
+          verifySelector: string;
+          homeUrl: string;
+          setCtx: (c: BrowserContext) => void;
+          getCtx: () => BrowserContext | null;
+        }> = [
+          {
+            name: "grok",
+            profileDir: GROK_PROFILE_DIR,
+            cookieFile: join(homedir(), ".openclaw", "grok-session.json"),
+            verifySelector: "textarea",
+            homeUrl: "https://grok.com",
+            getCtx: () => grokContext,
+            setCtx: (c) => { grokContext = c; },
+          },
+          {
+            name: "claude",
+            profileDir: join(homedir(), ".openclaw", "claude-profile"),
+            cookieFile: join(homedir(), ".openclaw", "claude-cookie-expiry.json"),
+            verifySelector: ".ProseMirror",
+            homeUrl: "https://claude.ai/new",
+            getCtx: () => claudeContext,
+            setCtx: (c) => { claudeContext = c; },
+          },
+          {
+            name: "gemini",
+            profileDir: join(homedir(), ".openclaw", "gemini-profile"),
+            cookieFile: join(homedir(), ".openclaw", "gemini-cookie-expiry.json"),
+            verifySelector: ".ql-editor",
+            homeUrl: "https://gemini.google.com/app",
+            getCtx: () => geminiContext,
+            setCtx: (c) => { geminiContext = c; },
+          },
+          {
+            name: "chatgpt",
+            profileDir: join(homedir(), ".openclaw", "chatgpt-profile"),
+            cookieFile: join(homedir(), ".openclaw", "chatgpt-cookie-expiry.json"),
+            verifySelector: "#prompt-textarea",
+            homeUrl: "https://chatgpt.com",
+            getCtx: () => chatgptContext,
+            setCtx: (c) => { chatgptContext = c; },
+          },
+        ];
 
-      for (const p of profileProviders) {
-        // Skip if no saved profile/session exists
-        if (!existsSync(p.profileDir) && !existsSync(p.cookieFile)) {
-          api.logger.info(`[cli-bridge:${p.name}] no saved profile — skipping startup restore`);
-          continue;
-        }
-        if (p.getCtx()) continue; // already connected
-
-        try {
-          api.logger.info(`[cli-bridge:${p.name}] restoring session from profile…`);
-          const ctx = await chromium.launchPersistentContext(p.profileDir, {
-            headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
-          });
-          const page = await ctx.newPage();
-          await page.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
-          await new Promise(r => setTimeout(r, 3000));
-          const ok = await page.locator(p.verifySelector).isVisible().catch(() => false);
-          await page.close().catch(() => {});
-          if (ok) {
-            p.setCtx(ctx);
-            ctx.on("close", () => { p.setCtx(null as unknown as BrowserContext); });
-            api.logger.info(`[cli-bridge:${p.name}] session restored from profile ✅`);
-          } else {
-            await ctx.close().catch(() => {});
-            api.logger.info(`[cli-bridge:${p.name}] profile exists but not logged in — skipping`);
+        for (const p of profileProviders) {
+          if (!existsSync(p.profileDir) && !existsSync(p.cookieFile)) {
+            api.logger.info(`[cli-bridge:${p.name}] no saved profile — skipping startup restore`);
+            continue;
           }
-        } catch (err) {
-          api.logger.warn(`[cli-bridge:${p.name}] startup restore failed: ${(err as Error).message}`);
-        }
+          if (p.getCtx()) continue; // already connected
 
-        // Sequential delay — avoid spawning all 4 Chromium instances at once
-        await new Promise(r => setTimeout(r, 3000));
-      }
-    })();
+          try {
+            api.logger.info(`[cli-bridge:${p.name}] restoring session from profile…`);
+            const ctx = await chromium.launchPersistentContext(p.profileDir, {
+              headless: true,
+              args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            });
+            const page = await ctx.newPage();
+            await page.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+            await new Promise(r => setTimeout(r, 3000));
+            const ok = await page.locator(p.verifySelector).isVisible().catch(() => false);
+            await page.close().catch(() => {});
+            if (ok) {
+              p.setCtx(ctx);
+              ctx.on("close", () => { p.setCtx(null as unknown as BrowserContext); });
+              api.logger.info(`[cli-bridge:${p.name}] session restored from profile ✅`);
+            } else {
+              await ctx.close().catch(() => {});
+              api.logger.info(`[cli-bridge:${p.name}] profile exists but not logged in — needs /xxx-login`);
+            }
+          } catch (err) {
+            api.logger.warn(`[cli-bridge:${p.name}] startup restore failed: ${(err as Error).message}`);
+          }
+
+          // Sequential — never spawn all 4 Chromium instances at once
+          await new Promise(r => setTimeout(r, 3000));
+        }
+      })();
+    }
 
     // ── Phase 1: openai-codex auth bridge ─────────────────────────────────────
     if (enableCodex) {
