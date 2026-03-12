@@ -746,14 +746,10 @@ const plugin = {
     const codexAuthPath = cfg.codexAuthPath ?? DEFAULT_CODEX_AUTH_PATH;
     const grokSessionPath = cfg.grokSessionPath ?? DEFAULT_SESSION_PATH;
 
-    // ── Grok session restore (non-blocking) ───────────────────────────────────
-    void tryRestoreGrokSession(grokSessionPath, (msg) => api.logger.info(msg));
+    // Grok session restore on startup REMOVED — on-demand only via /grok-login.
 
-    // ── Auto-connect all browser providers on startup (non-blocking) ──────────
-    void (async () => {
-      await new Promise(r => setTimeout(r, 3000)); // wait for proxy to start
-      await ensureAllProviderContexts((msg) => api.logger.info(msg));
-    })();
+    // Auto-connect on startup REMOVED — browsers are launched on-demand via /xxx-login only.
+    // Spawning 4 persistent Chromium contexts at startup caused OOM under load.
 
     // ── Phase 1: openai-codex auth bridge ─────────────────────────────────────
     if (enableCodex) {
