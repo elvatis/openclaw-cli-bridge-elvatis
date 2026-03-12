@@ -1,8 +1,8 @@
 # STATUS — openclaw-cli-bridge-elvatis
 
-## Current Version: 1.0.0 (npm + ClawHub + GitHub) ✅ RELEASED
+## Current Version: 1.3.3 (npm + ClawHub + GitHub) ✅ RELEASED
 
-## All 4 Providers LIVE — Tested 2026-03-11 22:24
+## All 4 Providers Available — on-demand via /xxx-login
 | Provider | Status | Models | Command |
 |---|---|---|---|
 | Grok | ✅ | web-grok/grok-3, grok-3-fast, grok-3-mini, grok-3-mini-fast | /grok-login |
@@ -10,26 +10,35 @@
 | Gemini | ✅ | web-gemini/gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash | /gemini-login |
 | ChatGPT | ✅ | web-chatgpt/gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5 | /chatgpt-login |
 
-Live test: "What is the capital of France?"
-- Grok: "Paris" ✅
-- Claude: "Paris" ✅
-- Gemini: "Paris" ✅
-- ChatGPT: "Paris" ✅
-
 ## Stats
 - 22 total models, 16 web-session models
 - 96/96 tests green (8 test files)
-- 0 zombie Chromium processes (singleton CDP, cleanupBrowsers on stop)
+- 0 zombie Chromium processes at startup (browsers on-demand only)
 - Cookie expiry tracking for all 4 providers
+- Singleton guard on ensureAllProviderContexts (no concurrent spawns)
 
-## Known Issue: Browser persistence after Gateway restart
-After SIGUSR1/full restart, OpenClaw browser is gone (CDP ECONNREFUSED).
-Workaround: manually open browser + 4 provider pages → lazy connect takes over.
-Fix needed: auto-start browser on plugin init, or keep-alive ping.
+## Architecture: Browser Lifecycle
+- **On plugin start:** NO browser launched automatically
+- **On /xxx-login:** launches persistent Chromium for that provider only
+- **On request (no context):** returns null → caller sees "not logged in" error
+- **On /xxx-logout:** closes context + deletes session file
 
-## Next Steps (v1.1.x)
-- Auto-reconnect OpenClaw browser on plugin start
-- /status command showing all 4 providers at once
-- Context-window management for long conversations (new page per conversation)
-- Handle model-switching within chatgpt.com (dropdown selector)
-- Handle Gemini model switching (2.5 Pro vs Flash vs 3)
+## Known Issues
+- Cloudflare may block headless Chromium for Claude/Gemini without a valid CDP session
+  → Workaround: have OpenClaw browser open on the provider's page, then /xxx-login
+
+## Release History
+- v1.3.3 (2026-03-12): Remove startup auto-connect — browsers on-demand only (OOM fix)
+- v1.3.2 (2026-03-12): Singleton guard on ensureAllProviderContexts (resource leak fix)
+- v1.3.1 (2026-03-11): Cookie baking into persistent profiles on login
+- v1.3.0 (2026-03-11): Browser auto-reconnect after gateway restart
+- v1.2.0 (2026-03-11): Fresh page per request + ChatGPT model switching
+- v1.1.0 (2026-03-11): Auto-connect on startup + /bridge-status
+- v1.0.0 (2026-03-11): All 4 providers headless (Grok/Claude/Gemini/ChatGPT) — 96/96 tests
+- v0.2.x: Grok (v0.2.26-28), Claude (v0.2.29), Gemini (v0.2.30)
+- v0.2.25: Sleep-resilient token refresh + staged /cli-* switching
+
+## Next Steps
+- Context-window management for long conversations
+- Gemini model switching (2.5 Pro vs Flash vs 3) via UI
+- /bridge-status: show per-provider login state + cookie expiry
