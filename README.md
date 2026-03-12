@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.3.5`
+**Current version:** `1.4.0`
 
 ---
 
@@ -146,7 +146,8 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 | `/chatgpt-logout` | Clear session |
 
 **Session lifecycle:**
-- First use: run `/xxx-login` once (opens Chromium, authenticate in browser)
+- First use: run `/xxx-login` once - authenticates and saves cookies to persistent Chromium profile
+- **No CDP required:** `/xxx-login` no longer depends on the OpenClaw browser (CDP port 18800). If CDP is available, cookies are imported from it; otherwise a standalone persistent Chromium is launched automatically.
 - After gateway restart: sessions are **automatically restored** from saved profiles on startup (sequential, ~25s after start)
 - `/bridge-status` — shows all 4 providers at a glance with login state + expiry info
 
@@ -351,12 +352,19 @@ Slash commands (requireAuth=false, gateway commands.allowFrom is the auth layer)
 
 ```bash
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (45 tests)
+npm test            # vitest run (96 tests)
 ```
 
 ---
 
 ## Changelog
+
+### v1.4.0
+- **feat:** Persistent browser fallback for all providers - `/claude-login`, `/gemini-login`, `/chatgpt-login` no longer require the OpenClaw browser (CDP port 18800). If CDP is available, cookies are imported; otherwise a standalone persistent headless Chromium is launched automatically from the saved profile directory.
+- **feat:** New helper functions `getOrLaunchClaudeContext()`, `getOrLaunchGeminiContext()`, `getOrLaunchChatGPTContext()` - same pattern as the existing `getOrLaunchGrokContext()` (try CDP, fall back to persistent Chromium, coalesce concurrent launches)
+- **fix:** Proxy server `connectXxxContext` callbacks now use the persistent fallback too - no more "not logged in" errors when CDP is unavailable but a saved profile exists
+- **fix:** `cleanupBrowsers()` now properly closes Claude, Gemini, and ChatGPT persistent contexts on plugin teardown (previously only cleaned up Grok + CDP)
+- **root cause:** All 3 login commands (Claude, Gemini, ChatGPT) called `connectToOpenClawBrowser()` directly, which only tries CDP on 127.0.0.1:18800. If Chrome was not running with `--remote-debugging-port=18800`, login always failed. Grok already had the fallback pattern since v0.2.27 - now all 4 providers are consistent.
 
 ### v1.3.5
 - **fix:** Startup session restore now runs only once per process lifetime — `_startupRestoreDone` module-level guard prevents re-running on every hot-reload (SIGUSR1), which was triggered every ~60s by the openclaw-control-ui dashboard poll

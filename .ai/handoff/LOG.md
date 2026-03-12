@@ -4,6 +4,50 @@ _Last 10 sessions. Older entries in LOG-ARCHIVE.md._
 
 ---
 
+## 2026-03-12 — Session 7 (Claude Opus 4.6)
+
+> **Agent:** claude-opus-4-6
+> **Phase:** fix
+> **Commit before:** v1.3.5
+> **Commit after:** v1.4.0
+
+**T-012: Persistent browser fallback for Claude/Gemini/ChatGPT login commands**
+
+### Problem
+`/claude-login`, `/gemini-login`, `/chatgpt-login` all called `connectToOpenClawBrowser()` directly,
+which only tries CDP on `http://127.0.0.1:18800`. If Chrome was not running with
+`--remote-debugging-port=18800`, all three commands failed with "Could not connect to OpenClaw browser".
+Grok already had the fallback pattern (CDP -> persistent Chromium) since v0.2.27, but the other
+three providers never got it.
+
+### Fix (index.ts)
+
+**New constants:** `CLAUDE_PROFILE_DIR`, `GEMINI_PROFILE_DIR`, `CHATGPT_PROFILE_DIR`
+
+**New functions:** `getOrLaunchClaudeContext()`, `getOrLaunchGeminiContext()`, `getOrLaunchChatGPTContext()`
+- Same pattern as `getOrLaunchGrokContext()`: return existing context -> try CDP -> fall back to persistent Chromium
+- Concurrent launch requests coalesced via promise guard (no duplicate Chromium spawns)
+
+**Updated login handlers:** `/claude-login`, `/gemini-login`, `/chatgpt-login` now follow the Grok pattern:
+1. Try to import cookies from CDP (optional, catches errors gracefully)
+2. `getOrLaunchXxxContext()` (CDP or persistent Chromium fallback)
+3. Inject imported cookies if available
+4. Navigate and verify
+
+**Updated proxy callbacks:** `connectClaudeContext`, `connectGeminiContext`, `connectChatGPTContext` in
+both proxy server setup blocks now use `getOrLaunchXxxContext()` instead of `connectToOpenClawBrowser()`.
+
+**Updated `cleanupBrowsers()`:** Now properly closes Claude, Gemini, and ChatGPT persistent contexts.
+
+### Build + Tests
+- `npm run build` - only pre-existing errors (openclaw/plugin-sdk not available locally)
+- `npm test` - 96/96 green, 0 failures
+
+### Version
+1.3.5 -> 1.4.0 (feature: persistent fallback for all providers)
+
+---
+
 ## 2026-03-11 — Session 6 (Akido / claude-sonnet-4-6)
 
 > **Agent:** claude-sonnet-4-6

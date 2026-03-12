@@ -4,11 +4,14 @@
 Alle Provider (Claude, Gemini, Codex/ChatGPT, Grok) über Playwright Browser-Sessions
 betreiben — keine lokalen CLI-Binaries mehr nötig. Ein headless Chromium, ein Proxy.
 
-## Aktueller Stand (v0.2.28)
+## Aktueller Stand (v1.4.0)
 - ✅ Grok: DOM-Polling via grok.com (FERTIG, produktiv)
-- ⏳ Claude: claude CLI binary → Ziel: claude.ai headless
-- ⏳ Gemini: gemini CLI binary → Ziel: gemini.google.com headless
-- ⏳ Codex: codex CLI binary → Ziel: chatgpt.com headless
+- ✅ Claude: claude.ai headless (FERTIG, persistent Chromium fallback)
+- ✅ Gemini: gemini.google.com headless (FERTIG, persistent Chromium fallback)
+- ✅ ChatGPT: chatgpt.com headless (FERTIG, persistent Chromium fallback)
+
+All 4 providers now work without CDP (OpenClaw browser). Persistent Chromium profiles
+are used as fallback when CDP on port 18800 is unavailable.
 
 ## Reihenfolge
 1. **Claude headless** (claude.ai) — höchste Priorität, meistgenutzt
