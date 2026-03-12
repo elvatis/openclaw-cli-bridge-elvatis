@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.3.1`
+**Current version:** `1.3.3`
 
 ---
 
@@ -286,6 +286,15 @@ npm test            # vitest run (45 tests)
 ---
 
 ## Changelog
+
+### v1.3.3
+- **fix:** Removed auto-connect of all browser providers on plugin startup — caused OOM (load 195, 30GB RAM) by spawning 4+ persistent Chromium instances on every gateway start
+- **fix:** Removed Grok session restore on startup — same root cause
+- **behavior change:** Browsers are now started **on-demand only** via `/grok-login`, `/claude-login`, `/gemini-login`, `/chatgpt-login`
+
+### v1.3.2
+- **fix:** Singleton promise guard on `ensureAllProviderContexts()` — concurrent requests no longer each spawn their own Chromium; extra callers await the existing run
+- **fix:** Removed recursive `ensureAllProviderContexts()` fallback from all `connect*Context` proxy callbacks — no more exponential browser spawn on CDP failure
 
 ### v1.3.1
 - **fix:** /claude-login, /gemini-login, /chatgpt-login now bake cookies into persistent profile dirs
