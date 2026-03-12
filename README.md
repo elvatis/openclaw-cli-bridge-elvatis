@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.4.2`
+**Current version:** `1.4.3`
 
 ---
 
@@ -358,6 +358,10 @@ npm test            # vitest run (96 tests)
 ---
 
 ## Changelog
+
+### v1.4.3
+- **fix:** Full stealth mode for all browser launches - `ignoreDefaultArgs: ['--enable-automation']` removes Playwright's automation flag, `--disable-blink-features=AutomationControlled` hides `navigator.webdriver`, and `--disable-infobars` suppresses the "Chrome is being controlled by automated software" banner. Combined with `channel: "chrome"` (v1.4.2), this bypasses Cloudflare human verification completely.
+- **root cause:** Even with system Chrome (`channel: "chrome"`), Playwright injects `--enable-automation` by default, which sets `navigator.webdriver = true` and shows the automation infobar. Cloudflare checks both signals.
 
 ### v1.4.2
 - **fix:** All browser launches now use `channel: "chrome"` (real system Chrome) instead of Playwright's bundled Chromium. Cloudflare human verification no longer blocks `/xxx-login` commands.
