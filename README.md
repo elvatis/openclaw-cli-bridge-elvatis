@@ -81,6 +81,77 @@ All commands use gateway-level `commands.allowFrom` for authorization (`requireA
 
 ---
 
+### Phase 4 — Web Browser Providers (headless, no API key needed)
+
+Routes requests through real browser sessions on the provider's web UI. Requires a valid login session (free or paid tier). Uses persistent Chromium profiles — sessions survive gateway restarts.
+
+**Grok** (grok.com — SuperGrok subscription):
+
+| Model | Notes |
+|---|---|
+| `web-grok/grok-3` | Full model |
+| `web-grok/grok-3-fast` | Faster variant |
+| `web-grok/grok-3-mini` | Lightweight |
+| `web-grok/grok-3-mini-fast` | Fastest |
+
+| Command | What it does |
+|---|---|
+| `/grok-login` | Authenticate via X.com OAuth, save session to `~/.openclaw/grok-profile/` |
+| `/grok-status` | Show session validity + cookie expiry |
+| `/grok-logout` | Clear session |
+
+**Claude** (claude.ai):
+
+| Model | Notes |
+|---|---|
+| `web-claude/claude-sonnet` | Sonnet |
+| `web-claude/claude-opus` | Opus |
+| `web-claude/claude-haiku` | Haiku |
+
+| Command | What it does |
+|---|---|
+| `/claude-login` | Authenticate, save cookies to `~/.openclaw/claude-profile/` |
+| `/claude-status` | Show session validity + cookie expiry |
+| `/claude-logout` | Clear session |
+
+**Gemini** (gemini.google.com):
+
+| Model | Notes |
+|---|---|
+| `web-gemini/gemini-2-5-pro` | Gemini 2.5 Pro |
+| `web-gemini/gemini-2-5-flash` | Gemini 2.5 Flash |
+| `web-gemini/gemini-3-pro` | Gemini 3 Pro |
+| `web-gemini/gemini-3-flash` | Gemini 3 Flash |
+
+| Command | What it does |
+|---|---|
+| `/gemini-login` | Authenticate, save cookies to `~/.openclaw/gemini-profile/` |
+| `/gemini-status` | Show session validity + cookie expiry |
+| `/gemini-logout` | Clear session |
+
+**ChatGPT** (chatgpt.com):
+
+| Model | Notes |
+|---|---|
+| `web-chatgpt/gpt-4o` | GPT-4o |
+| `web-chatgpt/gpt-4o-mini` | GPT-4o Mini |
+| `web-chatgpt/gpt-o3` | o3 |
+| `web-chatgpt/gpt-o4-mini` | o4-mini |
+| `web-chatgpt/gpt-5` | GPT-5 |
+
+| Command | What it does |
+|---|---|
+| `/chatgpt-login` | Authenticate, save cookies to `~/.openclaw/chatgpt-profile/` |
+| `/chatgpt-status` | Show session validity + cookie expiry |
+| `/chatgpt-logout` | Clear session |
+
+**Session lifecycle:**
+- First use: run `/xxx-login` once (opens Chromium, authenticate in browser)
+- After gateway restart: sessions are **automatically restored** from saved profiles on startup (sequential, ~25s after start)
+- `/bridge-status` — shows all 4 providers at a glance with login state + expiry info
+
+---
+
 ## Requirements
 
 - [OpenClaw](https://openclaw.ai) gateway (tested with `2026.3.x`)
