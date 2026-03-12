@@ -9,7 +9,7 @@
     ]
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --noEmitOnError false",
     "typecheck": "tsc -p tsconfig.check.json",
     "test": "vitest run",
     "ci": "npm run typecheck && npm run test"
