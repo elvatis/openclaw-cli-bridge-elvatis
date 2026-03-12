@@ -746,10 +746,97 @@ const plugin = {
     const codexAuthPath = cfg.codexAuthPath ?? DEFAULT_CODEX_AUTH_PATH;
     const grokSessionPath = cfg.grokSessionPath ?? DEFAULT_SESSION_PATH;
 
-    // Grok session restore on startup REMOVED — on-demand only via /grok-login.
+    // ── Safe session restore on startup (sequential, profile-gated, non-blocking) ──
+    // Restores provider sessions from saved persistent profiles — but ONLY if the
+    // profile directory already exists (i.e. user has logged in before).
+    // Providers are launched one at a time with a delay to avoid OOM.
+    void (async () => {
+      await new Promise(r => setTimeout(r, 5000)); // wait for proxy + gateway to settle
+      const { chromium } = await import("playwright");
+      const { existsSync } = await import("node:fs");
 
-    // Auto-connect on startup REMOVED — browsers are launched on-demand via /xxx-login only.
-    // Spawning 4 persistent Chromium contexts at startup caused OOM under load.
+      const profileProviders: Array<{
+        name: string;
+        profileDir: string;
+        cookieFile: string;
+        verifySelector: string;
+        homeUrl: string;
+        setCtx: (c: BrowserContext) => void;
+        getCtx: () => BrowserContext | null;
+      }> = [
+        {
+          name: "grok",
+          profileDir: GROK_PROFILE_DIR,
+          cookieFile: join(homedir(), ".openclaw", "grok-session.json"),
+          verifySelector: "textarea",
+          homeUrl: "https://grok.com",
+          getCtx: () => grokContext,
+          setCtx: (c) => { grokContext = c; },
+        },
+        {
+          name: "claude",
+          profileDir: join(homedir(), ".openclaw", "claude-profile"),
+          cookieFile: join(homedir(), ".openclaw", "claude-cookie-expiry.json"),
+          verifySelector: ".ProseMirror",
+          homeUrl: "https://claude.ai/new",
+          getCtx: () => claudeContext,
+          setCtx: (c) => { claudeContext = c; },
+        },
+        {
+          name: "gemini",
+          profileDir: join(homedir(), ".openclaw", "gemini-profile"),
+          cookieFile: join(homedir(), ".openclaw", "gemini-cookie-expiry.json"),
+          verifySelector: ".ql-editor",
+          homeUrl: "https://gemini.google.com/app",
+          getCtx: () => geminiContext,
+          setCtx: (c) => { geminiContext = c; },
+        },
+        {
+          name: "chatgpt",
+          profileDir: join(homedir(), ".openclaw", "chatgpt-profile"),
+          cookieFile: join(homedir(), ".openclaw", "chatgpt-cookie-expiry.json"),
+          verifySelector: "#prompt-textarea",
+          homeUrl: "https://chatgpt.com",
+          getCtx: () => chatgptContext,
+          setCtx: (c) => { chatgptContext = c; },
+        },
+      ];
+
+      for (const p of profileProviders) {
+        // Skip if no saved profile/session exists
+        if (!existsSync(p.profileDir) && !existsSync(p.cookieFile)) {
+          api.logger.info(`[cli-bridge:${p.name}] no saved profile — skipping startup restore`);
+          continue;
+        }
+        if (p.getCtx()) continue; // already connected
+
+        try {
+          api.logger.info(`[cli-bridge:${p.name}] restoring session from profile…`);
+          const ctx = await chromium.launchPersistentContext(p.profileDir, {
+            headless: true,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          });
+          const page = await ctx.newPage();
+          await page.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+          await new Promise(r => setTimeout(r, 3000));
+          const ok = await page.locator(p.verifySelector).isVisible().catch(() => false);
+          await page.close().catch(() => {});
+          if (ok) {
+            p.setCtx(ctx);
+            ctx.on("close", () => { p.setCtx(null as unknown as BrowserContext); });
+            api.logger.info(`[cli-bridge:${p.name}] session restored from profile ✅`);
+          } else {
+            await ctx.close().catch(() => {});
+            api.logger.info(`[cli-bridge:${p.name}] profile exists but not logged in — skipping`);
+          }
+        } catch (err) {
+          api.logger.warn(`[cli-bridge:${p.name}] startup restore failed: ${(err as Error).message}`);
+        }
+
+        // Sequential delay — avoid spawning all 4 Chromium instances at once
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    })();
 
     // ── Phase 1: openai-codex auth bridge ─────────────────────────────────────
     if (enableCodex) {
