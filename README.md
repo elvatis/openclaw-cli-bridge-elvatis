@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.4.0`
+**Current version:** `1.4.1`
 
 ---
 
@@ -358,6 +358,11 @@ npm test            # vitest run (96 tests)
 ---
 
 ## Changelog
+
+### v1.4.1
+- **fix:** `/claude-login`, `/gemini-login`, `/chatgpt-login` now fall back to a **headed** (visible) Chromium browser when headless login fails (no saved cookies in profile). The user can log in manually in the opened browser window (5 min timeout). After login, cookies are saved to the persistent profile for future headless use.
+- **fix:** Added missing `claude-opus-4-6` and `claude-haiku-4-5` entries to the Claude browser MODEL_MAP
+- **root cause:** Headless Chromium without saved cookies sees a login page, not the editor - the user cannot interact with a headless browser to log in
 
 ### v1.4.0
 - **feat:** Persistent browser fallback for all providers - `/claude-login`, `/gemini-login`, `/chatgpt-login` no longer require the OpenClaw browser (CDP port 18800). If CDP is available, cookies are imported; otherwise a standalone persistent headless Chromium is launched automatically from the saved profile directory.
