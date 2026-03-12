@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.4.1`
+**Current version:** `1.4.2`
 
 ---
 
@@ -358,6 +358,10 @@ npm test            # vitest run (96 tests)
 ---
 
 ## Changelog
+
+### v1.4.2
+- **fix:** All browser launches now use `channel: "chrome"` (real system Chrome) instead of Playwright's bundled Chromium. Cloudflare human verification no longer blocks `/xxx-login` commands.
+- **root cause:** Playwright's bundled Chromium is fingerprinted by Cloudflare as an automation browser, triggering CAPTCHA challenges that cannot be completed. System Chrome is not flagged.
 
 ### v1.4.1
 - **fix:** `/claude-login`, `/gemini-login`, `/chatgpt-login` now fall back to a **headed** (visible) Chromium browser when headless login fails (no saved cookies in profile). The user can log in manually in the opened browser window (5 min timeout). After login, cookies are saved to the persistent profile for future headless use.

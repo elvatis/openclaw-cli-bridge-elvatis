@@ -296,6 +296,7 @@ async function getOrLaunchGrokContext(
     try {
       const ctx = await chromium.launchPersistentContext(GROK_PROFILE_DIR, {
         headless: true,
+        channel: "chrome",
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       });
       grokContext = ctx;
@@ -341,6 +342,7 @@ async function getOrLaunchClaudeContext(
       mkdirSync(CLAUDE_PROFILE_DIR, { recursive: true });
       const ctx = await chromium.launchPersistentContext(CLAUDE_PROFILE_DIR, {
         headless: true,
+        channel: "chrome",
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       });
       claudeContext = ctx;
@@ -373,6 +375,7 @@ async function getOrLaunchGeminiContext(
       mkdirSync(GEMINI_PROFILE_DIR, { recursive: true });
       const ctx = await chromium.launchPersistentContext(GEMINI_PROFILE_DIR, {
         headless: true,
+        channel: "chrome",
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       });
       geminiContext = ctx;
@@ -405,6 +408,7 @@ async function getOrLaunchChatGPTContext(
       mkdirSync(CHATGPT_PROFILE_DIR, { recursive: true });
       const ctx = await chromium.launchPersistentContext(CHATGPT_PROFILE_DIR, {
         headless: true,
+        channel: "chrome",
         args: ["--no-sandbox", "--disable-setuid-sandbox"],
       });
       chatgptContext = ctx;
@@ -1573,6 +1577,7 @@ const plugin = {
           const { chromium } = await import("playwright");
           const headedCtx = await chromium.launchPersistentContext(CLAUDE_PROFILE_DIR, {
             headless: false,
+            channel: "chrome",
             args: ["--no-sandbox", "--disable-setuid-sandbox"],
           });
           const loginPage = await headedCtx.newPage();
@@ -1698,6 +1703,7 @@ const plugin = {
           const { chromium } = await import("playwright");
           const headedCtx = await chromium.launchPersistentContext(GEMINI_PROFILE_DIR, {
             headless: false,
+            channel: "chrome",
             args: ["--no-sandbox", "--disable-setuid-sandbox"],
           });
           const loginPage = await headedCtx.newPage();
@@ -1818,6 +1824,7 @@ const plugin = {
           const { chromium } = await import("playwright");
           const headedCtx = await chromium.launchPersistentContext(CHATGPT_PROFILE_DIR, {
             headless: false,
+            channel: "chrome",
             args: ["--no-sandbox", "--disable-setuid-sandbox"],
           });
           const loginPage = await headedCtx.newPage();
