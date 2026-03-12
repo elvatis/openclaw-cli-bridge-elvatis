@@ -323,11 +323,31 @@ async function cleanupBrowsers(log: (msg: string) => void): Promise<void> {
 }
 
 /**
+ * Singleton guard for ensureAllProviderContexts — prevents concurrent spawns.
+ * If a run is already in progress, callers await the same promise instead of
+ * spawning a new Chromium each time.
+ */
+let _ensureAllRunning: Promise<void> | null = null;
+
+/**
  * Ensure all browser provider contexts are connected.
  * 1. Try the shared OpenClaw browser (CDP 18800)
  * 2. Fallback: launch a persistent headless Chromium per provider (saved profile with cookies)
+ *
+ * SAFETY: Only one concurrent run allowed. Extra callers await the existing run.
  */
 async function ensureAllProviderContexts(log: (msg: string) => void): Promise<void> {
+  if (_ensureAllRunning) {
+    log("[cli-bridge] ensureAllProviderContexts already running — awaiting existing run");
+    return _ensureAllRunning;
+  }
+  _ensureAllRunning = _doEnsureAllProviderContexts(log).finally(() => {
+    _ensureAllRunning = null;
+  });
+  return _ensureAllRunning;
+}
+
+async function _doEnsureAllProviderContexts(log: (msg: string) => void): Promise<void> {
   const { chromium } = await import("playwright");
 
   // Try CDP first (OpenClaw browser)
@@ -848,8 +868,7 @@ const plugin = {
                 const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
                 if (editor) { claudeContext = ctx; return ctx; }
               }
-              // Fallback: try persistent context
-              await ensureAllProviderContexts((msg) => api.logger.info(msg));
+              // No fallback spawn — return existing context or null to avoid Chromium leak
               return claudeContext;
             },
             getGeminiContext: () => geminiContext,
@@ -861,8 +880,7 @@ const plugin = {
                 const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
                 if (editor) { geminiContext = ctx; return ctx; }
               }
-              // Fallback: try persistent context
-              await ensureAllProviderContexts((msg) => api.logger.info(msg));
+              // No fallback spawn — return existing context or null to avoid Chromium leak
               return geminiContext;
             },
             getChatGPTContext: () => chatgptContext,
@@ -874,8 +892,7 @@ const plugin = {
                 const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
                 if (editor) { chatgptContext = ctx; return ctx; }
               }
-              // Fallback: try persistent context
-              await ensureAllProviderContexts((msg) => api.logger.info(msg));
+              // No fallback spawn — return existing context or null to avoid Chromium leak
               return chatgptContext;
             },
           });
@@ -919,8 +936,7 @@ const plugin = {
                     const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
                     if (editor) { claudeContext = ctx; return ctx; }
                   }
-                  // Fallback: try persistent context
-                  await ensureAllProviderContexts((msg) => api.logger.info(msg));
+                  // No fallback spawn — return existing context or null to avoid Chromium leak
                   return claudeContext;
                 },
                 getGeminiContext: () => geminiContext,
@@ -932,8 +948,7 @@ const plugin = {
                     const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
                     if (editor) { geminiContext = ctx; return ctx; }
                   }
-                  // Fallback: try persistent context
-                  await ensureAllProviderContexts((msg) => api.logger.info(msg));
+                  // No fallback spawn — return existing context or null to avoid Chromium leak
                   return geminiContext;
                 },
                 getChatGPTContext: () => chatgptContext,
@@ -945,8 +960,7 @@ const plugin = {
                     const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
                     if (editor) { chatgptContext = ctx; return ctx; }
                   }
-                  // Fallback: try persistent context
-                  await ensureAllProviderContexts((msg) => api.logger.info(msg));
+                  // No fallback spawn — return existing context or null to avoid Chromium leak
                   return chatgptContext;
                 },
               });
