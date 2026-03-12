@@ -85,8 +85,11 @@ interface CliPluginConfig {
 let grokBrowser: Browser | null = null;
 let grokContext: BrowserContext | null = null;
 
-// Persistent profile dir — survives gateway restarts, keeps cookies intact
+// Persistent profile dirs — survive gateway restarts, keep cookies intact
 const GROK_PROFILE_DIR = join(homedir(), ".openclaw", "grok-profile");
+const CLAUDE_PROFILE_DIR = join(homedir(), ".openclaw", "claude-profile");
+const GEMINI_PROFILE_DIR = join(homedir(), ".openclaw", "gemini-profile");
+const CHATGPT_PROFILE_DIR = join(homedir(), ".openclaw", "chatgpt-profile");
 
 // ── Gemini web-session state ──────────────────────────────────────────────────
 let geminiContext: BrowserContext | null = null;
@@ -310,19 +313,136 @@ async function getOrLaunchGrokContext(
   return _cdpBrowserLaunchPromise;
 }
 
+// ── Per-provider persistent context launch promises (coalesce concurrent calls) ──
+let _claudeLaunchPromise: Promise<BrowserContext | null> | null = null;
+let _geminiLaunchPromise: Promise<BrowserContext | null> | null = null;
+let _chatgptLaunchPromise: Promise<BrowserContext | null> | null = null;
+
+/**
+ * Get or launch a persistent headless Chromium context for a provider.
+ * Same pattern as getOrLaunchGrokContext:
+ *   1. Return existing live context if available
+ *   2. Try CDP (OpenClaw browser)
+ *   3. Fall back to persistent Chromium from saved profile
+ */
+async function getOrLaunchClaudeContext(
+  log: (msg: string) => void
+): Promise<BrowserContext | null> {
+  if (claudeContext) {
+    try { claudeContext.pages(); return claudeContext; } catch { claudeContext = null; }
+  }
+  const cdpCtx = await connectToOpenClawBrowser(log);
+  if (cdpCtx) return cdpCtx;
+  if (_claudeLaunchPromise) return _claudeLaunchPromise;
+  _claudeLaunchPromise = (async () => {
+    const { chromium } = await import("playwright");
+    log("[cli-bridge:claude] launching persistent Chromium…");
+    try {
+      mkdirSync(CLAUDE_PROFILE_DIR, { recursive: true });
+      const ctx = await chromium.launchPersistentContext(CLAUDE_PROFILE_DIR, {
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      });
+      claudeContext = ctx;
+      ctx.on("close", () => { claudeContext = null; log("[cli-bridge:claude] persistent context closed"); });
+      log("[cli-bridge:claude] persistent context ready");
+      return ctx;
+    } catch (err) {
+      log(`[cli-bridge:claude] failed to launch browser: ${(err as Error).message}`);
+      return null;
+    } finally {
+      _claudeLaunchPromise = null;
+    }
+  })();
+  return _claudeLaunchPromise;
+}
+
+async function getOrLaunchGeminiContext(
+  log: (msg: string) => void
+): Promise<BrowserContext | null> {
+  if (geminiContext) {
+    try { geminiContext.pages(); return geminiContext; } catch { geminiContext = null; }
+  }
+  const cdpCtx = await connectToOpenClawBrowser(log);
+  if (cdpCtx) return cdpCtx;
+  if (_geminiLaunchPromise) return _geminiLaunchPromise;
+  _geminiLaunchPromise = (async () => {
+    const { chromium } = await import("playwright");
+    log("[cli-bridge:gemini] launching persistent Chromium…");
+    try {
+      mkdirSync(GEMINI_PROFILE_DIR, { recursive: true });
+      const ctx = await chromium.launchPersistentContext(GEMINI_PROFILE_DIR, {
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      });
+      geminiContext = ctx;
+      ctx.on("close", () => { geminiContext = null; log("[cli-bridge:gemini] persistent context closed"); });
+      log("[cli-bridge:gemini] persistent context ready");
+      return ctx;
+    } catch (err) {
+      log(`[cli-bridge:gemini] failed to launch browser: ${(err as Error).message}`);
+      return null;
+    } finally {
+      _geminiLaunchPromise = null;
+    }
+  })();
+  return _geminiLaunchPromise;
+}
+
+async function getOrLaunchChatGPTContext(
+  log: (msg: string) => void
+): Promise<BrowserContext | null> {
+  if (chatgptContext) {
+    try { chatgptContext.pages(); return chatgptContext; } catch { chatgptContext = null; }
+  }
+  const cdpCtx = await connectToOpenClawBrowser(log);
+  if (cdpCtx) return cdpCtx;
+  if (_chatgptLaunchPromise) return _chatgptLaunchPromise;
+  _chatgptLaunchPromise = (async () => {
+    const { chromium } = await import("playwright");
+    log("[cli-bridge:chatgpt] launching persistent Chromium…");
+    try {
+      mkdirSync(CHATGPT_PROFILE_DIR, { recursive: true });
+      const ctx = await chromium.launchPersistentContext(CHATGPT_PROFILE_DIR, {
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+      });
+      chatgptContext = ctx;
+      ctx.on("close", () => { chatgptContext = null; log("[cli-bridge:chatgpt] persistent context closed"); });
+      log("[cli-bridge:chatgpt] persistent context ready");
+      return ctx;
+    } catch (err) {
+      log(`[cli-bridge:chatgpt] failed to launch browser: ${(err as Error).message}`);
+      return null;
+    } finally {
+      _chatgptLaunchPromise = null;
+    }
+  })();
+  return _chatgptLaunchPromise;
+}
+
 /** Clean up all browser resources — call on plugin teardown */
 async function cleanupBrowsers(log: (msg: string) => void): Promise<void> {
   if (grokContext) {
     try { await grokContext.close(); } catch { /* ignore */ }
     grokContext = null;
   }
+  if (claudeContext) {
+    try { await claudeContext.close(); } catch { /* ignore */ }
+    claudeContext = null;
+  }
+  if (geminiContext) {
+    try { await geminiContext.close(); } catch { /* ignore */ }
+    geminiContext = null;
+  }
+  if (chatgptContext) {
+    try { await chatgptContext.close(); } catch { /* ignore */ }
+    chatgptContext = null;
+  }
   if (_cdpBrowser) {
     try { await _cdpBrowser.close(); } catch { /* ignore */ }
     _cdpBrowser = null;
   }
-  claudeContext = null;
-  geminiContext = null;
-  chatgptContext = null;
   log("[cli-bridge] browser resources cleaned up");
 }
 
@@ -944,7 +1064,7 @@ const plugin = {
             warn: (msg) => api.logger.warn(msg),
             getGrokContext: () => grokContext,
             connectGrokContext: async () => {
-              const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+              const ctx = await getOrLaunchGrokContext((msg) => api.logger.info(msg));
               if (ctx) {
                 const check = await verifySession(ctx, (msg) => api.logger.info(msg));
                 if (check.valid) { grokContext = ctx; return ctx; }
@@ -953,38 +1073,35 @@ const plugin = {
             },
             getClaudeContext: () => claudeContext,
             connectClaudeContext: async () => {
-              const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+              const ctx = await getOrLaunchClaudeContext((msg) => api.logger.info(msg));
               if (ctx) {
                 const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
                 const { page } = await getOrCreateClaudePage(ctx);
                 const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
                 if (editor) { claudeContext = ctx; return ctx; }
               }
-              // No fallback spawn — return existing context or null to avoid Chromium leak
               return claudeContext;
             },
             getGeminiContext: () => geminiContext,
             connectGeminiContext: async () => {
-              const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+              const ctx = await getOrLaunchGeminiContext((msg) => api.logger.info(msg));
               if (ctx) {
                 const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
                 const { page } = await getOrCreateGeminiPage(ctx);
                 const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
                 if (editor) { geminiContext = ctx; return ctx; }
               }
-              // No fallback spawn — return existing context or null to avoid Chromium leak
               return geminiContext;
             },
             getChatGPTContext: () => chatgptContext,
             connectChatGPTContext: async () => {
-              const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+              const ctx = await getOrLaunchChatGPTContext((msg) => api.logger.info(msg));
               if (ctx) {
                 const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
                 const { page } = await getOrCreateChatGPTPage(ctx);
                 const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
                 if (editor) { chatgptContext = ctx; return ctx; }
               }
-              // No fallback spawn — return existing context or null to avoid Chromium leak
               return chatgptContext;
             },
           });
@@ -1410,13 +1527,34 @@ const plugin = {
           claudeContext = null;
         }
 
-        api.logger.info("[cli-bridge:claude] /claude-login: connecting to OpenClaw browser…");
+        api.logger.info("[cli-bridge:claude] /claude-login: connecting…");
 
-        // Connect to OpenClaw browser context for session (singleton CDP)
-        const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
-        if (!ctx) return { text: "❌ Could not connect to OpenClaw browser.\nMake sure claude.ai is open in your browser." };
+        // Step 1: try to grab cookies from OpenClaw browser (CDP) if available
+        let importedCookies: unknown[] = [];
+        try {
+          const { chromium } = await import("playwright");
+          const ocBrowser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 3000 });
+          const ocCtx = ocBrowser.contexts()[0];
+          if (ocCtx) {
+            importedCookies = await ocCtx.cookies(["https://claude.ai", "https://anthropic.com"]);
+            api.logger.info(`[cli-bridge:claude] imported ${importedCookies.length} cookies from OpenClaw browser`);
+          }
+          await ocBrowser.close().catch(() => {});
+        } catch {
+          api.logger.info("[cli-bridge:claude] OpenClaw browser not available — using saved profile");
+        }
 
-        // Navigate to claude.ai/new if not already there
+        // Step 2: get or launch persistent context (CDP or fallback Chromium)
+        const ctx = await getOrLaunchClaudeContext((msg) => api.logger.info(msg));
+        if (!ctx) return { text: "❌ Could not launch browser. Check server logs." };
+
+        // Step 3: inject imported cookies if available
+        if (importedCookies.length > 0) {
+          await ctx.addCookies(importedCookies as Parameters<typeof ctx.addCookies>[0]);
+          api.logger.info("[cli-bridge:claude] cookies injected into persistent profile");
+        }
+
+        // Step 4: navigate to claude.ai and verify
         const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
         let page;
         try {
@@ -1425,33 +1563,12 @@ const plugin = {
           return { text: `❌ Failed to open claude.ai: ${(err as Error).message}` };
         }
 
-        // Verify editor is visible
         const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
         if (!editor) {
           return { text: "❌ claude.ai editor not visible — are you logged in?\nOpen claude.ai in your browser and try again." };
         }
 
         claudeContext = ctx;
-
-        // Export + bake cookies into persistent profile
-        const claudeProfileDir = join(homedir(), ".openclaw", "claude-profile");
-        mkdirSync(claudeProfileDir, { recursive: true });
-        try {
-          const allCookies = await ctx.cookies([
-            "https://claude.ai",
-            "https://anthropic.com",
-          ]);
-          const { chromium } = await import("playwright");
-          const pCtx = await chromium.launchPersistentContext(claudeProfileDir, {
-            headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
-          });
-          await pCtx.addCookies(allCookies);
-          await pCtx.close();
-          api.logger.info(`[cli-bridge:claude] cookies baked into ${claudeProfileDir}`);
-        } catch (err) {
-          api.logger.warn(`[cli-bridge:claude] cookie bake failed: ${(err as Error).message}`);
-        }
 
         // Scan cookie expiry
         const expiry = await scanClaudeCookieExpiry(ctx);
@@ -1511,10 +1628,34 @@ const plugin = {
           geminiContext = null;
         }
 
-        api.logger.info("[cli-bridge:gemini] /gemini-login: connecting to OpenClaw browser…");
-        const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
-        if (!ctx) return { text: "❌ Could not connect to OpenClaw browser.\nMake sure gemini.google.com is open in your browser." };
+        api.logger.info("[cli-bridge:gemini] /gemini-login: connecting…");
 
+        // Step 1: try to grab cookies from OpenClaw browser (CDP) if available
+        let importedCookies: unknown[] = [];
+        try {
+          const { chromium } = await import("playwright");
+          const ocBrowser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 3000 });
+          const ocCtx = ocBrowser.contexts()[0];
+          if (ocCtx) {
+            importedCookies = await ocCtx.cookies(["https://gemini.google.com", "https://accounts.google.com", "https://google.com"]);
+            api.logger.info(`[cli-bridge:gemini] imported ${importedCookies.length} cookies from OpenClaw browser`);
+          }
+          await ocBrowser.close().catch(() => {});
+        } catch {
+          api.logger.info("[cli-bridge:gemini] OpenClaw browser not available — using saved profile");
+        }
+
+        // Step 2: get or launch persistent context
+        const ctx = await getOrLaunchGeminiContext((msg) => api.logger.info(msg));
+        if (!ctx) return { text: "❌ Could not launch browser. Check server logs." };
+
+        // Step 3: inject imported cookies if available
+        if (importedCookies.length > 0) {
+          await ctx.addCookies(importedCookies as Parameters<typeof ctx.addCookies>[0]);
+          api.logger.info("[cli-bridge:gemini] cookies injected into persistent profile");
+        }
+
+        // Step 4: navigate and verify
         const { getOrCreateGeminiPage } = await import("./src/gemini-browser.js");
         let page;
         try {
@@ -1529,27 +1670,6 @@ const plugin = {
         }
 
         geminiContext = ctx;
-
-        // Export + bake cookies into persistent profile
-        const geminiProfileDir = join(homedir(), ".openclaw", "gemini-profile");
-        mkdirSync(geminiProfileDir, { recursive: true });
-        try {
-          const allCookies = await ctx.cookies([
-            "https://gemini.google.com",
-            "https://accounts.google.com",
-            "https://google.com",
-          ]);
-          const { chromium } = await import("playwright");
-          const pCtx = await chromium.launchPersistentContext(geminiProfileDir, {
-            headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
-          });
-          await pCtx.addCookies(allCookies);
-          await pCtx.close();
-          api.logger.info(`[cli-bridge:gemini] cookies baked into ${geminiProfileDir}`);
-        } catch (err) {
-          api.logger.warn(`[cli-bridge:gemini] cookie bake failed: ${(err as Error).message}`);
-        }
 
         const expiry = await scanGeminiCookieExpiry(ctx);
         if (expiry) {
@@ -1607,10 +1727,34 @@ const plugin = {
           } catch { /* fall through */ }
           chatgptContext = null;
         }
-        api.logger.info("[cli-bridge:chatgpt] /chatgpt-login: connecting to OpenClaw browser…");
-        const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
-        if (!ctx) return { text: "❌ Could not connect to OpenClaw browser.\nMake sure chatgpt.com is open in your browser." };
+        api.logger.info("[cli-bridge:chatgpt] /chatgpt-login: connecting…");
 
+        // Step 1: try to grab cookies from OpenClaw browser (CDP) if available
+        let importedCookies: unknown[] = [];
+        try {
+          const { chromium } = await import("playwright");
+          const ocBrowser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 3000 });
+          const ocCtx = ocBrowser.contexts()[0];
+          if (ocCtx) {
+            importedCookies = await ocCtx.cookies(["https://chatgpt.com", "https://openai.com", "https://auth.openai.com"]);
+            api.logger.info(`[cli-bridge:chatgpt] imported ${importedCookies.length} cookies from OpenClaw browser`);
+          }
+          await ocBrowser.close().catch(() => {});
+        } catch {
+          api.logger.info("[cli-bridge:chatgpt] OpenClaw browser not available — using saved profile");
+        }
+
+        // Step 2: get or launch persistent context
+        const ctx = await getOrLaunchChatGPTContext((msg) => api.logger.info(msg));
+        if (!ctx) return { text: "❌ Could not launch browser. Check server logs." };
+
+        // Step 3: inject imported cookies if available
+        if (importedCookies.length > 0) {
+          await ctx.addCookies(importedCookies as Parameters<typeof ctx.addCookies>[0]);
+          api.logger.info("[cli-bridge:chatgpt] cookies injected into persistent profile");
+        }
+
+        // Step 4: navigate and verify
         const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
         let page;
         try { ({ page } = await getOrCreateChatGPTPage(ctx)); }
@@ -1620,27 +1764,6 @@ const plugin = {
           return { text: "❌ ChatGPT editor not visible — are you logged in?\nOpen chatgpt.com in your browser and try again." };
 
         chatgptContext = ctx;
-
-        // Export + bake cookies into persistent profile
-        const chatgptProfileDir = join(homedir(), ".openclaw", "chatgpt-profile");
-        mkdirSync(chatgptProfileDir, { recursive: true });
-        try {
-          const allCookies = await ctx.cookies([
-            "https://chatgpt.com",
-            "https://openai.com",
-            "https://auth.openai.com",
-          ]);
-          const { chromium } = await import("playwright");
-          const pCtx = await chromium.launchPersistentContext(chatgptProfileDir, {
-            headless: true,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
-          });
-          await pCtx.addCookies(allCookies);
-          await pCtx.close();
-          api.logger.info(`[cli-bridge:chatgpt] cookies baked into ${chatgptProfileDir}`);
-        } catch (err) {
-          api.logger.warn(`[cli-bridge:chatgpt] cookie bake failed: ${(err as Error).message}`);
-        }
 
         const expiry = await scanChatGPTCookieExpiry(ctx);
         if (expiry) { saveChatGPTExpiry(expiry); api.logger.info(`[cli-bridge:chatgpt] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`); }
