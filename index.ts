@@ -91,6 +91,15 @@ const CLAUDE_PROFILE_DIR = join(homedir(), ".openclaw", "claude-profile");
 const GEMINI_PROFILE_DIR = join(homedir(), ".openclaw", "gemini-profile");
 const CHATGPT_PROFILE_DIR = join(homedir(), ".openclaw", "chatgpt-profile");
 
+// Stealth launch options — prevent Cloudflare/bot detection from flagging the browser
+const STEALTH_ARGS = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-blink-features=AutomationControlled",
+  "--disable-infobars",
+];
+const STEALTH_IGNORE_DEFAULTS = ["--enable-automation"] as const;
+
 // ── Gemini web-session state ──────────────────────────────────────────────────
 let geminiContext: BrowserContext | null = null;
 const GEMINI_EXPIRY_FILE = join(homedir(), ".openclaw", "gemini-cookie-expiry.json");
@@ -297,7 +306,8 @@ async function getOrLaunchGrokContext(
       const ctx = await chromium.launchPersistentContext(GROK_PROFILE_DIR, {
         headless: true,
         channel: "chrome",
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        args: STEALTH_ARGS,
+        ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
       });
       grokContext = ctx;
       // Auto-cleanup on browser crash
@@ -343,7 +353,8 @@ async function getOrLaunchClaudeContext(
       const ctx = await chromium.launchPersistentContext(CLAUDE_PROFILE_DIR, {
         headless: true,
         channel: "chrome",
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        args: STEALTH_ARGS,
+        ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
       });
       claudeContext = ctx;
       ctx.on("close", () => { claudeContext = null; log("[cli-bridge:claude] persistent context closed"); });
@@ -376,7 +387,8 @@ async function getOrLaunchGeminiContext(
       const ctx = await chromium.launchPersistentContext(GEMINI_PROFILE_DIR, {
         headless: true,
         channel: "chrome",
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        args: STEALTH_ARGS,
+        ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
       });
       geminiContext = ctx;
       ctx.on("close", () => { geminiContext = null; log("[cli-bridge:gemini] persistent context closed"); });
@@ -409,7 +421,8 @@ async function getOrLaunchChatGPTContext(
       const ctx = await chromium.launchPersistentContext(CHATGPT_PROFILE_DIR, {
         headless: true,
         channel: "chrome",
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        args: STEALTH_ARGS,
+        ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
       });
       chatgptContext = ctx;
       ctx.on("close", () => { chatgptContext = null; log("[cli-bridge:chatgpt] persistent context closed"); });
@@ -543,7 +556,9 @@ async function _doEnsureAllProviderContexts(log: (msg: string) => void): Promise
         mkdirSync(cfg.profileDir, { recursive: true });
         const pCtx = await chromium.launchPersistentContext(cfg.profileDir, {
           headless: true,
-          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          channel: "chrome",
+          args: STEALTH_ARGS,
+          ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
         });
         const page = await pCtx.newPage();
         await page.goto(cfg.homeUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
@@ -1578,7 +1593,8 @@ const plugin = {
           const headedCtx = await chromium.launchPersistentContext(CLAUDE_PROFILE_DIR, {
             headless: false,
             channel: "chrome",
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            args: STEALTH_ARGS,
+            ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
           });
           const loginPage = await headedCtx.newPage();
           await loginPage.goto("https://claude.ai/new", { waitUntil: "domcontentloaded", timeout: 15_000 });
@@ -1704,7 +1720,8 @@ const plugin = {
           const headedCtx = await chromium.launchPersistentContext(GEMINI_PROFILE_DIR, {
             headless: false,
             channel: "chrome",
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            args: STEALTH_ARGS,
+            ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
           });
           const loginPage = await headedCtx.newPage();
           await loginPage.goto("https://gemini.google.com/app", { waitUntil: "domcontentloaded", timeout: 15_000 });
@@ -1825,7 +1842,8 @@ const plugin = {
           const headedCtx = await chromium.launchPersistentContext(CHATGPT_PROFILE_DIR, {
             headless: false,
             channel: "chrome",
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            args: STEALTH_ARGS,
+            ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
           });
           const loginPage = await headedCtx.newPage();
           await loginPage.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 15_000 });
