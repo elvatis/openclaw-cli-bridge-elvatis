@@ -1563,15 +1563,39 @@ const plugin = {
           return { text: `❌ Failed to open claude.ai: ${(err as Error).message}` };
         }
 
-        const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+        let editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
         if (!editor) {
-          return { text: "❌ claude.ai editor not visible — are you logged in?\nOpen claude.ai in your browser and try again." };
+          // Headless failed — launch headed browser for interactive login
+          api.logger.info("[cli-bridge:claude] headless login failed — launching headed browser for manual login…");
+          try { await ctx.close(); } catch { /* ignore */ }
+          claudeContext = null;
+
+          const { chromium } = await import("playwright");
+          const headedCtx = await chromium.launchPersistentContext(CLAUDE_PROFILE_DIR, {
+            headless: false,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          });
+          const loginPage = await headedCtx.newPage();
+          await loginPage.goto("https://claude.ai/new", { waitUntil: "domcontentloaded", timeout: 15_000 });
+
+          api.logger.info("[cli-bridge:claude] waiting for manual login (5 min timeout)…");
+          try {
+            await loginPage.waitForSelector(".ProseMirror", { timeout: 300_000 });
+          } catch {
+            await headedCtx.close().catch(() => {});
+            return { text: "❌ Login timeout — claude.ai editor did not appear within 5 minutes." };
+          }
+
+          claudeContext = headedCtx;
+          headedCtx.on("close", () => { claudeContext = null; });
+          editor = true;
+          page = loginPage;
+        } else {
+          claudeContext = ctx;
         }
 
-        claudeContext = ctx;
-
         // Scan cookie expiry
-        const expiry = await scanClaudeCookieExpiry(ctx);
+        const expiry = await scanClaudeCookieExpiry(claudeContext!);
         if (expiry) {
           saveClaudeExpiry(expiry);
           api.logger.info(`[cli-bridge:claude] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
@@ -1664,14 +1688,38 @@ const plugin = {
           return { text: `❌ Failed to open gemini.google.com: ${(err as Error).message}` };
         }
 
-        const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
+        let editor = await page.locator(".ql-editor").isVisible().catch(() => false);
         if (!editor) {
-          return { text: "❌ Gemini editor not visible — are you logged in?\nOpen gemini.google.com in your browser and try again." };
+          // Headless failed — launch headed browser for interactive login
+          api.logger.info("[cli-bridge:gemini] headless login failed — launching headed browser for manual login…");
+          try { await ctx.close(); } catch { /* ignore */ }
+          geminiContext = null;
+
+          const { chromium } = await import("playwright");
+          const headedCtx = await chromium.launchPersistentContext(GEMINI_PROFILE_DIR, {
+            headless: false,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          });
+          const loginPage = await headedCtx.newPage();
+          await loginPage.goto("https://gemini.google.com/app", { waitUntil: "domcontentloaded", timeout: 15_000 });
+
+          api.logger.info("[cli-bridge:gemini] waiting for manual login (5 min timeout)…");
+          try {
+            await loginPage.waitForSelector(".ql-editor", { timeout: 300_000 });
+          } catch {
+            await headedCtx.close().catch(() => {});
+            return { text: "❌ Login timeout — Gemini editor did not appear within 5 minutes." };
+          }
+
+          geminiContext = headedCtx;
+          headedCtx.on("close", () => { geminiContext = null; });
+          editor = true;
+          page = loginPage;
+        } else {
+          geminiContext = ctx;
         }
 
-        geminiContext = ctx;
-
-        const expiry = await scanGeminiCookieExpiry(ctx);
+        const expiry = await scanGeminiCookieExpiry(geminiContext!);
         if (expiry) {
           saveGeminiExpiry(expiry);
           api.logger.info(`[cli-bridge:gemini] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
@@ -1760,12 +1808,37 @@ const plugin = {
         try { ({ page } = await getOrCreateChatGPTPage(ctx)); }
         catch (err) { return { text: `❌ Failed to open chatgpt.com: ${(err as Error).message}` }; }
 
-        if (!await page.locator("#prompt-textarea").isVisible().catch(() => false))
-          return { text: "❌ ChatGPT editor not visible — are you logged in?\nOpen chatgpt.com in your browser and try again." };
+        let chatgptEditorVisible = await page.locator("#prompt-textarea").isVisible().catch(() => false);
+        if (!chatgptEditorVisible) {
+          // Headless failed — launch headed browser for interactive login
+          api.logger.info("[cli-bridge:chatgpt] headless login failed — launching headed browser for manual login…");
+          try { await ctx.close(); } catch { /* ignore */ }
+          chatgptContext = null;
 
-        chatgptContext = ctx;
+          const { chromium } = await import("playwright");
+          const headedCtx = await chromium.launchPersistentContext(CHATGPT_PROFILE_DIR, {
+            headless: false,
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+          });
+          const loginPage = await headedCtx.newPage();
+          await loginPage.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 15_000 });
 
-        const expiry = await scanChatGPTCookieExpiry(ctx);
+          api.logger.info("[cli-bridge:chatgpt] waiting for manual login (5 min timeout)…");
+          try {
+            await loginPage.waitForSelector("#prompt-textarea", { timeout: 300_000 });
+          } catch {
+            await headedCtx.close().catch(() => {});
+            return { text: "❌ Login timeout — ChatGPT editor did not appear within 5 minutes." };
+          }
+
+          chatgptContext = headedCtx;
+          headedCtx.on("close", () => { chatgptContext = null; });
+          page = loginPage;
+        } else {
+          chatgptContext = ctx;
+        }
+
+        const expiry = await scanChatGPTCookieExpiry(chatgptContext!);
         if (expiry) { saveChatGPTExpiry(expiry); api.logger.info(`[cli-bridge:chatgpt] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`); }
         const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatChatGPTExpiry(expiry)}` : "";
         return { text: `✅ ChatGPT session ready!\n\nModels available:\n• \`vllm/web-chatgpt/gpt-4o\`\n• \`vllm/web-chatgpt/gpt-4o-mini\`\n• \`vllm/web-chatgpt/gpt-o3\`\n• \`vllm/web-chatgpt/gpt-o4-mini\`\n• \`vllm/web-chatgpt/gpt-5\`${expiryLine}` };
