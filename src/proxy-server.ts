@@ -205,6 +205,7 @@ async function handleRequest(
     }).join("");
 
     const cliModels = CLI_MODELS.filter(m => m.id.startsWith("cli-"));
+    const codexModels = CLI_MODELS.filter(m => m.id.startsWith("openai-codex/"));
     const webModels = CLI_MODELS.filter(m => m.id.startsWith("web-"));
     const localModels = CLI_MODELS.filter(m => m.id.startsWith("local-"));
     const modelList = (models: typeof CLI_MODELS) =>
@@ -255,6 +256,8 @@ async function handleRequest(
     <div class="card">
       <div class="card-header">CLI Models (${cliModels.length})</div>
       <ul>${modelList(cliModels)}</ul>
+      <div class="card-header">Codex Models (${codexModels.length})</div>
+      <ul>${modelList(codexModels)}</ul>
     </div>
     <div class="card">
       <div class="card-header">Web Session Models (${webModels.length})</div>
