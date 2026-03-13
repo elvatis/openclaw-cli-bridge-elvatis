@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.6.3`
+**Current version:** `1.6.4`
 
 ---
 
@@ -361,6 +361,9 @@ npm test            # vitest run (83 tests)
 ---
 
 ## Changelog
+
+### v1.6.4
+- **chore:** version bump (1.6.3 was already published on npm with partial changes)
 
 ### v1.6.3
 - **fix:** CLI-proxy models (`cli-gemini/*`, `cli-claude/*`) now return HTTP 400 with `tools_not_supported` when a request includes tool/function call schemas — prevents agents from silently failing or hallucinating when assigned a CLI-proxy model
