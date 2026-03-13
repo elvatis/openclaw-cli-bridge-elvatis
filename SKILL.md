@@ -56,6 +56,8 @@ Sessions survive gateway restarts. `/bridge-status` shows all 4 at a glance.
 
 On gateway restart, if any session has expired, a **WhatsApp alert** is sent automatically with the exact `/xxx-login` commands needed — no guessing required.
 
+**Browser health dashboard:** `http://127.0.0.1:31337/status` — live overview of all 4 providers, cookie expiry, and model list. Auto-refreshes every 30s.
+
 ## Setup
 
 1. Enable plugin + restart gateway
@@ -64,4 +66,4 @@ On gateway restart, if any session has expired, a **WhatsApp alert** is sent aut
 
 See `README.md` for full configuration reference and architecture diagram.
 
-**Version:** 1.7.0
+**Version:** 1.7.1

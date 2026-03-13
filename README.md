@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.7.0`
+**Current version:** `1.7.1`
 
 ---
 
@@ -361,6 +361,9 @@ npm test            # vitest run (83 tests)
 ---
 
 ## Changelog
+
+### v1.7.1
+- **feat:** `/status` HTML dashboard — browser-accessible health page at `http://127.0.0.1:31337/status`. Shows all 4 web providers with live status badge (Connected / Logged in / Expired / Never logged in), cookie expiry per provider, CLI and web model list. Auto-refreshes every 30s.
 
 ### v1.7.0
 - **fix:** Startup restore timeout 3s → 6s with one retry, eliminates false "not logged in" for slow-loading pages (Grok)
