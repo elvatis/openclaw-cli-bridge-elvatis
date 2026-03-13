@@ -62,4 +62,4 @@ Sessions survive gateway restarts. `/bridge-status` shows all 4 at a glance.
 
 See `README.md` for full configuration reference and architecture diagram.
 
-**Version:** 1.6.0
+**Version:** 1.6.1

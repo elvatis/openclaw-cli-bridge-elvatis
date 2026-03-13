@@ -854,7 +854,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.6.0",
+  version: "1.6.1",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -885,12 +885,16 @@ const plugin = {
         const { chromium } = await import("playwright");
         const { existsSync } = await import("node:fs");
 
+        // Collect providers that need re-login — send one batched WhatsApp alert
+        const needsLogin: string[] = [];
+
         const profileProviders: Array<{
           name: string;
           profileDir: string;
           cookieFile: string;
           verifySelector: string;
           homeUrl: string;
+          loginCmd: string;
           setCtx: (c: BrowserContext) => void;
           getCtx: () => BrowserContext | null;
         }> = [
@@ -900,6 +904,7 @@ const plugin = {
             cookieFile: join(homedir(), ".openclaw", "grok-session.json"),
             verifySelector: "textarea",
             homeUrl: "https://grok.com",
+            loginCmd: "/grok-login",
             getCtx: () => grokContext,
             setCtx: (c) => { grokContext = c; },
           },
@@ -909,6 +914,7 @@ const plugin = {
             cookieFile: join(homedir(), ".openclaw", "gemini-cookie-expiry.json"),
             verifySelector: ".ql-editor",
             homeUrl: "https://gemini.google.com/app",
+            loginCmd: "/gemini-login",
             getCtx: () => geminiContext,
             setCtx: (c) => { geminiContext = c; },
           },
@@ -918,6 +924,7 @@ const plugin = {
             cookieFile: CLAUDE_EXPIRY_FILE,
             verifySelector: ".ProseMirror",
             homeUrl: "https://claude.ai/new",
+            loginCmd: "/claude-login",
             getCtx: () => claudeWebContext,
             setCtx: (c) => { claudeWebContext = c; },
           },
@@ -927,6 +934,7 @@ const plugin = {
             cookieFile: CHATGPT_EXPIRY_FILE,
             verifySelector: "#prompt-textarea",
             homeUrl: "https://chatgpt.com",
+            loginCmd: "/chatgpt-login",
             getCtx: () => chatgptContext,
             setCtx: (c) => { chatgptContext = c; },
           },
@@ -956,7 +964,8 @@ const plugin = {
               api.logger.info(`[cli-bridge:${p.name}] session restored from profile ✅`);
             } else {
               await ctx.close().catch(() => {});
-              api.logger.info(`[cli-bridge:${p.name}] profile exists but not logged in — needs /xxx-login`);
+              api.logger.info(`[cli-bridge:${p.name}] profile exists but not logged in — needs ${p.loginCmd}`);
+              needsLogin.push(p.loginCmd);
             }
           } catch (err) {
             api.logger.warn(`[cli-bridge:${p.name}] startup restore failed: ${(err as Error).message}`);
@@ -964,6 +973,22 @@ const plugin = {
 
           // Sequential — never spawn all 4 Chromium instances at once
           await new Promise(r => setTimeout(r, 3000));
+
+        }
+
+        // Send one batched WhatsApp alert if any providers need re-login
+        if (needsLogin.length > 0) {
+          const cmds = needsLogin.map(cmd => `• ${cmd}`).join("\n");
+          const msg = `🔐 *cli-bridge:* Session expired for ${needsLogin.length} provider(s). Run to re-login:\n\n${cmds}`;
+          try {
+            await api.runtime.system.runCommandWithTimeout(
+              ["openclaw", "message", "send", "--channel", "whatsapp", "--to", "+4915170113694", "--message", msg],
+              { timeoutMs: 10_000 }
+            );
+            api.logger.info(`[cli-bridge] sent re-login notification for: ${needsLogin.join(", ")}`);
+          } catch (err) {
+            api.logger.warn(`[cli-bridge] failed to send re-login notification: ${(err as Error).message}`);
+          }
         }
       })();
     }
