@@ -132,9 +132,10 @@ async function scanGeminiCookieExpiry(ctx: BrowserContext): Promise<GeminiExpiry
     const cookies = await ctx.cookies(["https://gemini.google.com", "https://accounts.google.com"]);
     const auth = cookies.filter(c => ["__Secure-1PSID", "__Secure-3PSID", "SID"].includes(c.name) && c.expires && c.expires > 0);
     if (!auth.length) return null;
-    auth.sort((a, b) => (a.expires ?? 0) - (b.expires ?? 0));
-    const earliest = auth[0];
-    return { expiresAt: (earliest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: earliest.name };
+    // Use the longest-lived auth cookie for expiry tracking
+    auth.sort((a, b) => (b.expires ?? 0) - (a.expires ?? 0));
+    const longest = auth[0];
+    return { expiresAt: (longest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: longest.name };
   } catch { return null; }
 }
 // ── Claude cookie expiry helpers ─────────────────────────────────────────────
@@ -173,9 +174,11 @@ async function scanChatGPTCookieExpiry(ctx: BrowserContext): Promise<ChatGPTExpi
     const cookies = await ctx.cookies(["https://chatgpt.com", "https://auth0.openai.com"]);
     const auth = cookies.filter(c => ["__Secure-next-auth.session-token", "_puid", "oai-did"].includes(c.name) && c.expires && c.expires > 0);
     if (!auth.length) return null;
-    auth.sort((a, b) => (a.expires ?? 0) - (b.expires ?? 0));
-    const earliest = auth[0];
-    return { expiresAt: (earliest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: earliest.name };
+    // Use the LONGEST-lived auth cookie for expiry tracking — _puid (~7d) is
+    // much shorter than __Secure-next-auth.session-token and triggers false alerts.
+    auth.sort((a, b) => (b.expires ?? 0) - (a.expires ?? 0));
+    const longest = auth[0];
+    return { expiresAt: (longest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: longest.name };
   } catch { return null; }
 }
 
@@ -211,7 +214,8 @@ async function scanCookieExpiry(ctx: import("playwright").BrowserContext): Promi
     const cookies = await ctx.cookies(["https://grok.com", "https://x.ai"]);
     const authCookies = cookies.filter((c) => ["sso", "sso-rw"].includes(c.name) && c.expires > 0);
     if (authCookies.length === 0) return null;
-    const earliest = authCookies.reduce((min, c) => (c.expires < min.expires ? c : min));
+    // Use the longest-lived auth cookie for expiry tracking
+    const earliest = authCookies.reduce((min, c) => (c.expires > min.expires ? c : min));
     return {
       expiresAt: earliest.expires * 1000,
       loginAt: Date.now(),
@@ -914,7 +918,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.7.3",
+  version: "1.7.4",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
