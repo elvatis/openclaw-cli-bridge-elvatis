@@ -1,6 +1,6 @@
 ---
 name: openclaw-cli-bridge-elvatis
-description: Bridge local Codex, Gemini, and Claude Code CLIs into OpenClaw as vllm model providers. Includes /cli-* slash commands for instant model switching (/cli-sonnet, /cli-opus, /cli-haiku, /cli-gemini, /cli-gemini-flash, /cli-gemini3). E2BIG-safe spawn via minimal env.
+description: Bridge local AI CLIs + web browser sessions (Grok, Gemini, Claude.ai, ChatGPT) into OpenClaw as model providers. Includes /cli-* slash commands for instant model switching and persistent browser profiles for all 4 web providers.
 homepage: https://github.com/elvatis/openclaw-cli-bridge-elvatis
 metadata:
   {
@@ -15,7 +15,7 @@ metadata:
 
 # OpenClaw CLI Bridge
 
-Bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as OpenClaw model providers. Three phases:
+Bridges locally installed AI CLIs + web browser sessions into OpenClaw as model providers. Four phases:
 
 ## Phase 1 — Codex Auth Bridge
 Registers `openai-codex` provider from existing `~/.codex/auth.json` tokens. No re-login.
@@ -43,7 +43,16 @@ Six instant model-switch commands (authorized senders only):
 | `/cli-back` | Restore previous model |
 | `/cli-test [model]` | Health check (no model switch) |
 
-Each command runs `openclaw models set <model>` atomically and replies with a confirmation.
+Each command uses staged switching by default (apply with `/cli-apply`).
+
+## Phase 4 — Web Browser Providers
+Persistent Chromium profiles for 4 web providers (no API key needed):
+- **Grok** (`web-grok/*`): `/grok-login`, `/grok-status`, `/grok-logout`
+- **Gemini** (`web-gemini/*`): `/gemini-login`, `/gemini-status`, `/gemini-logout`
+- **Claude.ai** (`web-claude/*`): `/claude-login`, `/claude-status`, `/claude-logout`
+- **ChatGPT** (`web-chatgpt/*`): `/chatgpt-login`, `/chatgpt-status`, `/chatgpt-logout`
+
+Sessions survive gateway restarts. `/bridge-status` shows all 4 at a glance.
 
 ## Setup
 
@@ -53,4 +62,4 @@ Each command runs `openclaw models set <model>` atomically and replies with a co
 
 See `README.md` for full configuration reference and architecture diagram.
 
-**Version:** 1.3.1
+**Version:** 1.6.0
