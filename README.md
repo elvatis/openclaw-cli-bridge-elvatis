@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.6.2`
+**Current version:** `1.6.3`
 
 ---
 
@@ -135,9 +135,11 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 |---|---|
 | `web-chatgpt/gpt-4o` | GPT-4o |
 | `web-chatgpt/gpt-4o-mini` | GPT-4o Mini |
-| `web-chatgpt/gpt-o3` | GPT o3 |
-| `web-chatgpt/gpt-o4-mini` | GPT o4-mini |
+| `web-chatgpt/gpt-4.1` | GPT-4.1 |
+| `web-chatgpt/o3` | o3 |
+| `web-chatgpt/o4-mini` | o4-mini |
 | `web-chatgpt/gpt-5` | GPT-5 |
+| `web-chatgpt/gpt-5-mini` | GPT-5 Mini |
 
 | Command | What it does |
 |---|---|
@@ -360,6 +362,10 @@ npm test            # vitest run (83 tests)
 
 ## Changelog
 
+### v1.6.3
+- **fix:** `/bridge-status` now uses cookie expiry files as source of truth (not in-memory context). Shows 🟡 "logged in, browser not loaded" instead of ❌ "not connected" after gateway restarts when cookies are still valid.
+- **fix:** Update ChatGPT web-session models to current lineup: added `gpt-4.1`, `gpt-5-mini`; renamed `gpt-o3`→`o3`, `gpt-o4-mini`→`o4-mini`; updated context window sizes.
+
 ### v1.6.2
 - **docs:** Add missing changelog entries (v1.5.1, v1.6.0, v1.6.1), fix /cli-codex54 command name in SKILL.md, add startup re-login alert description to SKILL.md.
 
@@ -458,7 +464,7 @@ No CLI binaries required — just authenticated browser sessions.
 
 ## v1.0.0
 - **feat:** `chatgpt-browser.ts` — chatgpt.com DOM-automation (`#prompt-textarea` + `[data-message-author-role]`)
-- **feat:** `web-chatgpt/*` models: gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5
+- **feat:** `web-chatgpt/*` models: gpt-4o, gpt-4o-mini, gpt-4.1, o3, o4-mini, gpt-5, gpt-5-mini (updated in v1.6.3)
 - **feat:** `/chatgpt-login`, `/chatgpt-status`, `/chatgpt-logout` + cookie-expiry tracking
 - **feat:** All 4 providers headless: Grok ✅ Claude ✅ Gemini ✅ ChatGPT ✅
 - **test:** 96/83 tests green (8 test files)

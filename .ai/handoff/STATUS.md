@@ -1,6 +1,6 @@
 # STATUS — openclaw-cli-bridge-elvatis
 
-## Current Version: 1.6.1
+## Current Version: 1.6.3
 
 ## All 4 Providers Available — persistent Chromium profiles
 | Provider | Status | Models | Login Cmd | Cookie Expiry |
@@ -8,7 +8,7 @@
 | Grok | ✅ | web-grok/grok-3, grok-3-fast, grok-3-mini, grok-3-mini-fast | /grok-login | ~178d |
 | Gemini | ✅ | web-gemini/gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash | /gemini-login | ~398d |
 | Claude.ai | ⚠️ expired | web-claude/claude-sonnet, claude-opus, claude-haiku | /claude-login | EXPIRED |
-| ChatGPT | ⚠️ expiring | web-chatgpt/gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5 | /chatgpt-login | ~6d |
+| ChatGPT | ⚠️ expiring | web-chatgpt/gpt-4o, gpt-4o-mini, gpt-4.1, o3, o4-mini, gpt-5, gpt-5-mini | /chatgpt-login | ~6d |
 
 ## Stats
 - 22 total models (6 CLI + 16 web-session)
