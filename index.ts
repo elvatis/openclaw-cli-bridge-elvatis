@@ -939,7 +939,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.8.0",
+  version: "1.8.1",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -1408,7 +1408,7 @@ const plugin = {
         acceptsArgs: true,
         requireAuth: false,
         handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
-          const forceNow = (ctx.args ?? "").trim().toLowerCase() === "--now";
+          const forceNow = (ctx.args ?? "").trim().toLowerCase().startsWith("--now");
           api.logger.info(`[cli-bridge] /${name} by ${ctx.senderId ?? "?"} forceNow=${forceNow}`);
           return switchModel(api, model, label, forceNow);
         },

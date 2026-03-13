@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.8.0`
+**Current version:** `1.8.1`
 
 ---
 
@@ -367,6 +367,9 @@ npm test            # vitest run (83 tests)
 ---
 
 ## Changelog
+
+### v1.8.1
+- **fix:** `--now` flag now works when followed by additional text (e.g. `/cli-bitnet --now hello`) — was using `===` instead of `startsWith`.
 
 ### v1.8.0
 - **feat:** BitNet local inference — `local-bitnet/bitnet-2b` routes to llama-server on 127.0.0.1:8082. No API key, no internet, pure CPU inference (2.87 tok/s on i7-6700K). Use `/cli-bitnet` to switch.
