@@ -706,6 +706,25 @@ function readCurrentModel(): string | null {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// BitNet server health check
+// ──────────────────────────────────────────────────────────────────────────────
+async function checkBitNetServer(url = "http://127.0.0.1:8082"): Promise<boolean> {
+  return new Promise((resolve) => {
+    const target = new URL("/v1/models", url);
+    const req = http.get(
+      { hostname: target.hostname, port: parseInt(target.port), path: target.pathname, timeout: 3_000 },
+      (res) => {
+        let data = "";
+        res.on("data", (c: Buffer) => (data += c));
+        res.on("end", () => resolve(res.statusCode === 200));
+      }
+    );
+    req.on("error", () => resolve(false));
+    req.on("timeout", () => { req.destroy(); resolve(false); });
+  });
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Phase 3: model command table
 // ──────────────────────────────────────────────────────────────────────────────
 const CLI_MODEL_COMMANDS = [
@@ -720,6 +739,8 @@ const CLI_MODEL_COMMANDS = [
   // ── Codex CLI (openai-codex provider, OAuth auth) ────────────────────────────
   { name: "cli-codex",        model: "openai-codex/gpt-5.3-codex",          description: "GPT-5.3 Codex (Codex CLI auth)",        label: "GPT-5.3 Codex" },
   { name: "cli-codex54",      model: "openai-codex/gpt-5.4",                description: "GPT-5.4 (Codex CLI auth)",              label: "GPT-5.4" },
+  // ── BitNet local inference (via local proxy → llama-server) ─────────────────
+  { name: "cli-bitnet",       model: "vllm/local-bitnet/bitnet-2b",         description: "BitNet b1.58 2B (local CPU, no API key)", label: "BitNet 2B (local)" },
 ] as const;
 
 /** Default model used by /cli-test when no arg is given */
@@ -918,7 +939,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.7.5",
+  version: "1.8.0",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -2151,6 +2172,16 @@ const plugin = {
           }
           lines.push("");
         }
+
+        // ── BitNet local inference ──────────────────────────────────────────────
+        const bitnetOk = await checkBitNetServer();
+        if (bitnetOk) {
+          lines.push(`✅ *BitNet (local)* — running at 127.0.0.1:8082`);
+          lines.push(`   Models: local-bitnet/bitnet-2b`);
+        } else {
+          lines.push(`❌ *BitNet (local)* — not running (\`sudo systemctl start bitnet-server\`)`);
+        }
+        lines.push("");
 
         lines.push(`🔌 Proxy: \`127.0.0.1:${port}\``);
         return { text: lines.join("\n") };

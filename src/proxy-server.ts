@@ -69,6 +69,8 @@ export interface ProxyServerOptions {
   };
   /** Plugin version string for the status page */
   version?: string;
+  /** Returns the BitNet llama-server base URL (default: http://127.0.0.1:8082) */
+  getBitNetServerUrl?: () => string;
 }
 
 /** Available CLI bridge models for GET /v1/models */
@@ -104,6 +106,8 @@ export const CLI_MODELS = [
   { id: "web-chatgpt/o4-mini",          name: "o4-mini (web session)",           contextWindow: 200_000, maxTokens: 100_000 },
   { id: "web-chatgpt/gpt-5",            name: "GPT-5 (web session)",             contextWindow: 1_047_576, maxTokens: 32_768 },
   { id: "web-chatgpt/gpt-5-mini",       name: "GPT-5 Mini (web session)",        contextWindow: 1_047_576, maxTokens: 32_768 },
+  // ── Local BitNet inference ──────────────────────────────────────────────────
+  { id: "local-bitnet/bitnet-2b",       name: "BitNet b1.58 2B (local CPU inference)", contextWindow: 4_096, maxTokens: 2_048 },
 ];
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -206,6 +210,7 @@ async function handleRequest(
 
     const cliModels = CLI_MODELS.filter(m => m.id.startsWith("cli-"));
     const webModels = CLI_MODELS.filter(m => m.id.startsWith("web-"));
+    const localModels = CLI_MODELS.filter(m => m.id.startsWith("local-"));
     const modelList = (models: typeof CLI_MODELS) =>
       models.map(m => `<li style="margin:2px 0;font-size:13px;color:#d1d5db"><code style="color:#93c5fd">${m.id}</code></li>`).join("");
 
@@ -259,6 +264,10 @@ async function handleRequest(
       <div class="card-header">Web Session Models (${webModels.length})</div>
       <ul>${modelList(webModels)}</ul>
     </div>
+    <div class="card">
+      <div class="card-header">Local Models (${localModels.length})</div>
+      <ul>${modelList(localModels)}</ul>
+    </div>
   </div>
 
   <p class="footer">openclaw-cli-bridge-elvatis v${version} &nbsp;·&nbsp; <a href="/v1/models" style="color:#4b5563">/v1/models</a> &nbsp;·&nbsp; <a href="/health" style="color:#4b5563">/health</a></p>
@@ -284,7 +293,7 @@ async function handleRequest(
           owned_by: "openclaw-cli-bridge",
           // CLI-proxy models stream plain text — no tool/function call support
           capabilities: {
-            tools: !(m.id.startsWith("cli-gemini/") || m.id.startsWith("cli-claude/")),
+            tools: !(m.id.startsWith("cli-gemini/") || m.id.startsWith("cli-claude/") || m.id.startsWith("local-bitnet/")),
           },
         })),
       })
@@ -332,7 +341,7 @@ async function handleRequest(
     // CLI-proxy models (cli-gemini/*, cli-claude/*) are plain text completions —
     // they cannot process tool/function call schemas. Return a clear 400 so
     // OpenClaw can surface a meaningful error instead of getting a garbled response.
-    const isCliModel = model.startsWith("cli-gemini/") || model.startsWith("cli-claude/");
+    const isCliModel = model.startsWith("cli-gemini/") || model.startsWith("cli-claude/") || model.startsWith("local-bitnet/");
     if (hasTools && isCliModel) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
@@ -543,6 +552,65 @@ async function handleRequest(
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: msg, type: "chatgpt_browser_error" } }));
+        }
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── BitNet local inference routing ────────────────────────────────────────
+    if (model.startsWith("local-bitnet/")) {
+      const bitnetUrl = opts.getBitNetServerUrl?.() ?? "http://127.0.0.1:8082";
+      const timeoutMs = opts.timeoutMs ?? 120_000;
+      const requestBody = JSON.stringify(parsed);
+
+      try {
+        const targetUrl = new URL("/v1/chat/completions", bitnetUrl);
+        const proxyRes = await new Promise<http.IncomingMessage>((resolve, reject) => {
+          const proxyReq = http.request(
+            {
+              hostname: targetUrl.hostname,
+              port: parseInt(targetUrl.port),
+              path: targetUrl.pathname,
+              method: "POST",
+              headers: { "Content-Type": "application/json", "Content-Length": Buffer.byteLength(requestBody) },
+              timeout: timeoutMs,
+            },
+            resolve
+          );
+          proxyReq.on("error", reject);
+          proxyReq.on("timeout", () => { proxyReq.destroy(new Error("BitNet request timed out")); });
+          proxyReq.write(requestBody);
+          proxyReq.end();
+        });
+
+        // Forward status + headers
+        const fwdHeaders: Record<string, string> = { ...corsHeaders() };
+        const ct = proxyRes.headers["content-type"];
+        if (ct) fwdHeaders["Content-Type"] = ct;
+        if (stream) {
+          fwdHeaders["Cache-Control"] = "no-cache";
+          fwdHeaders["Connection"] = "keep-alive";
+        }
+        res.writeHead(proxyRes.statusCode ?? 200, fwdHeaders);
+        proxyRes.pipe(res);
+      } catch (err) {
+        const msg = (err as Error).message;
+        if (msg.includes("ECONNREFUSED") || msg.includes("ECONNRESET") || msg.includes("ENOTFOUND")) {
+          res.writeHead(503, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({
+            error: {
+              message: "BitNet server not running. Start with: sudo systemctl start bitnet-server",
+              type: "bitnet_error",
+              code: "bitnet_unavailable",
+            },
+          }));
+        } else {
+          opts.warn(`[cli-bridge] BitNet error for ${model}: ${msg}`);
+          if (!res.headersSent) {
+            res.writeHead(500, { "Content-Type": "application/json", ...corsHeaders() });
+            res.end(JSON.stringify({ error: { message: msg, type: "bitnet_error" } }));
+          }
         }
       }
       return;

@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.7.5`
+**Current version:** `1.8.0`
 
 ---
 
@@ -56,6 +56,12 @@ All commands use gateway-level `commands.allowFrom` for authorization (`requireA
 | `/cli-codex52` | `openai-codex/gpt-5.2-codex` | |
 | `/cli-codex54` | `openai-codex/gpt-5.4` | May require upgraded OAuth scope |
 | `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` | ✅ Tested |
+
+**BitNet local inference** (via local proxy → llama-server on 127.0.0.1:8082, no API key):
+
+| Command | Model |
+|---|---|
+| `/cli-bitnet` | `vllm/local-bitnet/bitnet-2b` |
 
 **Utility:**
 
@@ -361,6 +367,10 @@ npm test            # vitest run (83 tests)
 ---
 
 ## Changelog
+
+### v1.8.0
+- **feat:** BitNet local inference — `local-bitnet/bitnet-2b` routes to llama-server on 127.0.0.1:8082. No API key, no internet, pure CPU inference (2.87 tok/s on i7-6700K). Use `/cli-bitnet` to switch.
+- **feat:** `/bridge-status` shows BitNet server health as 5th provider.
 
 ### v1.7.5
 - **chore:** Re-published to ClawHub with correct display name "OpenClaw CLI Bridge"
