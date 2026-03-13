@@ -168,6 +168,10 @@ async function handleRequest(
           object: "model",
           created: now,
           owned_by: "openclaw-cli-bridge",
+          // CLI-proxy models stream plain text — no tool/function call support
+          capabilities: {
+            tools: !(m.id.startsWith("cli-gemini/") || m.id.startsWith("cli-claude/")),
+          },
         })),
       })
     );
@@ -202,7 +206,8 @@ async function handleRequest(
       return;
     }
 
-    const { model, messages, stream = false } = parsed;
+    const { model, messages, stream = false } = parsed as { model: string; messages: ChatMessage[]; stream?: boolean; tools?: unknown };
+    const hasTools = Array.isArray((parsed as { tools?: unknown }).tools) && (parsed as { tools?: unknown[] }).tools!.length > 0;
 
     if (!model || !messages?.length) {
       res.writeHead(400, { "Content-Type": "application/json" });
@@ -210,7 +215,23 @@ async function handleRequest(
       return;
     }
 
-    opts.log(`[cli-bridge] ${model} · ${messages.length} msg(s) · stream=${stream}`);
+    // CLI-proxy models (cli-gemini/*, cli-claude/*) are plain text completions —
+    // they cannot process tool/function call schemas. Return a clear 400 so
+    // OpenClaw can surface a meaningful error instead of getting a garbled response.
+    const isCliModel = model.startsWith("cli-gemini/") || model.startsWith("cli-claude/");
+    if (hasTools && isCliModel) {
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({
+        error: {
+          message: `Model ${model} does not support tool/function calls. Use a native API model (e.g. github-copilot/gpt-5-mini) for agents that need tools.`,
+          type: "invalid_request_error",
+          code: "tools_not_supported",
+        }
+      }));
+      return;
+    }
+
+    opts.log(`[cli-bridge] ${model} · ${messages.length} msg(s) · stream=${stream}${hasTools ? " · tools=unsupported→rejected" : ""}`);
 
     const id = `chatcmpl-cli-${randomBytes(6).toString("hex")}`;
     const created = Math.floor(Date.now() / 1000);
