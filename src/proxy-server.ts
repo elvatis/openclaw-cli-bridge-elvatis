@@ -72,6 +72,7 @@ export const CLI_MODELS = [
   { id: "cli-gemini/gemini-2.5-pro",      name: "Gemini 2.5 Pro (CLI)",   contextWindow: 1_000_000, maxTokens: 8_192 },
   { id: "cli-gemini/gemini-2.5-flash",    name: "Gemini 2.5 Flash (CLI)", contextWindow: 1_000_000, maxTokens: 8_192 },
   { id: "cli-gemini/gemini-3-pro-preview",name: "Gemini 3 Pro (CLI)",     contextWindow: 1_000_000, maxTokens: 8_192 },
+  { id: "cli-gemini/gemini-3-pro",        name: "Gemini 3 Pro (CLI, alias)", contextWindow: 1_000_000, maxTokens: 8_192 },
   // Grok web-session models (requires /grok-login)
   { id: "web-grok/grok-3",           name: "Grok 3 (web session)",           contextWindow: 131_072, maxTokens: 131_072 },
   { id: "web-grok/grok-3-fast",      name: "Grok 3 Fast (web session)",      contextWindow: 131_072, maxTokens: 131_072 },
