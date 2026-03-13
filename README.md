@@ -360,6 +360,19 @@ npm test            # vitest run (83 tests)
 
 ## Changelog
 
+### v1.6.1
+- **feat:** WhatsApp re-login alerts on startup. After each gateway restart, the session restore loop collects any providers that failed to restore (cookies expired) and sends a single batched WhatsApp notification with the exact `/xxx-login` commands needed. No credential storage — remains fully 2FA-safe.
+
+### v1.6.0
+- **feat:** Persistent Chromium profiles for all 4 web providers (Grok, Gemini, Claude.ai, ChatGPT). Browser sessions now survive gateway restarts — cookies are stored in `~/.openclaw/{grok,gemini,claude,chatgpt}-profile/` and restored automatically on startup.
+- **feat:** Re-added `/claude-login`, `/claude-status`, `/claude-logout`, `/chatgpt-login`, `/chatgpt-status`, `/chatgpt-logout` commands with full persistent profile support.
+- **feat:** `/bridge-status` now shows all 4 providers with session state and cookie expiry at a glance.
+- **fix:** Startup restore guard (`_startupRestoreDone`) prevents duplicate browser launches on hot-reloads (SIGUSR1).
+
+### v1.5.1
+- **fix:** Hardcoded plugin version `1.3.1` in plugin object updated to `1.5.1`.
+- **docs:** Added `CONTRIBUTING.md` with release checklist and smoketest workflow.
+
 ### v1.5.0
 - **refactor:** Removed `/claude-login`, `/claude-logout`, `/claude-status`, `/chatgpt-login`, `/chatgpt-logout`, `/chatgpt-status` commands and all related browser automation code. Claude is fully covered by `cli-claude/*` via CLI proxy, ChatGPT by `openai-codex` + `copilot-proxy`.
 - **refactor:** Removed `web-claude/*` and `web-chatgpt/*` proxy routes and model entries from proxy server.

@@ -39,7 +39,7 @@ Six instant model-switch commands (authorized senders only):
 | `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` |
 | `/cli-gemini3` | `vllm/cli-gemini/gemini-3-pro` |
 | `/cli-codex` | `openai-codex/gpt-5.3-codex` |
-| `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` |
+| `/cli-codex54` | `openai-codex/gpt-5.4` |
 | `/cli-back` | Restore previous model |
 | `/cli-test [model]` | Health check (no model switch) |
 
@@ -53,6 +53,8 @@ Persistent Chromium profiles for 4 web providers (no API key needed):
 - **ChatGPT** (`web-chatgpt/*`): `/chatgpt-login`, `/chatgpt-status`, `/chatgpt-logout`
 
 Sessions survive gateway restarts. `/bridge-status` shows all 4 at a glance.
+
+On gateway restart, if any session has expired, a **WhatsApp alert** is sent automatically with the exact `/xxx-login` commands needed — no guessing required.
 
 ## Setup
 
