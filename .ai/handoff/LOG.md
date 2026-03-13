@@ -4,6 +4,55 @@ _Last 10 sessions. Older entries in LOG-ARCHIVE.md._
 
 ---
 
+## 2026-03-13 — Session 8 (Claude Opus 4.6)
+
+> **Agent:** claude-opus-4-6
+> **Phase:** fix
+> **Commit before:** v1.7.2
+> **Commit after:** v1.7.3
+
+**T-013: Fix cookie expiry tracking — longest-lived auth cookie for all 4 providers**
+
+### Problem
+`scanClaudeCookieExpiry()` included `__cf_bm` (Cloudflare Bot Management cookie, ~30 min lifetime)
+in its cookie filter list and sorted ascending by expiry (earliest first). Result: the saved
+`claude-cookie-expiry.json` always showed `cookieName: "__cf_bm"` expiring in ~30 minutes.
+
+**Impact:**
+- Every gateway startup, the cookie-first check (`expiresAt - Date.now() > 1h`) failed immediately
+- Fallback browser-check (headless `.ProseMirror` selector) also failed (Cloudflare block)
+- `/claude-login` added to `needsLogin[]` → WhatsApp alert sent on every restart
+- Same pattern affected ChatGPT (`_puid` ~7d was picked over longer-lived session tokens),
+  Gemini, and Grok (all sorted ascending = shortest wins)
+
+### Fix (index.ts)
+
+**`scanClaudeCookieExpiry()`** (line 152):
+- Removed `__cf_bm` from cookie filter list (only `sessionKey`, `lastActiveOrg` remain)
+- Reversed sort: `(b.expires) - (a.expires)` → picks longest-lived cookie
+- Renamed variable `earliest` → `longest` for clarity
+
+**`scanChatGPTCookieExpiry()`** (line 176):
+- Reversed sort: now picks longest-lived of `__Secure-next-auth.session-token` / `_puid` / `oai-did`
+
+**`scanGeminiCookieExpiry()`** (line 135):
+- Reversed sort: now picks longest-lived of `__Secure-1PSID` / `__Secure-3PSID` / `SID`
+
+**`scanCookieExpiry()` (Grok)** (line 216):
+- Reversed reduce: `c.expires > min.expires` instead of `<`
+
+**Stale files deleted:**
+- `~/.openclaw/claude-cookie-expiry.json` (contained `__cf_bm` with 30-min expiry)
+- `~/.openclaw/chatgpt-cookie-expiry.json` (contained `_puid` with ~7d expiry)
+
+### Build
+- `npm run build` — ✅ (pre-existing TS errors from missing openclaw/plugin-sdk, JS emitted via `--noEmitOnError false`)
+
+### Version
+1.7.2 → 1.7.3
+
+---
+
 ## 2026-03-12 — Session 7 (Claude Opus 4.6)
 
 > **Agent:** claude-opus-4-6
