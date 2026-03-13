@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.7.4`
+**Current version:** `1.7.5`
 
 ---
 
@@ -361,6 +361,9 @@ npm test            # vitest run (83 tests)
 ---
 
 ## Changelog
+
+### v1.7.5
+- **chore:** Re-published to ClawHub with correct display name "OpenClaw CLI Bridge"
 
 ### v1.7.4
 - **docs:** Handoff docs updated (DASHBOARD, LOG, STATUS, NEXT_ACTIONS)
