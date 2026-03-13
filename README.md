@@ -70,6 +70,7 @@ All commands use gateway-level `commands.allowFrom` for authorization (`requireA
 | `/cli-back` | Restore the model active **before** the last `/cli-*` switch |
 | `/cli-test [model]` | One-shot proxy health check — **does NOT switch your active model** |
 | `/cli-list` | Show all registered CLI bridge models with commands |
+| `/cli-help` | Full reference card — CLI/Codex/Web/BitNet sections, expiry info, quick examples, dashboard links |
 
 **`/cli-back` details:**
 - Before every `/cli-*` switch the current model is saved to `~/.openclaw/cli-bridge-state.json`
@@ -217,7 +218,8 @@ openclaw models auth login --provider openai-codex
   Utility
     /cli-back            Restore previous model
     /cli-test [model]    Health check (no model switch)
-    /cli-list            This overview
+    /cli-list            All models with slash commands + dashboard URL
+    /cli-help            Full reference card (sections, expiry, examples, links)
 
   Proxy: 127.0.0.1:31337
 ```
