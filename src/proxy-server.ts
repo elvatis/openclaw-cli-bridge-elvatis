@@ -562,7 +562,34 @@ async function handleRequest(
     if (model.startsWith("local-bitnet/")) {
       const bitnetUrl = opts.getBitNetServerUrl?.() ?? "http://127.0.0.1:8082";
       const timeoutMs = opts.timeoutMs ?? 120_000;
-      const requestBody = JSON.stringify(parsed);
+      // llama-server (BitNet build) crashes with std::runtime_error on multi-part
+      // content arrays (ref: https://github.com/ggerganov/llama.cpp/issues/8367).
+      // Flatten all message content to plain strings before forwarding.
+      const flattenContent = (content: unknown): string => {
+        if (typeof content === "string") return content;
+        if (Array.isArray(content)) {
+          return content
+            .filter((c): c is { type: string; text?: string } => typeof c === "object" && c !== null)
+            .map((c) => (c.type === "text" && typeof c.text === "string" ? c.text : ""))
+            .join("");
+        }
+        return String(content ?? "");
+      };
+      // BitNet has a 4096 token context window. Long sessions blow it up and
+      // cause a hard C++ crash (no graceful error). Truncate to system prompt +
+      // last 10 messages (~2k tokens max) to stay safely within the limit.
+      const BITNET_MAX_MESSAGES = 6;
+      // Replace the full system prompt (MEMORY.md etc, ~2k+ tokens) with a
+      // minimal one so BitNet's 4096-token context isn't blown by the system msg alone.
+      const BITNET_SYSTEM = "You are Akido, a concise AI assistant. Answer briefly and directly. Current user: Emre. Timezone: Europe/Berlin.";
+      const allFlat = parsed.messages.map((m) => ({
+        role: m.role,
+        content: flattenContent(m.content),
+      }));
+      const nonSystemMsgs = allFlat.filter((m) => m.role !== "system");
+      const truncated = nonSystemMsgs.slice(-BITNET_MAX_MESSAGES);
+      const bitnetMessages = [{ role: "system", content: BITNET_SYSTEM }, ...truncated];
+      const requestBody = JSON.stringify({ ...parsed, messages: bitnetMessages, tools: undefined });
 
       try {
         const targetUrl = new URL("/v1/chat/completions", bitnetUrl);
