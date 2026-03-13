@@ -32,36 +32,36 @@ All commands use gateway-level `commands.allowFrom` for authorization (`requireA
 
 **Claude Code CLI** (routed via local proxy on `:31337`):
 
-| Command | Model |
-|---|---|
-| `/cli-sonnet` | `vllm/cli-claude/claude-sonnet-4-6` |
-| `/cli-opus` | `vllm/cli-claude/claude-opus-4-6` |
-| `/cli-haiku` | `vllm/cli-claude/claude-haiku-4-5` |
+| Command | Model | Notes |
+|---|---|---|
+| `/cli-sonnet` | `vllm/cli-claude/claude-sonnet-4-6` | ✅ Tested |
+| `/cli-opus` | `vllm/cli-claude/claude-opus-4-6` | ✅ Tested |
+| `/cli-haiku` | `vllm/cli-claude/claude-haiku-4-5` | ✅ Tested |
 
 **Gemini CLI** (routed via local proxy on `:31337`, stdin + `cwd=/tmp`):
 
-| Command | Model |
-|---|---|
-| `/cli-gemini` | `vllm/cli-gemini/gemini-2.5-pro` |
-| `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` |
-| `/cli-gemini3` | `vllm/cli-gemini/gemini-3-pro-preview` |
-| `/cli-gemini3-flash` | `vllm/cli-gemini/gemini-3-flash-preview` |
+| Command | Model | Notes |
+|---|---|---|
+| `/cli-gemini` | `vllm/cli-gemini/gemini-2.5-pro` | ✅ Tested |
+| `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` | ✅ Tested |
+| `/cli-gemini3` | `vllm/cli-gemini/gemini-3-pro-preview` | ✅ Tested |
+| `/cli-gemini3-flash` | `vllm/cli-gemini/gemini-3-flash-preview` | ✅ Tested |
 
 **Codex CLI** (via `openai-codex` provider — OAuth auth, calls OpenAI API directly, **not** through the local proxy):
 
 | Command | Model | Notes |
 |---|---|---|
 | `/cli-codex` | `openai-codex/gpt-5.3-codex` | ✅ Tested |
-| `/cli-codex-spark` | `openai-codex/gpt-5.3-codex-spark` | |
-| `/cli-codex52` | `openai-codex/gpt-5.2-codex` | |
+| `/cli-codex-spark` | `openai-codex/gpt-5.3-codex-spark` | ✅ Tested |
+| `/cli-codex52` | `openai-codex/gpt-5.2-codex` | ✅ Tested |
 | `/cli-codex54` | `openai-codex/gpt-5.4` | May require upgraded OAuth scope |
 | `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` | ✅ Tested |
 
 **BitNet local inference** (via local proxy → llama-server on 127.0.0.1:8082, no API key):
 
-| Command | Model |
-|---|---|
-| `/cli-bitnet` | `vllm/local-bitnet/bitnet-2b` |
+| Command | Model | Notes |
+|---|---|---|
+| `/cli-bitnet` | `vllm/local-bitnet/bitnet-2b` | ✅ Tested |
 
 **Utility:**
 
