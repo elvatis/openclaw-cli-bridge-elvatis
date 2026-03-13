@@ -395,3 +395,83 @@ describe("Error handling", () => {
     expect(JSON.parse(res.body).error.type).toBe("not_found");
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Tool/function call rejection for CLI-proxy models
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe("Tool call rejection", () => {
+  it("rejects tools for cli-gemini models with tools_not_supported", async () => {
+    const res = await json("/v1/chat/completions", {
+      model: "cli-gemini/gemini-2.5-pro",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "test", parameters: {} } }],
+    });
+
+    expect(res.status).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe("tools_not_supported");
+  });
+
+  it("rejects tools for cli-claude models with tools_not_supported", async () => {
+    const res = await json("/v1/chat/completions", {
+      model: "cli-claude/claude-sonnet-4-6",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "test", parameters: {} } }],
+    });
+
+    expect(res.status).toBe(400);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe("tools_not_supported");
+  });
+
+  it("does NOT reject tools for web-grok models (returns 503 no session)", async () => {
+    const res = await json("/v1/chat/completions", {
+      model: "web-grok/grok-3",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "test", parameters: {} } }],
+    });
+
+    // Should NOT be 400 tools_not_supported — reaches provider logic, gets 503 (no session)
+    expect(res.status).not.toBe(400);
+    expect(res.status).toBe(503);
+    const body = JSON.parse(res.body);
+    expect(body.error.code).toBe("no_grok_session");
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Model capabilities
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe("Model capabilities", () => {
+  it("cli-gemini models have capabilities.tools===false", async () => {
+    const res = await fetch("/v1/models");
+    const body = JSON.parse(res.body);
+    const cliGeminiModels = body.data.filter((m: { id: string }) => m.id.startsWith("cli-gemini/"));
+    expect(cliGeminiModels.length).toBeGreaterThan(0);
+    for (const m of cliGeminiModels) {
+      expect(m.capabilities.tools).toBe(false);
+    }
+  });
+
+  it("cli-claude models have capabilities.tools===false", async () => {
+    const res = await fetch("/v1/models");
+    const body = JSON.parse(res.body);
+    const cliClaudeModels = body.data.filter((m: { id: string }) => m.id.startsWith("cli-claude/"));
+    expect(cliClaudeModels.length).toBeGreaterThan(0);
+    for (const m of cliClaudeModels) {
+      expect(m.capabilities.tools).toBe(false);
+    }
+  });
+
+  it("web-grok models have capabilities.tools===true", async () => {
+    const res = await fetch("/v1/models");
+    const body = JSON.parse(res.body);
+    const webGrokModels = body.data.filter((m: { id: string }) => m.id.startsWith("web-grok/"));
+    expect(webGrokModels.length).toBeGreaterThan(0);
+    for (const m of webGrokModels) {
+      expect(m.capabilities.tools).toBe(true);
+    }
+  });
+});
