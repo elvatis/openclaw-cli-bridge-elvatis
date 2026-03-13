@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.6.1`
+**Current version:** `1.6.2`
 
 ---
 
@@ -359,6 +359,9 @@ npm test            # vitest run (83 tests)
 ---
 
 ## Changelog
+
+### v1.6.2
+- **docs:** Add missing changelog entries (v1.5.1, v1.6.0, v1.6.1), fix /cli-codex54 command name in SKILL.md, add startup re-login alert description to SKILL.md.
 
 ### v1.6.1
 - **feat:** WhatsApp re-login alerts on startup. After each gateway restart, the session restore loop collects any providers that failed to restore (cookies expired) and sends a single batched WhatsApp notification with the exact `/xxx-login` commands needed. No credential storage — remains fully 2FA-safe.
