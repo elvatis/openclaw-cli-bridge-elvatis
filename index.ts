@@ -912,7 +912,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.7.1",
+  version: "1.7.2",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -959,7 +959,7 @@ const plugin = {
           {
             name: "grok",
             profileDir: GROK_PROFILE_DIR,
-            cookieFile: join(homedir(), ".openclaw", "grok-session.json"),
+            cookieFile: GROK_EXPIRY_FILE,
             verifySelector: "textarea",
             homeUrl: "https://grok.com",
             loginCmd: "/grok-login",
@@ -1005,8 +1005,44 @@ const plugin = {
           }
           if (p.getCtx()) continue; // already connected
 
+          // ── Cookie-first check ────────────────────────────────────────────
+          // If a cookie expiry file exists and is still valid (>1h left),
+          // launch the persistent context immediately without a browser-based
+          // selector check. Selector checks are fragile (slow pages, DOM changes).
+          // The keep-alive (20h) will verify the session properly later.
+          let cookiesValid = false;
+          if (existsSync(p.cookieFile)) {
+            try {
+              const expInfo = JSON.parse(readFileSync(p.cookieFile, "utf-8")) as { expiresAt: number };
+              const msLeft = expInfo.expiresAt - Date.now();
+              if (msLeft > 3_600_000) { // >1h remaining
+                cookiesValid = true;
+                api.logger.info(`[cli-bridge:${p.name}] cookie valid (${Math.floor(msLeft / 86_400_000)}d left) — restoring context without browser check`);
+              }
+            } catch { /* ignore parse errors */ }
+          }
+
+          if (cookiesValid) {
+            try {
+              const ctx = await chromium.launchPersistentContext(p.profileDir, {
+                headless: true,
+                args: ["--no-sandbox", "--disable-setuid-sandbox"],
+              });
+              p.setCtx(ctx);
+              ctx.on("close", () => { p.setCtx(null as unknown as BrowserContext); });
+              api.logger.info(`[cli-bridge:${p.name}] session restored from profile ✅`);
+            } catch (err) {
+              api.logger.warn(`[cli-bridge:${p.name}] context launch failed: ${(err as Error).message}`);
+              needsLogin.push(p.loginCmd);
+            }
+            // Sequential — never spawn all 4 Chromium instances at once
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+
+          // ── Fallback: cookies expired or missing — try browser check ─────
           try {
-            api.logger.info(`[cli-bridge:${p.name}] restoring session from profile…`);
+            api.logger.info(`[cli-bridge:${p.name}] cookies expired/missing — verifying via browser…`);
             const ctx = await chromium.launchPersistentContext(p.profileDir, {
               headless: true,
               args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -1014,46 +1050,16 @@ const plugin = {
             const page = await ctx.newPage();
             await page.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
             await new Promise(r => setTimeout(r, 6000));
-            let ok = await page.locator(p.verifySelector).isVisible().catch(() => false);
-            // Retry once — some pages (Grok) load slowly
-            if (!ok) {
-              api.logger.info(`[cli-bridge:${p.name}] verifySelector not visible after 6s, retrying (3s)…`);
-              await new Promise(r => setTimeout(r, 3000));
-              ok = await page.locator(p.verifySelector).isVisible().catch(() => false);
-            }
+            const ok = await page.locator(p.verifySelector).isVisible().catch(() => false);
             await page.close().catch(() => {});
             if (ok) {
               p.setCtx(ctx);
               ctx.on("close", () => { p.setCtx(null as unknown as BrowserContext); });
               api.logger.info(`[cli-bridge:${p.name}] session restored from profile ✅`);
             } else {
-              // Session may be truly expired or just slow — attempt auto-relogin:
-              // re-navigate in the same context and check once more
-              api.logger.info(`[cli-bridge:${p.name}] not logged in after restore — attempting auto-relogin…`);
-              try {
-                const reloginPage = await ctx.newPage();
-                await reloginPage.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
-                await new Promise(r => setTimeout(r, 6000));
-                let reloginOk = await reloginPage.locator(p.verifySelector).isVisible().catch(() => false);
-                if (!reloginOk) {
-                  await new Promise(r => setTimeout(r, 3000));
-                  reloginOk = await reloginPage.locator(p.verifySelector).isVisible().catch(() => false);
-                }
-                await reloginPage.close().catch(() => {});
-                if (reloginOk) {
-                  p.setCtx(ctx);
-                  ctx.on("close", () => { p.setCtx(null as unknown as BrowserContext); });
-                  api.logger.info(`[cli-bridge:${p.name}] session restored (slow load) ✅`);
-                } else {
-                  await ctx.close().catch(() => {});
-                  api.logger.info(`[cli-bridge:${p.name}] auto-relogin failed, needs manual ${p.loginCmd}`);
-                  needsLogin.push(p.loginCmd);
-                }
-              } catch (reloginErr) {
-                await ctx.close().catch(() => {});
-                api.logger.warn(`[cli-bridge:${p.name}] auto-relogin error: ${(reloginErr as Error).message}`);
-                needsLogin.push(p.loginCmd);
-              }
+              await ctx.close().catch(() => {});
+              api.logger.info(`[cli-bridge:${p.name}] session expired — needs ${p.loginCmd}`);
+              needsLogin.push(p.loginCmd);
             }
           } catch (err) {
             api.logger.warn(`[cli-bridge:${p.name}] startup restore failed: ${(err as Error).message}`);
