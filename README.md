@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.6.5`
+**Current version:** `1.7.0`
 
 ---
 
@@ -361,6 +361,12 @@ npm test            # vitest run (83 tests)
 ---
 
 ## Changelog
+
+### v1.7.0
+- **fix:** Startup restore timeout 3s → 6s with one retry, eliminates false "not logged in" for slow-loading pages (Grok)
+- **feat:** Auto-relogin on startup — if cookies truly expired, attempt headless relogin before sending WhatsApp alert
+- **feat:** Keep-alive (20h) now verifies session after touch and attempts auto-relogin if expired
+- **feat:** Tests (vitest) — proxy tool rejection, models endpoint, auth, cookie expiry formatters
 
 ### v1.6.5
 - **feat:** Automatic session keep-alive — every 20h, active browser sessions are silently refreshed by navigating to the provider home page. Prevents cookie expiry on providers like ChatGPT (7-day sessions) without storing credentials.

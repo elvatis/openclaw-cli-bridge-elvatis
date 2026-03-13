@@ -56,6 +56,12 @@ import {
   createContextFromSession,
   DEFAULT_SESSION_PATH,
 } from "./src/grok-session.js";
+import {
+  formatExpiryInfo,
+  formatGeminiExpiry,
+  formatClaudeExpiry,
+  formatChatGPTExpiry,
+} from "./src/expiry-helpers.js";
 import type { BrowserContext, Browser } from "playwright";
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -120,14 +126,7 @@ function saveGeminiExpiry(info: GeminiExpiryInfo): void {
 function loadGeminiExpiry(): GeminiExpiryInfo | null {
   try { return JSON.parse(readFileSync(GEMINI_EXPIRY_FILE, "utf-8")) as GeminiExpiryInfo; } catch { return null; }
 }
-function formatGeminiExpiry(info: GeminiExpiryInfo): string {
-  const daysLeft = Math.floor((info.expiresAt - Date.now()) / 86_400_000);
-  const dateStr = new Date(info.expiresAt).toISOString().substring(0, 10);
-  if (daysLeft < 0)   return `⚠️ EXPIRED (${dateStr}) — run /gemini-login`;
-  if (daysLeft <= 7)  return `🚨 expires in ${daysLeft}d (${dateStr}) — run /gemini-login NOW`;
-  if (daysLeft <= 14) return `⚠️ expires in ${daysLeft}d (${dateStr}) — run /gemini-login soon`;
-  return `✅ valid for ${daysLeft} more days (expires ${dateStr})`;
-}
+// formatGeminiExpiry imported from ./src/expiry-helpers.js
 async function scanGeminiCookieExpiry(ctx: BrowserContext): Promise<GeminiExpiryInfo | null> {
   try {
     const cookies = await ctx.cookies(["https://gemini.google.com", "https://accounts.google.com"]);
@@ -146,14 +145,7 @@ function saveClaudeExpiry(info: ClaudeExpiryInfo): void {
 function loadClaudeExpiry(): ClaudeExpiryInfo | null {
   try { return JSON.parse(readFileSync(CLAUDE_EXPIRY_FILE, "utf-8")) as ClaudeExpiryInfo; } catch { return null; }
 }
-function formatClaudeExpiry(info: ClaudeExpiryInfo): string {
-  const daysLeft = Math.floor((info.expiresAt - Date.now()) / 86_400_000);
-  const dateStr = new Date(info.expiresAt).toISOString().substring(0, 10);
-  if (daysLeft < 0)   return `⚠️ EXPIRED (${dateStr}) — run /claude-login`;
-  if (daysLeft <= 7)  return `🚨 expires in ${daysLeft}d (${dateStr}) — run /claude-login NOW`;
-  if (daysLeft <= 14) return `⚠️ expires in ${daysLeft}d (${dateStr}) — run /claude-login soon`;
-  return `✅ valid for ${daysLeft} more days (expires ${dateStr})`;
-}
+// formatClaudeExpiry imported from ./src/expiry-helpers.js
 async function scanClaudeCookieExpiry(ctx: BrowserContext): Promise<ClaudeExpiryInfo | null> {
   try {
     const cookies = await ctx.cookies(["https://claude.ai"]);
@@ -173,14 +165,7 @@ function saveChatGPTExpiry(info: ChatGPTExpiryInfo): void {
 function loadChatGPTExpiry(): ChatGPTExpiryInfo | null {
   try { return JSON.parse(readFileSync(CHATGPT_EXPIRY_FILE, "utf-8")) as ChatGPTExpiryInfo; } catch { return null; }
 }
-function formatChatGPTExpiry(info: ChatGPTExpiryInfo): string {
-  const daysLeft = Math.floor((info.expiresAt - Date.now()) / 86_400_000);
-  const dateStr = new Date(info.expiresAt).toISOString().substring(0, 10);
-  if (daysLeft < 0)   return `⚠️ EXPIRED (${dateStr}) — run /chatgpt-login`;
-  if (daysLeft <= 7)  return `🚨 expires in ${daysLeft}d (${dateStr}) — run /chatgpt-login NOW`;
-  if (daysLeft <= 14) return `⚠️ expires in ${daysLeft}d (${dateStr}) — run /chatgpt-login soon`;
-  return `✅ valid for ${daysLeft} more days (expires ${dateStr})`;
-}
+// formatChatGPTExpiry imported from ./src/expiry-helpers.js
 async function scanChatGPTCookieExpiry(ctx: BrowserContext): Promise<ChatGPTExpiryInfo | null> {
   try {
     const cookies = await ctx.cookies(["https://chatgpt.com", "https://auth0.openai.com"]);
@@ -216,15 +201,7 @@ function loadGrokExpiry(): GrokExpiryInfo | null {
   } catch { return null; }
 }
 
-/** Returns human-readable expiry summary e.g. "179 days (2026-09-07)" */
-function formatExpiryInfo(info: GrokExpiryInfo): string {
-  const daysLeft = Math.ceil((info.expiresAt - Date.now()) / 86_400_000);
-  const dateStr = new Date(info.expiresAt).toISOString().split("T")[0];
-  if (daysLeft <= 0) return `⚠️ EXPIRED (was ${dateStr})`;
-  if (daysLeft <= 7) return `🚨 expires in ${daysLeft}d (${dateStr}) — run /grok-login NOW`;
-  if (daysLeft <= 14) return `⚠️ expires in ${daysLeft}d (${dateStr}) — run /grok-login soon`;
-  return `✅ valid for ${daysLeft} more days (expires ${dateStr})`;
-}
+// formatExpiryInfo imported from ./src/expiry-helpers.js
 
 /** Scan context cookies and return earliest auth cookie expiry */
 async function scanCookieExpiry(ctx: import("playwright").BrowserContext): Promise<GrokExpiryInfo | null> {
@@ -438,20 +415,27 @@ async function getOrLaunchChatGPTContext(
   return _chatgptLaunchPromise;
 }
 
-/** Session keep-alive — navigate to provider home pages to refresh cookies */
-async function sessionKeepAlive(log: (msg: string) => void): Promise<void> {
+/** Session keep-alive — navigate to provider home pages to refresh cookies.
+ *  After each touch, verifies the session is still valid. If expired, attempts
+ *  a full relogin. Returns provider login commands that need manual attention. */
+async function sessionKeepAlive(log: (msg: string) => void): Promise<string[]> {
   const providers: Array<{
     name: string;
     homeUrl: string;
+    verifySelector: string;
+    loginCmd: string;
     getCtx: () => BrowserContext | null;
+    setCtx: (c: BrowserContext | null) => void;
     scanExpiry: (ctx: BrowserContext) => Promise<{ expiresAt: number; loginAt: number; cookieName: string } | null>;
     saveExpiry: (info: { expiresAt: number; loginAt: number; cookieName: string }) => void;
   }> = [
-    { name: "grok", homeUrl: "https://grok.com", getCtx: () => grokContext, scanExpiry: scanCookieExpiry, saveExpiry: saveGrokExpiry },
-    { name: "gemini", homeUrl: "https://gemini.google.com/app", getCtx: () => geminiContext, scanExpiry: scanGeminiCookieExpiry, saveExpiry: saveGeminiExpiry },
-    { name: "claude-web", homeUrl: "https://claude.ai/new", getCtx: () => claudeWebContext, scanExpiry: scanClaudeCookieExpiry, saveExpiry: saveClaudeExpiry },
-    { name: "chatgpt", homeUrl: "https://chatgpt.com", getCtx: () => chatgptContext, scanExpiry: scanChatGPTCookieExpiry, saveExpiry: saveChatGPTExpiry },
+    { name: "grok", homeUrl: "https://grok.com", verifySelector: "textarea", loginCmd: "/grok-login", getCtx: () => grokContext, setCtx: (c) => { grokContext = c; }, scanExpiry: scanCookieExpiry, saveExpiry: saveGrokExpiry },
+    { name: "gemini", homeUrl: "https://gemini.google.com/app", verifySelector: ".ql-editor", loginCmd: "/gemini-login", getCtx: () => geminiContext, setCtx: (c) => { geminiContext = c; }, scanExpiry: scanGeminiCookieExpiry, saveExpiry: saveGeminiExpiry },
+    { name: "claude-web", homeUrl: "https://claude.ai/new", verifySelector: ".ProseMirror", loginCmd: "/claude-login", getCtx: () => claudeWebContext, setCtx: (c) => { claudeWebContext = c; }, scanExpiry: scanClaudeCookieExpiry, saveExpiry: saveClaudeExpiry },
+    { name: "chatgpt", homeUrl: "https://chatgpt.com", verifySelector: "#prompt-textarea", loginCmd: "/chatgpt-login", getCtx: () => chatgptContext, setCtx: (c) => { chatgptContext = c; }, scanExpiry: scanChatGPTCookieExpiry, saveExpiry: saveChatGPTExpiry },
   ];
+
+  const needsLogin: string[] = [];
 
   for (const p of providers) {
     const ctx = p.getCtx();
@@ -460,16 +444,49 @@ async function sessionKeepAlive(log: (msg: string) => void): Promise<void> {
       const page = await ctx.newPage();
       await page.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
       await new Promise(r => setTimeout(r, 4000));
+
+      // Verify session is still valid after touch
+      let valid = await page.locator(p.verifySelector).isVisible().catch(() => false);
+      if (!valid) {
+        // Retry once
+        await new Promise(r => setTimeout(r, 3000));
+        valid = await page.locator(p.verifySelector).isVisible().catch(() => false);
+      }
       await page.close();
-      const expiry = await p.scanExpiry(ctx);
-      if (expiry) p.saveExpiry(expiry);
-      log(`[cli-bridge:${p.name}] session keep-alive touch ✅`);
+
+      if (valid) {
+        const expiry = await p.scanExpiry(ctx);
+        if (expiry) p.saveExpiry(expiry);
+        log(`[cli-bridge:${p.name}] session keep-alive touch ✅`);
+      } else {
+        // Session expired — attempt relogin in same persistent context
+        log(`[cli-bridge:${p.name}] session expired after keep-alive — attempting auto-relogin…`);
+        const reloginPage = await ctx.newPage();
+        await reloginPage.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+        await new Promise(r => setTimeout(r, 6000));
+        let reloginOk = await reloginPage.locator(p.verifySelector).isVisible().catch(() => false);
+        if (!reloginOk) {
+          await new Promise(r => setTimeout(r, 3000));
+          reloginOk = await reloginPage.locator(p.verifySelector).isVisible().catch(() => false);
+        }
+        await reloginPage.close().catch(() => {});
+        if (reloginOk) {
+          const expiry = await p.scanExpiry(ctx);
+          if (expiry) p.saveExpiry(expiry);
+          log(`[cli-bridge:${p.name}] auto-relogin successful ✅`);
+        } else {
+          log(`[cli-bridge:${p.name}] auto-relogin failed, needs manual ${p.loginCmd}`);
+          needsLogin.push(p.loginCmd);
+        }
+      }
     } catch (err) {
       log(`[cli-bridge:${p.name}] session keep-alive failed: ${(err as Error).message}`);
     }
     // Sequential — avoid spawning multiple pages at once
     await new Promise(r => setTimeout(r, 2000));
   }
+
+  return needsLogin;
 }
 
 /** Clean up all browser resources — call on plugin teardown */
@@ -895,7 +912,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.6.5",
+  version: "1.7.0",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -996,17 +1013,47 @@ const plugin = {
             });
             const page = await ctx.newPage();
             await page.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
-            await new Promise(r => setTimeout(r, 3000));
-            const ok = await page.locator(p.verifySelector).isVisible().catch(() => false);
+            await new Promise(r => setTimeout(r, 6000));
+            let ok = await page.locator(p.verifySelector).isVisible().catch(() => false);
+            // Retry once — some pages (Grok) load slowly
+            if (!ok) {
+              api.logger.info(`[cli-bridge:${p.name}] verifySelector not visible after 6s, retrying (3s)…`);
+              await new Promise(r => setTimeout(r, 3000));
+              ok = await page.locator(p.verifySelector).isVisible().catch(() => false);
+            }
             await page.close().catch(() => {});
             if (ok) {
               p.setCtx(ctx);
               ctx.on("close", () => { p.setCtx(null as unknown as BrowserContext); });
               api.logger.info(`[cli-bridge:${p.name}] session restored from profile ✅`);
             } else {
-              await ctx.close().catch(() => {});
-              api.logger.info(`[cli-bridge:${p.name}] profile exists but not logged in — needs ${p.loginCmd}`);
-              needsLogin.push(p.loginCmd);
+              // Session may be truly expired or just slow — attempt auto-relogin:
+              // re-navigate in the same context and check once more
+              api.logger.info(`[cli-bridge:${p.name}] not logged in after restore — attempting auto-relogin…`);
+              try {
+                const reloginPage = await ctx.newPage();
+                await reloginPage.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 20_000 });
+                await new Promise(r => setTimeout(r, 6000));
+                let reloginOk = await reloginPage.locator(p.verifySelector).isVisible().catch(() => false);
+                if (!reloginOk) {
+                  await new Promise(r => setTimeout(r, 3000));
+                  reloginOk = await reloginPage.locator(p.verifySelector).isVisible().catch(() => false);
+                }
+                await reloginPage.close().catch(() => {});
+                if (reloginOk) {
+                  p.setCtx(ctx);
+                  ctx.on("close", () => { p.setCtx(null as unknown as BrowserContext); });
+                  api.logger.info(`[cli-bridge:${p.name}] session restored (slow load) ✅`);
+                } else {
+                  await ctx.close().catch(() => {});
+                  api.logger.info(`[cli-bridge:${p.name}] auto-relogin failed, needs manual ${p.loginCmd}`);
+                  needsLogin.push(p.loginCmd);
+                }
+              } catch (reloginErr) {
+                await ctx.close().catch(() => {});
+                api.logger.warn(`[cli-bridge:${p.name}] auto-relogin error: ${(reloginErr as Error).message}`);
+                needsLogin.push(p.loginCmd);
+              }
             }
           } catch (err) {
             api.logger.warn(`[cli-bridge:${p.name}] startup restore failed: ${(err as Error).message}`);
@@ -1036,7 +1083,22 @@ const plugin = {
       // Start session keep-alive interval (every 20h)
       if (!_keepAliveInterval) {
         _keepAliveInterval = setInterval(() => {
-          void sessionKeepAlive((msg) => api.logger.info(msg));
+          void (async () => {
+            const failed = await sessionKeepAlive((msg) => api.logger.info(msg));
+            if (failed.length > 0) {
+              const cmds = failed.map(cmd => `• ${cmd}`).join("\n");
+              const msg = `🔐 *cli-bridge keep-alive:* Session expired for ${failed.length} provider(s). Run to re-login:\n\n${cmds}`;
+              try {
+                await api.runtime.system.runCommandWithTimeout(
+                  ["openclaw", "message", "send", "--channel", "whatsapp", "--to", "+4915170113694", "--message", msg],
+                  { timeoutMs: 10_000 }
+                );
+                api.logger.info(`[cli-bridge] keep-alive: sent re-login notification for: ${failed.join(", ")}`);
+              } catch (err) {
+                api.logger.warn(`[cli-bridge] keep-alive: failed to send notification: ${(err as Error).message}`);
+              }
+            }
+          })();
         }, 72_000_000);
       }
     }
