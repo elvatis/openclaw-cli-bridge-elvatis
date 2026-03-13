@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.7.2`
+**Current version:** `1.7.3`
 
 ---
 
@@ -361,6 +361,9 @@ npm test            # vitest run (83 tests)
 ---
 
 ## Changelog
+
+### v1.7.3
+- **fix:** Claude cookie expiry now uses the longest-lived auth cookie (`sessionKey`, ~1 year) instead of the earliest-expiring one. `__cf_bm` (Cloudflare, ~30 min) was previously causing false "session expired" alerts every 30 minutes.
 
 ### v1.7.2
 - **fix:** Startup restore now uses cookie expiry file as primary check — if cookies are still valid (>1h left), the persistent context is launched immediately without a fragile browser selector check. This eliminates false "not logged in" errors for Grok/Claude/ChatGPT caused by slow page loads or DOM selector changes.

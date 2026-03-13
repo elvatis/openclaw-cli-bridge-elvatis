@@ -149,11 +149,13 @@ function loadClaudeExpiry(): ClaudeExpiryInfo | null {
 async function scanClaudeCookieExpiry(ctx: BrowserContext): Promise<ClaudeExpiryInfo | null> {
   try {
     const cookies = await ctx.cookies(["https://claude.ai"]);
-    const auth = cookies.filter(c => ["sessionKey", "__cf_bm", "lastActiveOrg"].includes(c.name) && c.expires && c.expires > 0);
+    const auth = cookies.filter(c => ["sessionKey", "lastActiveOrg"].includes(c.name) && c.expires && c.expires > 0);
     if (!auth.length) return null;
-    auth.sort((a, b) => (a.expires ?? 0) - (b.expires ?? 0));
-    const earliest = auth[0];
-    return { expiresAt: (earliest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: earliest.name };
+    // Use the LONGEST-lived auth cookie (sessionKey) for expiry tracking,
+    // not short-lived Cloudflare cookies like __cf_bm (~30 min).
+    auth.sort((a, b) => (b.expires ?? 0) - (a.expires ?? 0));
+    const longest = auth[0];
+    return { expiresAt: (longest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: longest.name };
   } catch { return null; }
 }
 
@@ -912,7 +914,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.7.2",
+  version: "1.7.3",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
