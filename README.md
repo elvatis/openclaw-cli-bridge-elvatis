@@ -91,14 +91,16 @@ All commands use gateway-level `commands.allowFrom` for authorization (`requireA
 
 Routes requests through real browser sessions on the provider's web UI. Requires a valid login session (free or paid tier). Uses persistent Chromium profiles — sessions survive gateway restarts.
 
+> **Note:** Only Grok and Gemini are active browser providers. Claude and ChatGPT browser routes were removed in v1.6.x — use `cli-claude/*` (Claude CLI) and `openai-codex/*` / `copilot-proxy` instead.
+
 **Grok** (grok.com — SuperGrok subscription):
 
 | Model | Notes |
 |---|---|
-| `web-grok/grok-3` | Full model |
-| `web-grok/grok-3-fast` | Faster variant |
-| `web-grok/grok-3-mini` | Lightweight |
-| `web-grok/grok-3-mini-fast` | Fastest |
+| `web-grok/grok-3` | Full model | ✅ Tested |
+| `web-grok/grok-3-fast` | Faster variant | ✅ Tested |
+| `web-grok/grok-3-mini` | Lightweight | ✅ Tested |
+| `web-grok/grok-3-mini-fast` | Fastest | ✅ Tested |
 
 | Command | What it does |
 |---|---|
@@ -110,10 +112,10 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 
 | Model | Notes |
 |---|---|
-| `web-gemini/gemini-2-5-pro` | Gemini 2.5 Pro |
-| `web-gemini/gemini-2-5-flash` | Gemini 2.5 Flash |
-| `web-gemini/gemini-3-pro` | Gemini 3 Pro |
-| `web-gemini/gemini-3-flash` | Gemini 3 Flash |
+| `web-gemini/gemini-2-5-pro` | Gemini 2.5 Pro | ✅ Tested |
+| `web-gemini/gemini-2-5-flash` | Gemini 2.5 Flash | ✅ Tested |
+| `web-gemini/gemini-3-pro` | Gemini 3 Pro | ✅ Tested |
+| `web-gemini/gemini-3-flash` | Gemini 3 Flash | ✅ Tested |
 
 | Command | What it does |
 |---|---|
@@ -121,37 +123,9 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 | `/gemini-status` | Show session validity + cookie expiry |
 | `/gemini-logout` | Clear session |
 
-**Claude.ai** (claude.ai — Pro/Team subscription):
+**Claude.ai** ~~(removed in v1.6.x)~~ — use `/cli-sonnet`, `/cli-opus`, `/cli-haiku` instead.
 
-| Model | Notes |
-|---|---|
-| `web-claude/claude-sonnet` | Claude Sonnet (web) |
-| `web-claude/claude-opus` | Claude Opus (web) |
-| `web-claude/claude-haiku` | Claude Haiku (web) |
-
-| Command | What it does |
-|---|---|
-| `/claude-login` | Authenticate, save cookies to `~/.openclaw/claude-profile/` |
-| `/claude-status` | Show session validity + cookie expiry |
-| `/claude-logout` | Clear session |
-
-**ChatGPT** (chatgpt.com — Plus/Pro subscription):
-
-| Model | Notes |
-|---|---|
-| `web-chatgpt/gpt-4o` | GPT-4o |
-| `web-chatgpt/gpt-4o-mini` | GPT-4o Mini |
-| `web-chatgpt/gpt-4.1` | GPT-4.1 |
-| `web-chatgpt/o3` | o3 |
-| `web-chatgpt/o4-mini` | o4-mini |
-| `web-chatgpt/gpt-5` | GPT-5 |
-| `web-chatgpt/gpt-5-mini` | GPT-5 Mini |
-
-| Command | What it does |
-|---|---|
-| `/chatgpt-login` | Authenticate, save cookies to `~/.openclaw/chatgpt-profile/` |
-| `/chatgpt-status` | Show session validity + cookie expiry |
-| `/chatgpt-logout` | Clear session |
+**ChatGPT** ~~(removed in v1.6.x)~~ — use `/cli-codex`, `openai-codex/*`, or `copilot-proxy` instead.
 
 **Session lifecycle:**
 - First use: run `/xxx-login` once — authenticates and saves cookies to persistent Chromium profile
