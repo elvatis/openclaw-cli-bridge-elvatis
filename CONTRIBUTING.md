@@ -57,6 +57,24 @@ clawhub publish "$TMPDIR" --slug openclaw-cli-bridge-elvatis --version X.Y.Z \
 
 ---
 
+## 🚨 Doku-Regel (PFLICHT)
+
+**Wenn ein Feature hinzukommt, geändert oder entfernt wird → SOFORT in ALLEN Doku-Dateien aktualisieren.**
+
+Gilt für: `README.md`, `SKILL.md`, `CONTRIBUTING.md`, `openclaw.plugin.json`, ClawHub, npm, GitHub.
+
+**Konkret für Slash Commands:**
+- Neuer Command (`/cli-xyz`) → sofort in README Utility-Tabelle + ASCII-Beispielblock eintragen
+- Command entfernt → sofort aus README + SKILL.md entfernen, nicht beim nächsten Release
+- Command umbenannt → beide Stellen gleichzeitig ändern
+
+**Tested Badge:**
+- Neues Feature getestet → sofort `✅ Tested` Badge in README setzen
+
+Kein "machen wir beim nächsten Release" — immer sofort, im gleichen Commit.
+
+---
+
 ## Versionsstellen — alle prüfen vor Release
 
 ```bash
