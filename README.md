@@ -363,8 +363,9 @@ npm test            # vitest run (83 tests)
 ## Changelog
 
 ### v1.6.3
-- **fix:** `/bridge-status` now uses cookie expiry files as source of truth (not in-memory context). Shows 🟡 "logged in, browser not loaded" instead of ❌ "not connected" after gateway restarts when cookies are still valid.
-- **fix:** Update ChatGPT web-session models to current lineup: added `gpt-4.1`, `gpt-5-mini`; renamed `gpt-o3`→`o3`, `gpt-o4-mini`→`o4-mini`; updated context window sizes.
+- **fix:** CLI-proxy models (`cli-gemini/*`, `cli-claude/*`) now return HTTP 400 with `tools_not_supported` when a request includes tool/function call schemas — prevents agents from silently failing or hallucinating when assigned a CLI-proxy model
+- **feat:** `/v1/models` response includes `capabilities.tools: false` for CLI-proxy models so OpenClaw can detect tool support upfront
+- **fix:** EADDRINUSE on hot-reload: re-probe after 1.5s wait before retrying bind; probe timeout 800ms → 2000ms
 
 ### v1.6.2
 - **docs:** Add missing changelog entries (v1.5.1, v1.6.0, v1.6.1), fix /cli-codex54 command name in SKILL.md, add startup re-login alert description to SKILL.md.

@@ -854,7 +854,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.6.2",
+  version: "1.6.3",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -1067,7 +1067,7 @@ const plugin = {
               headers: { Authorization: `Bearer ${apiKey}` } },
             (res) => { res.resume(); resolve(res.statusCode === 200); }
           );
-          req.setTimeout(800, () => { req.destroy(); resolve(false); });
+          req.setTimeout(2000, () => { req.destroy(); resolve(false); });
           req.on("error", () => resolve(false));
           req.end();
         });
@@ -1144,8 +1144,17 @@ const plugin = {
         } catch (err: unknown) {
           const msg = (err as Error).message ?? String(err);
           if (msg.includes("EADDRINUSE")) {
-            // Port is busy but probe didn't respond — wait for the OS to release it
-            api.logger.warn(`[cli-bridge] port ${port} busy, waiting 1s for OS release…`);
+            // Port is busy but probe didn't respond — maybe the old server is still shutting down.
+            // Re-probe first: if it now responds, reuse it without rebinding.
+            api.logger.warn(`[cli-bridge] port ${port} busy — re-probing before retry…`);
+            await new Promise(r => setTimeout(r, 1500));
+            const aliveNow = await probeExisting();
+            if (aliveNow) {
+              api.logger.info(`[cli-bridge] proxy now responding on :${port} — reusing`);
+              return;
+            }
+            // Still not responding — wait for OS to release the port, then rebind
+            api.logger.warn(`[cli-bridge] port ${port} still busy, waiting 1s for OS release…`);
             await new Promise((r) => setTimeout(r, 1000));
             // One final attempt
             try {
