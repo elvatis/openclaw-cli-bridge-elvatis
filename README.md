@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.9.0`
+**Current version:** `1.9.1`
 
 ---
 
@@ -356,6 +356,13 @@ npm run ci          # lint + typecheck + test
 
 ## Changelog
 
+### v1.9.1
+- **feat:** Full slash command mapping on status page — all models now show their /cli-* command
+- **fix:** Register missing slash commands: /cli-codex-spark, /cli-codex52, /cli-codex-mini, /cli-gemini3-flash (documented but never registered)
+- **feat:** /cli-help command — full reference with CLI/Codex/Web/BitNet sections, expiry info, quick examples, dashboard links
+- **feat:** /cli-list now references /cli-help and shows dashboard URL
+
+/
 ### v1.9.0
 - **feat:** Auto-source version from `package.json` — eliminates hardcoded version string sync issues (was stale across v1.8.2–v1.8.8)
 - **feat:** ESLint config (`eslint.config.js`) — TypeScript-aware linting with `npm run lint`, integrated into CI pipeline
