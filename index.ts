@@ -1240,6 +1240,13 @@ const plugin = {
               }
               return chatgptContext;
             },
+            version: plugin.version,
+            getExpiryInfo: () => ({
+              grok:    (() => { const e = loadGrokExpiry();    return e ? formatExpiryInfo(e)    : null; })(),
+              gemini:  (() => { const e = loadGeminiExpiry();  return e ? formatGeminiExpiry(e)  : null; })(),
+              claude:  (() => { const e = loadClaudeExpiry();  return e ? formatClaudeExpiry(e)  : null; })(),
+              chatgpt: (() => { const e = loadChatGPTExpiry(); return e ? formatChatGPTExpiry(e) : null; })(),
+            }),
           });
           proxyServer = server;
           api.logger.info(
