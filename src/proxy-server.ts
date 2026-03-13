@@ -94,18 +94,8 @@ export const CLI_MODELS = [
   { id: "web-gemini/gemini-2-5-flash", name: "Gemini 2.5 Flash (web session)", contextWindow: 1_000_000, maxTokens: 8192 },
   { id: "web-gemini/gemini-3-pro",     name: "Gemini 3 Pro (web session)",     contextWindow: 1_000_000, maxTokens: 8192 },
   { id: "web-gemini/gemini-3-flash",   name: "Gemini 3 Flash (web session)",   contextWindow: 1_000_000, maxTokens: 8192 },
-  // Claude web-session models (requires /claude-login)
-  { id: "web-claude/claude-sonnet",     name: "Claude Sonnet (web session)",     contextWindow: 200_000, maxTokens: 8192 },
-  { id: "web-claude/claude-opus",       name: "Claude Opus (web session)",       contextWindow: 200_000, maxTokens: 8192 },
-  { id: "web-claude/claude-haiku",      name: "Claude Haiku (web session)",      contextWindow: 200_000, maxTokens: 8192 },
-  // ChatGPT web-session models (requires /chatgpt-login)
-  { id: "web-chatgpt/gpt-4o",           name: "GPT-4o (web session)",            contextWindow: 128_000, maxTokens: 16_384 },
-  { id: "web-chatgpt/gpt-4o-mini",      name: "GPT-4o Mini (web session)",       contextWindow: 128_000, maxTokens: 16_384 },
-  { id: "web-chatgpt/gpt-4.1",          name: "GPT-4.1 (web session)",           contextWindow: 1_047_576, maxTokens: 32_768 },
-  { id: "web-chatgpt/o3",               name: "o3 (web session)",                contextWindow: 200_000, maxTokens: 100_000 },
-  { id: "web-chatgpt/o4-mini",          name: "o4-mini (web session)",           contextWindow: 200_000, maxTokens: 100_000 },
-  { id: "web-chatgpt/gpt-5",            name: "GPT-5 (web session)",             contextWindow: 1_047_576, maxTokens: 32_768 },
-  { id: "web-chatgpt/gpt-5-mini",       name: "GPT-5 Mini (web session)",        contextWindow: 1_047_576, maxTokens: 32_768 },
+  // Claude → use cli-claude/* instead (web-claude removed in v1.6.x)
+  // ChatGPT → use openai-codex/* or copilot-proxy instead (web-chatgpt removed in v1.6.x)
   // ── Local BitNet inference ──────────────────────────────────────────────────
   { id: "local-bitnet/bitnet-2b",       name: "BitNet b1.58 2B (local CPU inference)", contextWindow: 4_096, maxTokens: 2_048 },
 ];
