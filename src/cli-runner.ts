@@ -316,7 +316,19 @@ export const DEFAULT_ALLOWED_CLI_MODELS: ReadonlySet<string> = new Set([
   "cli-gemini/gemini-2.5-flash",
   "cli-gemini/gemini-3-pro-preview",
   "cli-gemini/gemini-3-flash-preview",
+  // Aliases (map to preview variants internally)
+  "cli-gemini/gemini-3-pro",   // alias → gemini-3-pro-preview
+  "cli-gemini/gemini-3-flash", // alias → gemini-3-flash-preview
 ]);
+
+/** Normalize model aliases to their canonical CLI model names. */
+function normalizeModelAlias(normalized: string): string {
+  const ALIASES: Record<string, string> = {
+    "cli-gemini/gemini-3-pro":   "cli-gemini/gemini-3-pro-preview",
+    "cli-gemini/gemini-3-flash": "cli-gemini/gemini-3-flash-preview",
+  };
+  return ALIASES[normalized] ?? normalized;
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Router
@@ -364,8 +376,11 @@ export async function routeToCliRunner(
     );
   }
 
-  if (normalized.startsWith("cli-gemini/")) return runGemini(prompt, normalized, timeoutMs);
-  if (normalized.startsWith("cli-claude/")) return runClaude(prompt, normalized, timeoutMs);
+  // Resolve aliases (e.g. gemini-3-pro → gemini-3-pro-preview) after allowlist check
+  const resolved = normalizeModelAlias(normalized);
+
+  if (resolved.startsWith("cli-gemini/")) return runGemini(prompt, resolved, timeoutMs);
+  if (resolved.startsWith("cli-claude/")) return runClaude(prompt, resolved, timeoutMs);
 
   throw new Error(
     `Unknown CLI bridge model: "${model}". Use "vllm/cli-gemini/<model>" or "vllm/cli-claude/<model>".`
