@@ -4,11 +4,11 @@
 
 **Kein Publish ohne erfolgreichen `/bridge-status` Test!**
 
-### 1. Build
+### 1. Lint + Build
 
 ```bash
-npm run build
-# Exit 0 erwartet — TS-Fehler sind ok (--noEmitOnError false), aber Exit != 0 blockiert
+npm run lint    # ESLint — 0 errors required, warnings ok
+npm run build   # Exit 0 erwartet — TS-Fehler sind ok (--noEmitOnError false), aber Exit != 0 blockiert
 ```
 
 ### 2. Gateway neu starten
@@ -67,9 +67,11 @@ grep -rn "X\.Y\.Z\|version" \
 ```
 
 Typische Stellen:
-- `package.json` → `"version": "..."`
+- `package.json` → `"version": "..."` (Hauptquelle — `index.ts` liest automatisch daraus)
 - `openclaw.plugin.json` → `"version": "..."`
 - `README.md` → `**Current version:** ...` (falls vorhanden)
+
+> **Seit v1.9.0:** `index.ts` liest die Version automatisch aus `package.json` — kein manuelles Sync mehr nötig für die Runtime-Version.
 
 ---
 
@@ -91,3 +93,24 @@ Die folgenden TS-Fehler sind bekannt und ignorierbar (kein Runtime-Problem):
 - `TS7006: Parameter implicitly has 'any' type` — minor, kein Effekt
 
 Build läuft mit `--noEmitOnError false` durch. `npm run build` → Exit 0 ist das Kriterium, nicht null TS-Fehler.
+
+---
+
+## Cookie Expiry Store (seit v1.9.0)
+
+Cookie-Expiry-Daten werden jetzt in **einer** Datei gespeichert:
+- `~/.openclaw/cookie-expiry.json` — enthält alle 4 Provider (grok, gemini, claude, chatgpt)
+
+Legacy-Dateien (`grok-cookie-expiry.json`, `gemini-cookie-expiry.json`, etc.) werden beim ersten Start automatisch migriert und gelöscht.
+
+---
+
+## Model Fallback Chain (seit v1.9.0)
+
+Wenn ein CLI-Modell fehlschlägt (Timeout, Fehler), wird automatisch ein leichteres Modell versucht:
+- `gemini-2.5-pro` → `gemini-2.5-flash`
+- `gemini-3-pro-preview` → `gemini-3-flash-preview`
+- `claude-opus-4-6` → `claude-sonnet-4-6`
+- `claude-sonnet-4-6` → `claude-haiku-4-5`
+
+Die Response enthält das tatsächlich verwendete Modell im `model`-Feld.

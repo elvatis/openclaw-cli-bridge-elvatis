@@ -17,6 +17,7 @@ import { geminiComplete, geminiCompleteStream, type ChatMessage as GeminiBrowser
 import { claudeComplete, claudeCompleteStream, type ChatMessage as ClaudeBrowserChatMessage } from "./claude-browser.js";
 import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrowserChatMessage } from "./chatgpt-browser.js";
 import type { BrowserContext } from "playwright";
+import { renderStatusPage, type StatusProvider } from "./status-template.js";
 
 export type GrokCompleteOptions = Parameters<typeof grokComplete>[1];
 export type GrokCompleteStreamOptions = Parameters<typeof grokCompleteStream>[1];
@@ -71,6 +72,14 @@ export interface ProxyServerOptions {
   version?: string;
   /** Returns the BitNet llama-server base URL (default: http://127.0.0.1:8082) */
   getBitNetServerUrl?: () => string;
+  /** Maps model ID → slash command name for the status page display */
+  modelCommands?: Record<string, string>;
+  /**
+   * Model fallback chain — maps a model prefix to a fallback model.
+   * When a CLI model fails (timeout, error), the request is retried once
+   * with the fallback model. Example: "cli-gemini/gemini-2.5-pro" → "cli-gemini/gemini-2.5-flash"
+   */
+  modelFallbacks?: Record<string, string>;
 }
 
 /** Available CLI bridge models for GET /v1/models */
@@ -158,10 +167,40 @@ async function handleRequest(
 
   const url = req.url ?? "/";
 
-  // Health check
+  // Health check (simple)
   if (url === "/health" || url === "/v1/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok", service: "openclaw-cli-bridge" }));
+    return;
+  }
+
+  // Health check (detailed JSON — for monitoring scripts)
+  if (url === "/healthz" && req.method === "GET") {
+    const expiry = opts.getExpiryInfo?.() ?? { grok: null, gemini: null, claude: null, chatgpt: null };
+    const sessionStatus = (provider: string, ctxGetter: (() => import("playwright").BrowserContext | null) | undefined, expiryStr: string | null) => {
+      const connected = ctxGetter?.() !== null && ctxGetter?.() !== undefined;
+      let status: "connected" | "logged_in" | "expired" | "not_configured" = "not_configured";
+      if (connected) status = "connected";
+      else if (expiryStr?.startsWith("⚠️ EXPIRED")) status = "expired";
+      else if (expiryStr) status = "logged_in";
+      return { status, expiry: expiryStr };
+    };
+    const health = {
+      status: "ok",
+      service: "openclaw-cli-bridge",
+      version: opts.version ?? "?",
+      port: opts.port,
+      uptime_s: Math.floor(process.uptime()),
+      providers: {
+        grok: sessionStatus("grok", opts.getGrokContext, expiry.grok),
+        gemini: sessionStatus("gemini", opts.getGeminiContext, expiry.gemini),
+        claude: sessionStatus("claude", opts.getClaudeContext, expiry.claude),
+        chatgpt: sessionStatus("chatgpt", opts.getChatGPTContext, expiry.chatgpt),
+      },
+      models: CLI_MODELS.length,
+    };
+    res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+    res.end(JSON.stringify(health, null, 2));
     return;
   }
 
@@ -170,109 +209,14 @@ async function handleRequest(
     const expiry = opts.getExpiryInfo?.() ?? { grok: null, gemini: null, claude: null, chatgpt: null };
     const version = opts.version ?? "?";
 
-    const providers = [
+    const providers: StatusProvider[] = [
       { name: "Grok",     icon: "𝕏",  expiry: expiry.grok,    loginCmd: "/grok-login",    ctx: opts.getGrokContext?.() ?? null },
       { name: "Gemini",   icon: "✦",  expiry: expiry.gemini,  loginCmd: "/gemini-login",  ctx: opts.getGeminiContext?.() ?? null },
       { name: "Claude",   icon: "◆",  expiry: expiry.claude,  loginCmd: "/claude-login",  ctx: opts.getClaudeContext?.() ?? null },
       { name: "ChatGPT",  icon: "◉",  expiry: expiry.chatgpt, loginCmd: "/chatgpt-login", ctx: opts.getChatGPTContext?.() ?? null },
     ];
 
-    function statusBadge(p: typeof providers[0]): { label: string; color: string; dot: string } {
-      if (p.ctx !== null) return { label: "Connected", color: "#22c55e", dot: "🟢" };
-      if (!p.expiry) return { label: "Never logged in", color: "#6b7280", dot: "⚪" };
-      if (p.expiry.startsWith("⚠️ EXPIRED")) return { label: "Expired", color: "#ef4444", dot: "🔴" };
-      if (p.expiry.startsWith("🚨")) return { label: "Expiring soon", color: "#f59e0b", dot: "🟡" };
-      return { label: "Logged in", color: "#3b82f6", dot: "🔵" };
-    }
-
-    const rows = providers.map(p => {
-      const badge = statusBadge(p);
-      const expiryText = p.expiry
-        ? p.expiry.replace(/[⚠️🚨✅🕐]/gu, "").trim()
-        : `Not logged in — run <code>${p.loginCmd}</code>`;
-      return `
-        <tr>
-          <td style="padding:12px 16px;font-weight:600;font-size:15px">${p.icon} ${p.name}</td>
-          <td style="padding:12px 16px">
-            <span style="background:${badge.color}22;color:${badge.color};border:1px solid ${badge.color}44;
-                         border-radius:6px;padding:3px 10px;font-size:13px;font-weight:600">
-              ${badge.dot} ${badge.label}
-            </span>
-          </td>
-          <td style="padding:12px 16px;color:#9ca3af;font-size:13px">${expiryText}</td>
-          <td style="padding:12px 16px;color:#6b7280;font-size:12px;font-family:monospace">${p.loginCmd}</td>
-        </tr>`;
-    }).join("");
-
-    const cliModels = CLI_MODELS.filter(m => m.id.startsWith("cli-"));
-    const codexModels = CLI_MODELS.filter(m => m.id.startsWith("openai-codex/"));
-    const webModels = CLI_MODELS.filter(m => m.id.startsWith("web-"));
-    const localModels = CLI_MODELS.filter(m => m.id.startsWith("local-"));
-    const modelList = (models: typeof CLI_MODELS) =>
-      models.map(m => `<li style="margin:2px 0;font-size:13px;color:#d1d5db"><code style="color:#93c5fd">${m.id}</code></li>`).join("");
-
-    const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CLI Bridge Status</title>
-  <meta http-equiv="refresh" content="30">
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0f1117; color: #e5e7eb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; padding: 32px 24px; }
-    h1 { font-size: 22px; font-weight: 700; color: #f9fafb; margin-bottom: 4px; }
-    .subtitle { color: #6b7280; font-size: 13px; margin-bottom: 28px; }
-    .card { background: #1a1d27; border: 1px solid #2d3148; border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
-    .card-header { padding: 14px 16px; border-bottom: 1px solid #2d3148; font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
-    table { width: 100%; border-collapse: collapse; }
-    tr:not(:last-child) td { border-bottom: 1px solid #1f2335; }
-    .models { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    ul { list-style: none; padding: 12px 16px; }
-    .footer { color: #374151; font-size: 12px; text-align: center; margin-top: 16px; }
-    code { background: #1e2130; padding: 1px 5px; border-radius: 4px; }
-  </style>
-</head>
-<body>
-  <h1>🌉 CLI Bridge</h1>
-  <p class="subtitle">v${version} &nbsp;·&nbsp; Port ${opts.port} &nbsp;·&nbsp; Auto-refreshes every 30s</p>
-
-  <div class="card">
-    <div class="card-header">Web Session Providers</div>
-    <table>
-      <thead>
-        <tr style="background:#13151f">
-          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Provider</th>
-          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Status</th>
-          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Session</th>
-          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Login</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>
-
-  <div class="models">
-    <div class="card">
-      <div class="card-header">CLI Models (${cliModels.length})</div>
-      <ul>${modelList(cliModels)}</ul>
-      <div class="card-header">Codex Models (${codexModels.length})</div>
-      <ul>${modelList(codexModels)}</ul>
-    </div>
-    <div class="card">
-      <div class="card-header">Web Session Models (${webModels.length})</div>
-      <ul>${modelList(webModels)}</ul>
-    </div>
-    <div class="card">
-      <div class="card-header">Local Models (${localModels.length})</div>
-      <ul>${modelList(localModels)}</ul>
-    </div>
-  </div>
-
-  <p class="footer">openclaw-cli-bridge-elvatis v${version} &nbsp;·&nbsp; <a href="/v1/models" style="color:#4b5563">/v1/models</a> &nbsp;·&nbsp; <a href="/health" style="color:#4b5563">/health</a></p>
-</body>
-</html>`;
-
+    const html = renderStatusPage({ version, port: opts.port, providers, models: CLI_MODELS, modelCommands: opts.modelCommands });
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
     return;
@@ -645,14 +589,32 @@ async function handleRequest(
 
     // ── CLI runner routing (Gemini / Claude Code) ─────────────────────────────
     let content: string;
+    let usedModel = model;
     try {
       content = await routeToCliRunner(model, messages, opts.timeoutMs ?? 120_000);
     } catch (err) {
       const msg = (err as Error).message;
-      opts.warn(`[cli-bridge] CLI error for ${model}: ${msg}`);
-      res.writeHead(500, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ error: { message: msg, type: "cli_error" } }));
-      return;
+      // ── Model fallback: retry once with a lighter model if configured ────
+      const fallbackModel = opts.modelFallbacks?.[model];
+      if (fallbackModel) {
+        opts.warn(`[cli-bridge] ${model} failed (${msg}), falling back to ${fallbackModel}`);
+        try {
+          content = await routeToCliRunner(fallbackModel, messages, opts.timeoutMs ?? 120_000);
+          usedModel = fallbackModel;
+          opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded`);
+        } catch (fallbackErr) {
+          const fallbackMsg = (fallbackErr as Error).message;
+          opts.warn(`[cli-bridge] fallback ${fallbackModel} also failed: ${fallbackMsg}`);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: { message: `${model}: ${msg} | fallback ${fallbackModel}: ${fallbackMsg}`, type: "cli_error" } }));
+          return;
+        }
+      } else {
+        opts.warn(`[cli-bridge] CLI error for ${model}: ${msg}`);
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: msg, type: "cli_error" } }));
+        return;
+      }
     }
 
     if (stream) {
@@ -664,7 +626,7 @@ async function handleRequest(
       });
 
       // Role chunk
-      sendSseChunk(res, { id, created, model, delta: { role: "assistant" }, finish_reason: null });
+      sendSseChunk(res, { id, created, model: usedModel, delta: { role: "assistant" }, finish_reason: null });
 
       // Content in chunks (~50 chars each for natural feel)
       const chunkSize = 50;
@@ -672,14 +634,14 @@ async function handleRequest(
         sendSseChunk(res, {
           id,
           created,
-          model,
+          model: usedModel,
           delta: { content: content.slice(i, i + chunkSize) },
           finish_reason: null,
         });
       }
 
       // Stop chunk
-      sendSseChunk(res, { id, created, model, delta: {}, finish_reason: "stop" });
+      sendSseChunk(res, { id, created, model: usedModel, delta: {}, finish_reason: "stop" });
       res.write("data: [DONE]\n\n");
       res.end();
     } else {
@@ -687,7 +649,7 @@ async function handleRequest(
         id,
         object: "chat.completion",
         created,
-        model,
+        model: usedModel,
         choices: [
           {
             index: 0,
