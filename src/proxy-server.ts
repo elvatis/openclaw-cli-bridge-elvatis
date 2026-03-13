@@ -14,6 +14,8 @@ import { type ChatMessage, routeToCliRunner } from "./cli-runner.js";
 import { scheduleTokenRefresh, setAuthLogger, stopTokenRefresh } from "./claude-auth.js";
 import { grokComplete, grokCompleteStream, type ChatMessage as GrokChatMessage } from "./grok-client.js";
 import { geminiComplete, geminiCompleteStream, type ChatMessage as GeminiBrowserChatMessage } from "./gemini-browser.js";
+import { claudeComplete, claudeCompleteStream, type ChatMessage as ClaudeBrowserChatMessage } from "./claude-browser.js";
+import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrowserChatMessage } from "./chatgpt-browser.js";
 import type { BrowserContext } from "playwright";
 
 export type GrokCompleteOptions = Parameters<typeof grokComplete>[1];
@@ -42,6 +44,22 @@ export interface ProxyServerOptions {
   _geminiComplete?: typeof geminiComplete;
   /** Override for testing — replaces geminiCompleteStream */
   _geminiCompleteStream?: typeof geminiCompleteStream;
+  /** Returns the current authenticated Claude BrowserContext (null if not logged in) */
+  getClaudeContext?: () => BrowserContext | null;
+  /** Async lazy connect — called when getClaudeContext returns null */
+  connectClaudeContext?: () => Promise<BrowserContext | null>;
+  /** Override for testing — replaces claudeComplete */
+  _claudeComplete?: typeof claudeComplete;
+  /** Override for testing — replaces claudeCompleteStream */
+  _claudeCompleteStream?: typeof claudeCompleteStream;
+  /** Returns the current authenticated ChatGPT BrowserContext (null if not logged in) */
+  getChatGPTContext?: () => BrowserContext | null;
+  /** Async lazy connect — called when getChatGPTContext returns null */
+  connectChatGPTContext?: () => Promise<BrowserContext | null>;
+  /** Override for testing — replaces chatgptComplete */
+  _chatgptComplete?: typeof chatgptComplete;
+  /** Override for testing — replaces chatgptCompleteStream */
+  _chatgptCompleteStream?: typeof chatgptCompleteStream;
 }
 
 /** Available CLI bridge models for GET /v1/models */
@@ -64,6 +82,16 @@ export const CLI_MODELS = [
   { id: "web-gemini/gemini-2-5-flash", name: "Gemini 2.5 Flash (web session)", contextWindow: 1_000_000, maxTokens: 8192 },
   { id: "web-gemini/gemini-3-pro",     name: "Gemini 3 Pro (web session)",     contextWindow: 1_000_000, maxTokens: 8192 },
   { id: "web-gemini/gemini-3-flash",   name: "Gemini 3 Flash (web session)",   contextWindow: 1_000_000, maxTokens: 8192 },
+  // Claude web-session models (requires /claude-login)
+  { id: "web-claude/claude-sonnet",     name: "Claude Sonnet (web session)",     contextWindow: 200_000, maxTokens: 8192 },
+  { id: "web-claude/claude-opus",       name: "Claude Opus (web session)",       contextWindow: 200_000, maxTokens: 8192 },
+  { id: "web-claude/claude-haiku",      name: "Claude Haiku (web session)",      contextWindow: 200_000, maxTokens: 8192 },
+  // ChatGPT web-session models (requires /chatgpt-login)
+  { id: "web-chatgpt/gpt-4o",           name: "GPT-4o (web session)",            contextWindow: 128_000, maxTokens: 8192 },
+  { id: "web-chatgpt/gpt-4o-mini",      name: "GPT-4o Mini (web session)",       contextWindow: 128_000, maxTokens: 8192 },
+  { id: "web-chatgpt/gpt-o3",           name: "GPT o3 (web session)",            contextWindow: 200_000, maxTokens: 8192 },
+  { id: "web-chatgpt/gpt-o4-mini",      name: "GPT o4-mini (web session)",       contextWindow: 200_000, maxTokens: 8192 },
+  { id: "web-chatgpt/gpt-5",            name: "GPT-5 (web session)",             contextWindow: 200_000, maxTokens: 8192 },
 ];
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -278,6 +306,105 @@ async function handleRequest(
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: msg, type: "gemini_browser_error" } }));
+        }
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Claude web-session routing ────────────────────────────────────────────
+    if (model.startsWith("web-claude/")) {
+      let claudeCtx = opts.getClaudeContext?.() ?? null;
+      if (!claudeCtx && opts.connectClaudeContext) {
+        claudeCtx = await opts.connectClaudeContext();
+      }
+      if (!claudeCtx) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "No active claude.ai session. Use /claude-login to authenticate.", code: "no_claude_session" } }));
+        return;
+      }
+      const timeoutMs = opts.timeoutMs ?? 120_000;
+      const claudeMessages = messages as ClaudeBrowserChatMessage[];
+      const doClaudeComplete = opts._claudeComplete ?? claudeComplete;
+      const doClaudeCompleteStream = opts._claudeCompleteStream ?? claudeCompleteStream;
+      try {
+        if (stream) {
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
+          sendSseChunk(res, { id, created, model, delta: { role: "assistant" }, finish_reason: null });
+          const result = await doClaudeCompleteStream(
+            claudeCtx,
+            { messages: claudeMessages, model, timeoutMs },
+            (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }),
+            opts.log
+          );
+          sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
+          res.write("data: [DONE]\n\n");
+          res.end();
+        } else {
+          const result = await doClaudeComplete(claudeCtx, { messages: claudeMessages, model, timeoutMs }, opts.log);
+          res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({
+            id, object: "chat.completion", created, model,
+            choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: result.finishReason }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          }));
+        }
+      } catch (err) {
+        const msg = (err as Error).message;
+        opts.warn(`[cli-bridge] Claude browser error for ${model}: ${msg}`);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: { message: msg, type: "claude_browser_error" } }));
+        }
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── ChatGPT web-session routing ──────────────────────────────────────────
+    if (model.startsWith("web-chatgpt/")) {
+      let chatgptCtx = opts.getChatGPTContext?.() ?? null;
+      if (!chatgptCtx && opts.connectChatGPTContext) {
+        chatgptCtx = await opts.connectChatGPTContext();
+      }
+      if (!chatgptCtx) {
+        res.writeHead(503, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: { message: "No active chatgpt.com session. Use /chatgpt-login to authenticate.", code: "no_chatgpt_session" } }));
+        return;
+      }
+      const chatgptModel = model.replace("web-chatgpt/", "");
+      const timeoutMs = opts.timeoutMs ?? 120_000;
+      const chatgptMessages = messages as ChatGPTBrowserChatMessage[];
+      const doChatGPTComplete = opts._chatgptComplete ?? chatgptComplete;
+      const doChatGPTCompleteStream = opts._chatgptCompleteStream ?? chatgptCompleteStream;
+      try {
+        if (stream) {
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
+          sendSseChunk(res, { id, created, model, delta: { role: "assistant" }, finish_reason: null });
+          const result = await doChatGPTCompleteStream(
+            chatgptCtx,
+            { messages: chatgptMessages, model: chatgptModel, timeoutMs },
+            (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }),
+            opts.log
+          );
+          sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
+          res.write("data: [DONE]\n\n");
+          res.end();
+        } else {
+          const result = await doChatGPTComplete(chatgptCtx, { messages: chatgptMessages, model: chatgptModel, timeoutMs }, opts.log);
+          res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({
+            id, object: "chat.completion", created, model,
+            choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: result.finishReason }],
+            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+          }));
+        }
+      } catch (err) {
+        const msg = (err as Error).message;
+        opts.warn(`[cli-bridge] ChatGPT browser error for ${model}: ${msg}`);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: { message: msg, type: "chatgpt_browser_error" } }));
         }
       }
       return;

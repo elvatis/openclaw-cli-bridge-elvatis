@@ -88,6 +88,8 @@ let grokContext: BrowserContext | null = null;
 // Persistent profile dirs — survive gateway restarts, keep cookies intact
 const GROK_PROFILE_DIR = join(homedir(), ".openclaw", "grok-profile");
 const GEMINI_PROFILE_DIR = join(homedir(), ".openclaw", "gemini-profile");
+const CLAUDE_PROFILE_DIR = join(homedir(), ".openclaw", "claude-profile");
+const CHATGPT_PROFILE_DIR = join(homedir(), ".openclaw", "chatgpt-profile");
 
 // Stealth launch options — prevent Cloudflare/bot detection from flagging the browser
 const STEALTH_ARGS = [
@@ -101,6 +103,14 @@ const STEALTH_IGNORE_DEFAULTS = ["--enable-automation"] as const;
 // ── Gemini web-session state ──────────────────────────────────────────────────
 let geminiContext: BrowserContext | null = null;
 const GEMINI_EXPIRY_FILE = join(homedir(), ".openclaw", "gemini-cookie-expiry.json");
+
+// ── Claude web-session state ─────────────────────────────────────────────────
+let claudeWebContext: BrowserContext | null = null;
+const CLAUDE_EXPIRY_FILE = join(homedir(), ".openclaw", "claude-cookie-expiry.json");
+
+// ── ChatGPT web-session state ────────────────────────────────────────────────
+let chatgptContext: BrowserContext | null = null;
+const CHATGPT_EXPIRY_FILE = join(homedir(), ".openclaw", "chatgpt-cookie-expiry.json");
 
 interface GeminiExpiryInfo { expiresAt: number; loginAt: number; cookieName: string; }
 
@@ -128,6 +138,60 @@ async function scanGeminiCookieExpiry(ctx: BrowserContext): Promise<GeminiExpiry
     return { expiresAt: (earliest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: earliest.name };
   } catch { return null; }
 }
+// ── Claude cookie expiry helpers ─────────────────────────────────────────────
+interface ClaudeExpiryInfo { expiresAt: number; loginAt: number; cookieName: string; }
+function saveClaudeExpiry(info: ClaudeExpiryInfo): void {
+  try { writeFileSync(CLAUDE_EXPIRY_FILE, JSON.stringify(info, null, 2)); } catch { /* ignore */ }
+}
+function loadClaudeExpiry(): ClaudeExpiryInfo | null {
+  try { return JSON.parse(readFileSync(CLAUDE_EXPIRY_FILE, "utf-8")) as ClaudeExpiryInfo; } catch { return null; }
+}
+function formatClaudeExpiry(info: ClaudeExpiryInfo): string {
+  const daysLeft = Math.floor((info.expiresAt - Date.now()) / 86_400_000);
+  const dateStr = new Date(info.expiresAt).toISOString().substring(0, 10);
+  if (daysLeft < 0)   return `⚠️ EXPIRED (${dateStr}) — run /claude-login`;
+  if (daysLeft <= 7)  return `🚨 expires in ${daysLeft}d (${dateStr}) — run /claude-login NOW`;
+  if (daysLeft <= 14) return `⚠️ expires in ${daysLeft}d (${dateStr}) — run /claude-login soon`;
+  return `✅ valid for ${daysLeft} more days (expires ${dateStr})`;
+}
+async function scanClaudeCookieExpiry(ctx: BrowserContext): Promise<ClaudeExpiryInfo | null> {
+  try {
+    const cookies = await ctx.cookies(["https://claude.ai"]);
+    const auth = cookies.filter(c => ["sessionKey", "__cf_bm", "lastActiveOrg"].includes(c.name) && c.expires && c.expires > 0);
+    if (!auth.length) return null;
+    auth.sort((a, b) => (a.expires ?? 0) - (b.expires ?? 0));
+    const earliest = auth[0];
+    return { expiresAt: (earliest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: earliest.name };
+  } catch { return null; }
+}
+
+// ── ChatGPT cookie expiry helpers ────────────────────────────────────────────
+interface ChatGPTExpiryInfo { expiresAt: number; loginAt: number; cookieName: string; }
+function saveChatGPTExpiry(info: ChatGPTExpiryInfo): void {
+  try { writeFileSync(CHATGPT_EXPIRY_FILE, JSON.stringify(info, null, 2)); } catch { /* ignore */ }
+}
+function loadChatGPTExpiry(): ChatGPTExpiryInfo | null {
+  try { return JSON.parse(readFileSync(CHATGPT_EXPIRY_FILE, "utf-8")) as ChatGPTExpiryInfo; } catch { return null; }
+}
+function formatChatGPTExpiry(info: ChatGPTExpiryInfo): string {
+  const daysLeft = Math.floor((info.expiresAt - Date.now()) / 86_400_000);
+  const dateStr = new Date(info.expiresAt).toISOString().substring(0, 10);
+  if (daysLeft < 0)   return `⚠️ EXPIRED (${dateStr}) — run /chatgpt-login`;
+  if (daysLeft <= 7)  return `🚨 expires in ${daysLeft}d (${dateStr}) — run /chatgpt-login NOW`;
+  if (daysLeft <= 14) return `⚠️ expires in ${daysLeft}d (${dateStr}) — run /chatgpt-login soon`;
+  return `✅ valid for ${daysLeft} more days (expires ${dateStr})`;
+}
+async function scanChatGPTCookieExpiry(ctx: BrowserContext): Promise<ChatGPTExpiryInfo | null> {
+  try {
+    const cookies = await ctx.cookies(["https://chatgpt.com", "https://auth0.openai.com"]);
+    const auth = cookies.filter(c => ["__Secure-next-auth.session-token", "_puid", "oai-did"].includes(c.name) && c.expires && c.expires > 0);
+    if (!auth.length) return null;
+    auth.sort((a, b) => (a.expires ?? 0) - (b.expires ?? 0));
+    const earliest = auth[0];
+    return { expiresAt: (earliest.expires ?? 0) * 1000, loginAt: Date.now(), cookieName: earliest.name };
+  } catch { return null; }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Cookie expiry tracking file — written on /grok-login, read on startup
@@ -297,6 +361,80 @@ async function getOrLaunchGeminiContext(
   return _geminiLaunchPromise;
 }
 
+// ── Per-provider persistent context launch promises (Claude) ─────────────────
+let _claudeLaunchPromise: Promise<BrowserContext | null> | null = null;
+
+async function getOrLaunchClaudeContext(
+  log: (msg: string) => void
+): Promise<BrowserContext | null> {
+  if (claudeWebContext) {
+    try { claudeWebContext.pages(); return claudeWebContext; } catch { claudeWebContext = null; }
+  }
+  const cdpCtx = await connectToOpenClawBrowser(log);
+  if (cdpCtx) return cdpCtx;
+  if (_claudeLaunchPromise) return _claudeLaunchPromise;
+  _claudeLaunchPromise = (async () => {
+    const { chromium } = await import("playwright");
+    log("[cli-bridge:claude-web] launching persistent Chromium…");
+    try {
+      mkdirSync(CLAUDE_PROFILE_DIR, { recursive: true });
+      const ctx = await chromium.launchPersistentContext(CLAUDE_PROFILE_DIR, {
+        headless: true,
+        channel: "chrome",
+        args: STEALTH_ARGS,
+        ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
+      });
+      claudeWebContext = ctx;
+      ctx.on("close", () => { claudeWebContext = null; log("[cli-bridge:claude-web] persistent context closed"); });
+      log("[cli-bridge:claude-web] persistent context ready");
+      return ctx;
+    } catch (err) {
+      log(`[cli-bridge:claude-web] failed to launch browser: ${(err as Error).message}`);
+      return null;
+    } finally {
+      _claudeLaunchPromise = null;
+    }
+  })();
+  return _claudeLaunchPromise;
+}
+
+// ── Per-provider persistent context launch promises (ChatGPT) ────────────────
+let _chatgptLaunchPromise: Promise<BrowserContext | null> | null = null;
+
+async function getOrLaunchChatGPTContext(
+  log: (msg: string) => void
+): Promise<BrowserContext | null> {
+  if (chatgptContext) {
+    try { chatgptContext.pages(); return chatgptContext; } catch { chatgptContext = null; }
+  }
+  const cdpCtx = await connectToOpenClawBrowser(log);
+  if (cdpCtx) return cdpCtx;
+  if (_chatgptLaunchPromise) return _chatgptLaunchPromise;
+  _chatgptLaunchPromise = (async () => {
+    const { chromium } = await import("playwright");
+    log("[cli-bridge:chatgpt] launching persistent Chromium…");
+    try {
+      mkdirSync(CHATGPT_PROFILE_DIR, { recursive: true });
+      const ctx = await chromium.launchPersistentContext(CHATGPT_PROFILE_DIR, {
+        headless: true,
+        channel: "chrome",
+        args: STEALTH_ARGS,
+        ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
+      });
+      chatgptContext = ctx;
+      ctx.on("close", () => { chatgptContext = null; log("[cli-bridge:chatgpt] persistent context closed"); });
+      log("[cli-bridge:chatgpt] persistent context ready");
+      return ctx;
+    } catch (err) {
+      log(`[cli-bridge:chatgpt] failed to launch browser: ${(err as Error).message}`);
+      return null;
+    } finally {
+      _chatgptLaunchPromise = null;
+    }
+  })();
+  return _chatgptLaunchPromise;
+}
+
 /** Clean up all browser resources — call on plugin teardown */
 async function cleanupBrowsers(log: (msg: string) => void): Promise<void> {
   if (grokContext) {
@@ -306,6 +444,14 @@ async function cleanupBrowsers(log: (msg: string) => void): Promise<void> {
   if (geminiContext) {
     try { await geminiContext.close(); } catch { /* ignore */ }
     geminiContext = null;
+  }
+  if (claudeWebContext) {
+    try { await claudeWebContext.close(); } catch { /* ignore */ }
+    claudeWebContext = null;
+  }
+  if (chatgptContext) {
+    try { await chatgptContext.close(); } catch { /* ignore */ }
+    chatgptContext = null;
   }
   if (_cdpBrowser) {
     try { await _cdpBrowser.close(); } catch { /* ignore */ }
@@ -708,11 +854,12 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.5.1",
+  version: "1.6.0",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
-    "Phase 3: /cli-* model switching, /cli-back restore, /cli-test health check.",
+    "Phase 3: /cli-* model switching, /cli-back restore, /cli-test health check. " +
+    "Phase 4: persistent browser profiles for Grok, Gemini, Claude.ai, ChatGPT.",
 
   register(api: OpenClawPluginApi) {
     const cfg = (api.pluginConfig ?? {}) as CliPluginConfig;
@@ -758,12 +905,30 @@ const plugin = {
           },
           {
             name: "gemini",
-            profileDir: join(homedir(), ".openclaw", "gemini-profile"),
+            profileDir: GEMINI_PROFILE_DIR,
             cookieFile: join(homedir(), ".openclaw", "gemini-cookie-expiry.json"),
             verifySelector: ".ql-editor",
             homeUrl: "https://gemini.google.com/app",
             getCtx: () => geminiContext,
             setCtx: (c) => { geminiContext = c; },
+          },
+          {
+            name: "claude-web",
+            profileDir: CLAUDE_PROFILE_DIR,
+            cookieFile: CLAUDE_EXPIRY_FILE,
+            verifySelector: ".ProseMirror",
+            homeUrl: "https://claude.ai/new",
+            getCtx: () => claudeWebContext,
+            setCtx: (c) => { claudeWebContext = c; },
+          },
+          {
+            name: "chatgpt",
+            profileDir: CHATGPT_PROFILE_DIR,
+            cookieFile: CHATGPT_EXPIRY_FILE,
+            verifySelector: "#prompt-textarea",
+            homeUrl: "https://chatgpt.com",
+            getCtx: () => chatgptContext,
+            setCtx: (c) => { chatgptContext = c; },
           },
         ];
 
@@ -843,7 +1008,7 @@ const plugin = {
           },
         ],
 
-        refreshOAuth: async (cred) => {
+        refreshOAuth: async (cred: ProviderAuthContext) => {
           try {
             const fresh = await readCodexCredentials(codexAuthPath);
             return {
@@ -918,6 +1083,28 @@ const plugin = {
               }
               return geminiContext;
             },
+            getClaudeContext: () => claudeWebContext,
+            connectClaudeContext: async () => {
+              const ctx = await getOrLaunchClaudeContext((msg) => api.logger.info(msg));
+              if (ctx) {
+                const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+                const { page } = await getOrCreateClaudePage(ctx);
+                const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+                if (editor) { claudeWebContext = ctx; return ctx; }
+              }
+              return claudeWebContext;
+            },
+            getChatGPTContext: () => chatgptContext,
+            connectChatGPTContext: async () => {
+              const ctx = await getOrLaunchChatGPTContext((msg) => api.logger.info(msg));
+              if (ctx) {
+                const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+                const { page } = await getOrCreateChatGPTPage(ctx);
+                const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
+                if (editor) { chatgptContext = ctx; return ctx; }
+              }
+              return chatgptContext;
+            },
           });
           proxyServer = server;
           api.logger.info(
@@ -959,8 +1146,29 @@ const plugin = {
                     const editor = await page.locator(".ql-editor").isVisible().catch(() => false);
                     if (editor) { geminiContext = ctx; return ctx; }
                   }
-                  // No fallback spawn — return existing context or null to avoid Chromium leak
                   return geminiContext;
+                },
+                getClaudeContext: () => claudeWebContext,
+                connectClaudeContext: async () => {
+                  const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+                  if (ctx) {
+                    const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+                    const { page } = await getOrCreateClaudePage(ctx);
+                    const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+                    if (editor) { claudeWebContext = ctx; return ctx; }
+                  }
+                  return claudeWebContext;
+                },
+                getChatGPTContext: () => chatgptContext,
+                connectChatGPTContext: async () => {
+                  const ctx = await connectToOpenClawBrowser((msg) => api.logger.info(msg));
+                  if (ctx) {
+                    const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+                    const { page } = await getOrCreateChatGPTPage(ctx);
+                    const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
+                    if (editor) { chatgptContext = ctx; return ctx; }
+                  }
+                  return chatgptContext;
                 },
               });
               proxyServer = server;
@@ -1428,10 +1636,262 @@ const plugin = {
       },
     } satisfies OpenClawPluginCommandDefinition);
 
+    // ── Claude.ai web-session commands ─────────────────────────────────────────
+    api.registerCommand({
+      name: "claude-login",
+      description: "Authenticate claude.ai: imports cookies from OpenClaw browser into persistent profile",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (claudeWebContext) {
+          const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+          try {
+            const { page } = await getOrCreateClaudePage(claudeWebContext);
+            const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+            if (editor) return { text: "✅ Already connected to claude.ai. Use `/claude-logout` first to reset." };
+          } catch { /* fall through */ }
+          claudeWebContext = null;
+        }
+
+        api.logger.info("[cli-bridge:claude-web] /claude-login: connecting…");
+
+        // Step 1: try to grab cookies from OpenClaw browser (CDP)
+        let importedCookies: unknown[] = [];
+        try {
+          const { chromium } = await import("playwright");
+          const ocBrowser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 3000 });
+          const ocCtx = ocBrowser.contexts()[0];
+          if (ocCtx) {
+            importedCookies = await ocCtx.cookies(["https://claude.ai"]);
+            api.logger.info(`[cli-bridge:claude-web] imported ${importedCookies.length} cookies from OpenClaw browser`);
+          }
+          await ocBrowser.close().catch(() => {});
+        } catch {
+          api.logger.info("[cli-bridge:claude-web] OpenClaw browser not available — using saved profile");
+        }
+
+        // Step 2: get or launch persistent context
+        const ctx = await getOrLaunchClaudeContext((msg) => api.logger.info(msg));
+        if (!ctx) return { text: "❌ Could not launch browser. Check server logs." };
+
+        // Step 3: inject imported cookies
+        if (importedCookies.length > 0) {
+          await ctx.addCookies(importedCookies as Parameters<typeof ctx.addCookies>[0]);
+          api.logger.info("[cli-bridge:claude-web] cookies injected into persistent profile");
+        }
+
+        // Step 4: navigate and verify
+        const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+        let page;
+        try {
+          ({ page } = await getOrCreateClaudePage(ctx));
+        } catch (err) {
+          return { text: `❌ Failed to open claude.ai: ${(err as Error).message}` };
+        }
+
+        let editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+        if (!editor) {
+          // Headless failed — launch headed browser for interactive login
+          api.logger.info("[cli-bridge:claude-web] headless login failed — launching headed browser for manual login…");
+          try { await ctx.close(); } catch { /* ignore */ }
+          claudeWebContext = null;
+
+          const { chromium } = await import("playwright");
+          const headedCtx = await chromium.launchPersistentContext(CLAUDE_PROFILE_DIR, {
+            headless: false,
+            channel: "chrome",
+            args: STEALTH_ARGS,
+            ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
+          });
+          const loginPage = await headedCtx.newPage();
+          await loginPage.goto("https://claude.ai/new", { waitUntil: "domcontentloaded", timeout: 15_000 });
+
+          api.logger.info("[cli-bridge:claude-web] waiting for manual login (5 min timeout)…");
+          try {
+            await loginPage.waitForSelector(".ProseMirror", { timeout: 300_000 });
+          } catch {
+            await headedCtx.close().catch(() => {});
+            return { text: "❌ Login timeout — Claude editor did not appear within 5 minutes." };
+          }
+
+          claudeWebContext = headedCtx;
+          headedCtx.on("close", () => { claudeWebContext = null; });
+          editor = true;
+          page = loginPage;
+        } else {
+          claudeWebContext = ctx;
+        }
+
+        const expiry = await scanClaudeCookieExpiry(claudeWebContext!);
+        if (expiry) {
+          saveClaudeExpiry(expiry);
+          api.logger.info(`[cli-bridge:claude-web] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
+        }
+        const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatClaudeExpiry(expiry)}` : "";
+
+        return { text: `✅ Claude.ai session ready!\n\nModels available:\n• \`vllm/web-claude/claude-sonnet\`\n• \`vllm/web-claude/claude-opus\`\n• \`vllm/web-claude/claude-haiku\`${expiryLine}` };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "claude-status",
+      description: "Check claude.ai session status",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (!claudeWebContext) {
+          return { text: "❌ No active claude.ai session\nRun `/claude-login` to authenticate." };
+        }
+        const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+        try {
+          const { page } = await getOrCreateClaudePage(claudeWebContext);
+          const editor = await page.locator(".ProseMirror").isVisible().catch(() => false);
+          if (editor) {
+            const expiry = loadClaudeExpiry();
+            const expiryLine = expiry ? `\n🕐 ${formatClaudeExpiry(expiry)}` : "";
+            return { text: `✅ claude.ai session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-claude/claude-sonnet, claude-opus, claude-haiku${expiryLine}` };
+          }
+        } catch { /* fall through */ }
+        claudeWebContext = null;
+        return { text: "❌ Session lost — run `/claude-login` to re-authenticate." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "claude-logout",
+      description: "Disconnect from claude.ai session",
+      handler: async (): Promise<PluginCommandResult> => {
+        claudeWebContext = null;
+        return { text: "✅ Disconnected from claude.ai. Run `/claude-login` to reconnect." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    // ── ChatGPT web-session commands ─────────────────────────────────────────
+    api.registerCommand({
+      name: "chatgpt-login",
+      description: "Authenticate chatgpt.com: imports cookies from OpenClaw browser into persistent profile",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (chatgptContext) {
+          const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+          try {
+            const { page } = await getOrCreateChatGPTPage(chatgptContext);
+            const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
+            if (editor) return { text: "✅ Already connected to chatgpt.com. Use `/chatgpt-logout` first to reset." };
+          } catch { /* fall through */ }
+          chatgptContext = null;
+        }
+
+        api.logger.info("[cli-bridge:chatgpt] /chatgpt-login: connecting…");
+
+        // Step 1: try to grab cookies from OpenClaw browser (CDP)
+        let importedCookies: unknown[] = [];
+        try {
+          const { chromium } = await import("playwright");
+          const ocBrowser = await chromium.connectOverCDP("http://127.0.0.1:18800", { timeout: 3000 });
+          const ocCtx = ocBrowser.contexts()[0];
+          if (ocCtx) {
+            importedCookies = await ocCtx.cookies(["https://chatgpt.com", "https://auth0.openai.com", "https://openai.com"]);
+            api.logger.info(`[cli-bridge:chatgpt] imported ${importedCookies.length} cookies from OpenClaw browser`);
+          }
+          await ocBrowser.close().catch(() => {});
+        } catch {
+          api.logger.info("[cli-bridge:chatgpt] OpenClaw browser not available — using saved profile");
+        }
+
+        // Step 2: get or launch persistent context
+        const ctx = await getOrLaunchChatGPTContext((msg) => api.logger.info(msg));
+        if (!ctx) return { text: "❌ Could not launch browser. Check server logs." };
+
+        // Step 3: inject imported cookies
+        if (importedCookies.length > 0) {
+          await ctx.addCookies(importedCookies as Parameters<typeof ctx.addCookies>[0]);
+          api.logger.info("[cli-bridge:chatgpt] cookies injected into persistent profile");
+        }
+
+        // Step 4: navigate and verify
+        const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+        let page;
+        try {
+          ({ page } = await getOrCreateChatGPTPage(ctx));
+        } catch (err) {
+          return { text: `❌ Failed to open chatgpt.com: ${(err as Error).message}` };
+        }
+
+        let editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
+        if (!editor) {
+          // Headless failed — launch headed browser for interactive login
+          api.logger.info("[cli-bridge:chatgpt] headless login failed — launching headed browser for manual login…");
+          try { await ctx.close(); } catch { /* ignore */ }
+          chatgptContext = null;
+
+          const { chromium } = await import("playwright");
+          const headedCtx = await chromium.launchPersistentContext(CHATGPT_PROFILE_DIR, {
+            headless: false,
+            channel: "chrome",
+            args: STEALTH_ARGS,
+            ignoreDefaultArgs: [...STEALTH_IGNORE_DEFAULTS],
+          });
+          const loginPage = await headedCtx.newPage();
+          await loginPage.goto("https://chatgpt.com", { waitUntil: "domcontentloaded", timeout: 15_000 });
+
+          api.logger.info("[cli-bridge:chatgpt] waiting for manual login (5 min timeout)…");
+          try {
+            await loginPage.waitForSelector("#prompt-textarea", { timeout: 300_000 });
+          } catch {
+            await headedCtx.close().catch(() => {});
+            return { text: "❌ Login timeout — ChatGPT editor did not appear within 5 minutes." };
+          }
+
+          chatgptContext = headedCtx;
+          headedCtx.on("close", () => { chatgptContext = null; });
+          editor = true;
+          page = loginPage;
+        } else {
+          chatgptContext = ctx;
+        }
+
+        const expiry = await scanChatGPTCookieExpiry(chatgptContext!);
+        if (expiry) {
+          saveChatGPTExpiry(expiry);
+          api.logger.info(`[cli-bridge:chatgpt] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
+        }
+        const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatChatGPTExpiry(expiry)}` : "";
+
+        return { text: `✅ ChatGPT session ready!\n\nModels available:\n• \`vllm/web-chatgpt/gpt-4o\`\n• \`vllm/web-chatgpt/gpt-4o-mini\`\n• \`vllm/web-chatgpt/gpt-o3\`\n• \`vllm/web-chatgpt/gpt-o4-mini\`\n• \`vllm/web-chatgpt/gpt-5\`${expiryLine}` };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "chatgpt-status",
+      description: "Check chatgpt.com session status",
+      handler: async (): Promise<PluginCommandResult> => {
+        if (!chatgptContext) {
+          return { text: "❌ No active chatgpt.com session\nRun `/chatgpt-login` to authenticate." };
+        }
+        const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+        try {
+          const { page } = await getOrCreateChatGPTPage(chatgptContext);
+          const editor = await page.locator("#prompt-textarea").isVisible().catch(() => false);
+          if (editor) {
+            const expiry = loadChatGPTExpiry();
+            const expiryLine = expiry ? `\n🕐 ${formatChatGPTExpiry(expiry)}` : "";
+            return { text: `✅ chatgpt.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-chatgpt/gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5${expiryLine}` };
+          }
+        } catch { /* fall through */ }
+        chatgptContext = null;
+        return { text: "❌ Session lost — run `/chatgpt-login` to re-authenticate." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    api.registerCommand({
+      name: "chatgpt-logout",
+      description: "Disconnect from chatgpt.com session",
+      handler: async (): Promise<PluginCommandResult> => {
+        chatgptContext = null;
+        return { text: "✅ Disconnected from chatgpt.com. Run `/chatgpt-login` to reconnect." };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
     // ── /bridge-status — all providers at a glance ───────────────────────────
     api.registerCommand({
       name: "bridge-status",
-      description: "Show status of all headless browser providers (Grok, Gemini)",
+      description: "Show status of all headless browser providers (Grok, Gemini, Claude, ChatGPT)",
       handler: async (): Promise<PluginCommandResult> => {
         const lines: string[] = [`🌉 *CLI Bridge v${plugin.version} — Provider Status*\n`];
 
@@ -1463,6 +1923,36 @@ const plugin = {
             models: "web-gemini/gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash",
             loginCmd: "/gemini-login",
             expiry: () => { const e = loadGeminiExpiry(); return e ? formatGeminiExpiry(e) : null; },
+          },
+          {
+            name: "Claude.ai",
+            ctx: claudeWebContext,
+            check: async () => {
+              if (!claudeWebContext) return false;
+              try {
+                const { getOrCreateClaudePage } = await import("./src/claude-browser.js");
+                const { page } = await getOrCreateClaudePage(claudeWebContext);
+                return page.locator(".ProseMirror").isVisible().catch(() => false);
+              } catch { claudeWebContext = null; return false; }
+            },
+            models: "web-claude/claude-sonnet, claude-opus, claude-haiku",
+            loginCmd: "/claude-login",
+            expiry: () => { const e = loadClaudeExpiry(); return e ? formatClaudeExpiry(e) : null; },
+          },
+          {
+            name: "ChatGPT",
+            ctx: chatgptContext,
+            check: async () => {
+              if (!chatgptContext) return false;
+              try {
+                const { getOrCreateChatGPTPage } = await import("./src/chatgpt-browser.js");
+                const { page } = await getOrCreateChatGPTPage(chatgptContext);
+                return page.locator("#prompt-textarea").isVisible().catch(() => false);
+              } catch { chatgptContext = null; return false; }
+            },
+            models: "web-chatgpt/gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5",
+            loginCmd: "/chatgpt-login",
+            expiry: () => { const e = loadChatGPTExpiry(); return e ? formatChatGPTExpiry(e) : null; },
           },
         ];
 
@@ -1497,6 +1987,12 @@ const plugin = {
       "/gemini-login",
       "/gemini-status",
       "/gemini-logout",
+      "/claude-login",
+      "/claude-status",
+      "/claude-logout",
+      "/chatgpt-login",
+      "/chatgpt-status",
+      "/chatgpt-logout",
       "/bridge-status",
     ];
     api.logger.info(`[cli-bridge] registered ${allCommands.length} commands: ${allCommands.join(", ")}`);
