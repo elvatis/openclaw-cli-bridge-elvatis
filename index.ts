@@ -1982,15 +1982,34 @@ const plugin = {
         ];
 
         for (const c of checks) {
-          const active = c.ctx !== null;
-          const ok = active ? await c.check() : false;
           const expiry = c.expiry();
-          if (ok) {
-            lines.push(`✅ *${c.name}* — active`);
+          const inMemory = c.ctx !== null;
+          const liveOk = inMemory ? await c.check() : false;
+
+          // Cookie-based status: treat as "logged in" if expiry file exists and not expired
+          // ⚠️ EXPIRED = truly expired, 🚨 = expiring soon (still valid), ✅ = fine
+          // This reflects actual login state independent of in-memory context
+          const cookieExpired = expiry !== null && expiry.startsWith("⚠️ EXPIRED");
+          const cookieValid = expiry !== null && !cookieExpired;
+
+          if (liveOk) {
+            // In-memory context active and verified
+            lines.push(`✅ *${c.name}* — active (browser connected)`);
             if (expiry) lines.push(`   🕐 ${expiry}`);
             lines.push(`   Models: ${c.models}`);
+          } else if (cookieValid) {
+            // Not in memory yet, but cookies are valid — will auto-connect on next request
+            lines.push(`🟡 *${c.name}* — logged in, browser not loaded`);
+            lines.push(`   🕐 ${expiry}`);
+            lines.push(`   Models: ${c.models}`);
+            lines.push(`   ℹ️ Browser launches on first request`);
+          } else if (cookieExpired) {
+            // Cookies expired — needs re-login
+            lines.push(`🔴 *${c.name}* — session expired (run \`${c.loginCmd}\`)`);
+            if (expiry) lines.push(`   🕐 ${expiry}`);
           } else {
-            lines.push(`❌ *${c.name}* — not connected (run \`${c.loginCmd}\`)`);
+            // No cookie file at all — never logged in
+            lines.push(`⚪ *${c.name}* — never logged in (run \`${c.loginCmd}\`)`);
           }
           lines.push("");
         }
