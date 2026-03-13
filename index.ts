@@ -752,9 +752,13 @@ const CLI_MODEL_COMMANDS = [
   { name: "cli-gemini",       model: "vllm/cli-gemini/gemini-2.5-pro",       description: "Gemini 2.5 Pro (Gemini CLI)",           label: "Gemini 2.5 Pro (CLI)" },
   { name: "cli-gemini-flash", model: "vllm/cli-gemini/gemini-2.5-flash",     description: "Gemini 2.5 Flash (Gemini CLI)",         label: "Gemini 2.5 Flash (CLI)" },
   { name: "cli-gemini3",      model: "vllm/cli-gemini/gemini-3-pro-preview", description: "Gemini 3 Pro (Gemini CLI)",             label: "Gemini 3 Pro (CLI)" },
+  { name: "cli-gemini3-flash", model: "vllm/cli-gemini/gemini-3-flash-preview", description: "Gemini 3 Flash (Gemini CLI)",       label: "Gemini 3 Flash (CLI)" },
   // ── Codex CLI (openai-codex provider, OAuth auth) ────────────────────────────
   { name: "cli-codex",        model: "openai-codex/gpt-5.3-codex",          description: "GPT-5.3 Codex (Codex CLI auth)",        label: "GPT-5.3 Codex" },
+  { name: "cli-codex-spark",  model: "openai-codex/gpt-5.3-codex-spark",    description: "GPT-5.3 Codex Spark (Codex CLI auth)",  label: "GPT-5.3 Codex Spark" },
+  { name: "cli-codex52",      model: "openai-codex/gpt-5.2-codex",          description: "GPT-5.2 Codex (Codex CLI auth)",        label: "GPT-5.2 Codex" },
   { name: "cli-codex54",      model: "openai-codex/gpt-5.4",                description: "GPT-5.4 (Codex CLI auth)",              label: "GPT-5.4" },
+  { name: "cli-codex-mini",   model: "openai-codex/gpt-5.1-codex-mini",     description: "GPT-5.1 Codex Mini (Codex CLI auth)",   label: "GPT-5.1 Codex Mini" },
   // ── BitNet local inference (via local proxy → llama-server) ─────────────────
   { name: "cli-bitnet",       model: "vllm/local-bitnet/bitnet-2b",         description: "BitNet b1.58 2B (local CPU, no API key)", label: "BitNet 2B (local)" },
 ] as const;
@@ -1646,12 +1650,158 @@ const plugin = {
         lines.push("  /cli-back            Restore previous model + clear staged");
         lines.push("  /cli-test [model]    Health check (no model switch)");
         lines.push("  /cli-list            This overview");
+        lines.push("  /cli-help            Connected providers + examples + dashboard link");
         lines.push("");
         lines.push("*Switching safely:*");
         lines.push("  /cli-sonnet          → stages switch (safe, apply later)");
         lines.push("  /cli-sonnet --now    → immediate switch (only between sessions!)");
         lines.push("");
-        lines.push(`Proxy: \`127.0.0.1:${port}\``);
+        lines.push(`Proxy: \`127.0.0.1:${port}\`  ·  Dashboard: http://127.0.0.1:${port}/status`);
+
+        return { text: lines.join("\n") };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    // ── Phase 3e: /cli-help — context-aware help with connected providers ─────
+    api.registerCommand({
+      name: "cli-help",
+      description: "Show available models based on currently connected providers, with example commands and status page link.",
+      requireAuth: false,
+      handler: async (): Promise<PluginCommandResult> => {
+        const lines: string[] = [`🌉 *CLI Bridge Help* — v${plugin.version}`, ""];
+
+        // ── CLI models (always available — spawns local CLI) ────────────────
+        lines.push("*CLI Models* (always available — uses locally installed CLIs)");
+        lines.push("");
+        const cliGroups: Record<string, typeof CLI_MODEL_COMMANDS[number][]> = {
+          "Claude Code": [],
+          "Gemini": [],
+        };
+        for (const c of CLI_MODEL_COMMANDS) {
+          if (c.model.startsWith("vllm/cli-claude/")) cliGroups["Claude Code"].push(c);
+          else if (c.model.startsWith("vllm/cli-gemini/")) cliGroups["Gemini"].push(c);
+        }
+        for (const [group, entries] of Object.entries(cliGroups)) {
+          if (entries.length === 0) continue;
+          lines.push(`  *${group}*`);
+          for (const c of entries) {
+            const modelShort = c.model.replace(/^vllm\/cli-(claude|gemini)\//, "");
+            lines.push(`    \`/${c.name}\`  →  ${modelShort}`);
+          }
+        }
+        lines.push("");
+
+        // ── Codex models (OAuth — always registered) ────────────────────────
+        const codexEntries = CLI_MODEL_COMMANDS.filter(c => c.model.startsWith("openai-codex/"));
+        if (codexEntries.length > 0) {
+          lines.push("*Codex* (OAuth — direct API, no proxy)");
+          for (const c of codexEntries) {
+            const modelShort = c.model.replace(/^openai-codex\//, "");
+            lines.push(`    \`/${c.name}\`  →  ${modelShort}`);
+          }
+          lines.push("");
+        }
+
+        // ── Web session models (only if connected) ──────────────────────────
+        const webProviders: Array<{
+          name: string;
+          ctx: BrowserContext | null;
+          models: string[];
+          cmds: string[];
+          loginCmd: string;
+          expiry: string | null;
+        }> = [
+          {
+            name: "Grok",
+            ctx: grokContext,
+            models: ["web-grok/grok-3", "web-grok/grok-3-fast", "web-grok/grok-3-mini", "web-grok/grok-3-mini-fast"],
+            cmds: ["openclaw models set vllm/web-grok/grok-3"],
+            loginCmd: "/grok-login",
+            expiry: (() => { const e = loadGrokExpiry(); return e ? formatExpiryInfo(e) : null; })(),
+          },
+          {
+            name: "Gemini (web)",
+            ctx: geminiContext,
+            models: ["web-gemini/gemini-2-5-pro", "web-gemini/gemini-2-5-flash", "web-gemini/gemini-3-pro", "web-gemini/gemini-3-flash"],
+            cmds: ["openclaw models set vllm/web-gemini/gemini-2-5-pro"],
+            loginCmd: "/gemini-login",
+            expiry: (() => { const e = loadGeminiExpiry(); return e ? formatGeminiExpiry(e) : null; })(),
+          },
+          {
+            name: "Claude.ai (web)",
+            ctx: claudeWebContext,
+            models: ["web-claude/*"],
+            cmds: [],
+            loginCmd: "/claude-login",
+            expiry: (() => { const e = loadClaudeExpiry(); return e ? formatClaudeExpiry(e) : null; })(),
+          },
+          {
+            name: "ChatGPT (web)",
+            ctx: chatgptContext,
+            models: ["web-chatgpt/*"],
+            cmds: [],
+            loginCmd: "/chatgpt-login",
+            expiry: (() => { const e = loadChatGPTExpiry(); return e ? formatChatGPTExpiry(e) : null; })(),
+          },
+        ];
+
+        const connectedWeb = webProviders.filter(p => p.ctx !== null);
+        const disconnectedWeb = webProviders.filter(p => p.ctx === null);
+
+        if (connectedWeb.length > 0) {
+          lines.push("*Web Session Models* (connected)");
+          for (const p of connectedWeb) {
+            const expiryNote = p.expiry ? ` — ${p.expiry}` : "";
+            lines.push(`  🟢 *${p.name}*${expiryNote}`);
+            lines.push(`    Models: ${p.models.join(", ")}`);
+            if (p.cmds.length > 0) {
+              lines.push(`    Example: \`${p.cmds[0]}\``);
+            }
+          }
+          lines.push("");
+        }
+
+        if (disconnectedWeb.length > 0) {
+          lines.push("*Web Session Models* (not connected)");
+          for (const p of disconnectedWeb) {
+            const expiryNote = p.expiry && !p.expiry.startsWith("⚠️ EXPIRED") ? " (cookies valid, auto-connects on use)" : "";
+            lines.push(`  ⚪ *${p.name}*${expiryNote}  →  run \`${p.loginCmd}\``);
+          }
+          lines.push("");
+        }
+
+        // ── BitNet ──────────────────────────────────────────────────────────
+        const bitnetOk = await checkBitNetServer();
+        if (bitnetOk) {
+          lines.push("*Local Inference*");
+          lines.push("  🟢 *BitNet 2B* — running  →  \`/cli-bitnet\`");
+        } else {
+          lines.push("*Local Inference*");
+          lines.push("  ⚪ *BitNet 2B* — not running  →  \`sudo systemctl start bitnet-server\`");
+        }
+        lines.push("");
+
+        // ── Utility commands ────────────────────────────────────────────────
+        lines.push("*Utility Commands*");
+        lines.push("  \`/cli-help\`             This help");
+        lines.push("  \`/cli-list\`             All models (no status check)");
+        lines.push("  \`/cli-test [model]\`     Health check (no model switch)");
+        lines.push("  \`/cli-back\`             Restore previous model");
+        lines.push("  \`/cli-apply\`            Apply staged model switch");
+        lines.push("  \`/bridge-status\`        Full provider diagnostics");
+        lines.push("");
+
+        // ── Quick examples ──────────────────────────────────────────────────
+        lines.push("*Quick Examples*");
+        lines.push("  \`/cli-sonnet\`           Switch to Claude Sonnet (staged)");
+        lines.push("  \`/cli-sonnet --now\`     Switch immediately");
+        lines.push("  \`/cli-gemini\`           Switch to Gemini 2.5 Pro");
+        lines.push("  \`/cli-codex\`            Switch to GPT-5.3 Codex");
+        lines.push("");
+
+        // ── Status page link ────────────────────────────────────────────────
+        lines.push(`📊 Dashboard: http://127.0.0.1:${port}/status`);
+        lines.push(`🔍 Health JSON: http://127.0.0.1:${port}/healthz`);
 
         return { text: lines.join("\n") };
       },
@@ -2262,6 +2412,7 @@ const plugin = {
       "/chatgpt-status",
       "/chatgpt-logout",
       "/bridge-status",
+      "/cli-help",
     ];
     api.logger.info(`[cli-bridge] registered ${allCommands.length} commands: ${allCommands.join(", ")}`);
   },
