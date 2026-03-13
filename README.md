@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.8.9`
+**Current version:** `1.9.0`
 
 ---
 
@@ -307,6 +307,18 @@ Slash commands (requireAuth=false, gateway commands.allowFrom is the auth layer)
   /cli-back   → reads state file, restores previous model, clears state
   /cli-test   → HTTP POST → localhost:31337, no global model change
   /cli-list   → formatted table of all registered models
+
+Proxy endpoints:
+  /health     → simple {"status":"ok"}
+  /healthz    → detailed JSON (version, uptime, provider status, model count)
+  /status     → HTML dashboard (auto-refreshes every 30s)
+  /v1/models  → OpenAI-compatible model list
+
+Model fallback (v1.9.0):
+  cli-gemini/gemini-2.5-pro      → cli-gemini/gemini-2.5-flash
+  cli-gemini/gemini-3-pro-preview → cli-gemini/gemini-3-flash-preview
+  cli-claude/claude-opus-4-6     → cli-claude/claude-sonnet-4-6
+  cli-claude/claude-sonnet-4-6   → cli-claude/claude-haiku-4-5
 ```
 
 ---
@@ -334,13 +346,26 @@ Slash commands (requireAuth=false, gateway commands.allowFrom is the auth layer)
 ## Development
 
 ```bash
+npm run lint        # eslint (TypeScript-aware)
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (83 tests)
+npm test            # vitest run (121 tests)
+npm run ci          # lint + typecheck + test
 ```
 
 ---
 
 ## Changelog
+
+### v1.9.0
+- **feat:** Auto-source version from `package.json` — eliminates hardcoded version string sync issues (was stale across v1.8.2–v1.8.8)
+- **feat:** ESLint config (`eslint.config.js`) — TypeScript-aware linting with `npm run lint`, integrated into CI pipeline
+- **refactor:** Extract `/status` HTML dashboard into `src/status-template.ts` — easier to maintain and test
+- **feat:** System Chrome startup check — logs a clear warning with install instructions if `google-chrome` / `chromium` is not found (required for stealth mode browser launches)
+- **refactor:** Consolidate 4 cookie expiry files (`grok-`, `gemini-`, `claude-`, `chatgpt-cookie-expiry.json`) into single `~/.openclaw/cookie-expiry.json`. Legacy files are auto-migrated on first load.
+- **fix:** Explicit `grokBrowser` cleanup on plugin unload — prevents orphaned Chromium processes on hot-reload. Launch promises (`_geminiLaunchPromise` etc.) are also cleared.
+- **feat:** Model fallback chain — when a CLI model fails (timeout, error), automatically retries with a lighter variant: `gemini-2.5-pro` → `flash`, `claude-opus` → `sonnet` → `haiku`. Response includes the actual model used.
+- **feat:** `/healthz` JSON endpoint — returns version, uptime, provider session status, and model count. Useful for monitoring scripts and health dashboards.
+- **feat:** Status page now shows slash commands (`/cli-codex`, `/cli-sonnet`, etc.) next to model IDs
 
 ### v1.8.7
 - **fix:** Add missing cli-gemini/gemini-3-flash-preview and all Codex models to status page model list

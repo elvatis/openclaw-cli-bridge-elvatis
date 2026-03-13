@@ -1,6 +1,6 @@
 {
   "name": "@elvatis_com/openclaw-cli-bridge-elvatis",
-  "version": "1.8.9",
+  "version": "1.9.0",
   "description": "Bridges gemini, claude, and codex CLI tools as OpenClaw model providers. Reads existing CLI auth without re-login.",
   "type": "module",
   "openclaw": {
@@ -12,11 +12,15 @@
     "build": "tsc --noEmitOnError false",
     "typecheck": "tsc -p tsconfig.check.json",
     "test": "vitest run",
-    "ci": "npm run typecheck && npm run test"
+    "lint": "eslint .",
+    "ci": "npm run lint && npm run typecheck && npm run test"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.3.2",
+    "eslint": "^10.0.3",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.0",
     "vitest": "^4.0.18"
   },
   "dependencies": {
