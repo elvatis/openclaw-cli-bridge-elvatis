@@ -341,7 +341,7 @@ async function handleRequest(
     // CLI-proxy models (cli-gemini/*, cli-claude/*) are plain text completions —
     // they cannot process tool/function call schemas. Return a clear 400 so
     // OpenClaw can surface a meaningful error instead of getting a garbled response.
-    const isCliModel = model.startsWith("cli-gemini/") || model.startsWith("cli-claude/") || model.startsWith("local-bitnet/");
+    const isCliModel = model.startsWith("cli-gemini/") || model.startsWith("cli-claude/"); // local-bitnet/* exempt: llama-server silently ignores tools
     if (hasTools && isCliModel) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({

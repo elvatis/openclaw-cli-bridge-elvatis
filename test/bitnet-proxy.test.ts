@@ -178,8 +178,10 @@ describe("POST /v1/chat/completions — BitNet routing", () => {
     expect(b.choices[0].finish_reason).toBe("stop");
   });
 
-  it("rejects tool calls with 400", async () => {
-    const { status, body } = await httpPost(
+  it("accepts tool calls (llama-server ignores tools silently)", async () => {
+    // local-bitnet/* is exempt from tool rejection — llama-server ignores tool schemas
+    // and responds normally. OpenClaw always sends tools with every request.
+    const { status } = await httpPost(
       `${urlWith}/v1/chat/completions`,
       {
         model: "local-bitnet/bitnet-2b",
@@ -188,8 +190,7 @@ describe("POST /v1/chat/completions — BitNet routing", () => {
       },
       auth
     );
-    expect(status).toBe(400);
-    const b = body as { error: { code: string } };
-    expect(b.error.code).toBe("tools_not_supported");
+    // Should NOT return 400 tools_not_supported — reaches BitNet routing (503 = server not running in test)
+    expect(status).not.toBe(400);
   });
 });
