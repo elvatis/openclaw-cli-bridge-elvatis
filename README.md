@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.8.5`
+**Current version:** `1.8.6`
 
 ---
 
@@ -342,6 +342,10 @@ npm test            # vitest run (83 tests)
 
 ## Changelog
 
+### v1.8.6
+- **fix:** Remove stale web-claude/* and web-chatgpt/* entries from model list (status page showed removed providers)
+
+/
 ### v1.8.5
 - **fix:** Replace full system prompt with 30-token mini stub for BitNet (prevents context overflow)
 - **fix:** Truncate to last 6 non-system messages before forwarding to BitNet (4096 token limit)
