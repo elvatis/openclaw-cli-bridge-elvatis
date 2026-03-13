@@ -249,6 +249,9 @@ let _cdpBrowserLaunchPromise: Promise<import("playwright").BrowserContext | null
 // Set to true after first run; hot-reloads see true and skip the restore loop.
 let _startupRestoreDone = false;
 
+// Session keep-alive interval — refreshes browser cookies every 20h
+let _keepAliveInterval: ReturnType<typeof setInterval> | null = null;
+
 /**
  * Connect to the OpenClaw managed browser (CDP port 18800).
  * Singleton: reuses the same connection. Falls back to persistent Chromium for Grok only.
@@ -435,8 +438,46 @@ async function getOrLaunchChatGPTContext(
   return _chatgptLaunchPromise;
 }
 
+/** Session keep-alive — navigate to provider home pages to refresh cookies */
+async function sessionKeepAlive(log: (msg: string) => void): Promise<void> {
+  const providers: Array<{
+    name: string;
+    homeUrl: string;
+    getCtx: () => BrowserContext | null;
+    scanExpiry: (ctx: BrowserContext) => Promise<{ expiresAt: number; loginAt: number; cookieName: string } | null>;
+    saveExpiry: (info: { expiresAt: number; loginAt: number; cookieName: string }) => void;
+  }> = [
+    { name: "grok", homeUrl: "https://grok.com", getCtx: () => grokContext, scanExpiry: scanCookieExpiry, saveExpiry: saveGrokExpiry },
+    { name: "gemini", homeUrl: "https://gemini.google.com/app", getCtx: () => geminiContext, scanExpiry: scanGeminiCookieExpiry, saveExpiry: saveGeminiExpiry },
+    { name: "claude-web", homeUrl: "https://claude.ai/new", getCtx: () => claudeWebContext, scanExpiry: scanClaudeCookieExpiry, saveExpiry: saveClaudeExpiry },
+    { name: "chatgpt", homeUrl: "https://chatgpt.com", getCtx: () => chatgptContext, scanExpiry: scanChatGPTCookieExpiry, saveExpiry: saveChatGPTExpiry },
+  ];
+
+  for (const p of providers) {
+    const ctx = p.getCtx();
+    if (!ctx) continue;
+    try {
+      const page = await ctx.newPage();
+      await page.goto(p.homeUrl, { waitUntil: "domcontentloaded", timeout: 15_000 });
+      await new Promise(r => setTimeout(r, 4000));
+      await page.close();
+      const expiry = await p.scanExpiry(ctx);
+      if (expiry) p.saveExpiry(expiry);
+      log(`[cli-bridge:${p.name}] session keep-alive touch ✅`);
+    } catch (err) {
+      log(`[cli-bridge:${p.name}] session keep-alive failed: ${(err as Error).message}`);
+    }
+    // Sequential — avoid spawning multiple pages at once
+    await new Promise(r => setTimeout(r, 2000));
+  }
+}
+
 /** Clean up all browser resources — call on plugin teardown */
 async function cleanupBrowsers(log: (msg: string) => void): Promise<void> {
+  if (_keepAliveInterval) {
+    clearInterval(_keepAliveInterval);
+    _keepAliveInterval = null;
+  }
   if (grokContext) {
     try { await grokContext.close(); } catch { /* ignore */ }
     grokContext = null;
@@ -854,7 +895,7 @@ function proxyTestRequest(
 const plugin = {
   id: "openclaw-cli-bridge-elvatis",
   name: "OpenClaw CLI Bridge",
-  version: "1.6.4",
+  version: "1.6.5",
   description:
     "Phase 1: openai-codex auth bridge. " +
     "Phase 2: HTTP proxy for gemini/claude CLIs. " +
@@ -991,6 +1032,13 @@ const plugin = {
           }
         }
       })();
+
+      // Start session keep-alive interval (every 20h)
+      if (!_keepAliveInterval) {
+        _keepAliveInterval = setInterval(() => {
+          void sessionKeepAlive((msg) => api.logger.info(msg));
+        }, 72_000_000);
+      }
     }
 
     // ── Phase 1: openai-codex auth bridge ─────────────────────────────────────
