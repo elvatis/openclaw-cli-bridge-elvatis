@@ -87,11 +87,13 @@ export const CLI_MODELS = [
   { id: "web-claude/claude-opus",       name: "Claude Opus (web session)",       contextWindow: 200_000, maxTokens: 8192 },
   { id: "web-claude/claude-haiku",      name: "Claude Haiku (web session)",      contextWindow: 200_000, maxTokens: 8192 },
   // ChatGPT web-session models (requires /chatgpt-login)
-  { id: "web-chatgpt/gpt-4o",           name: "GPT-4o (web session)",            contextWindow: 128_000, maxTokens: 8192 },
-  { id: "web-chatgpt/gpt-4o-mini",      name: "GPT-4o Mini (web session)",       contextWindow: 128_000, maxTokens: 8192 },
-  { id: "web-chatgpt/gpt-o3",           name: "GPT o3 (web session)",            contextWindow: 200_000, maxTokens: 8192 },
-  { id: "web-chatgpt/gpt-o4-mini",      name: "GPT o4-mini (web session)",       contextWindow: 200_000, maxTokens: 8192 },
-  { id: "web-chatgpt/gpt-5",            name: "GPT-5 (web session)",             contextWindow: 200_000, maxTokens: 8192 },
+  { id: "web-chatgpt/gpt-4o",           name: "GPT-4o (web session)",            contextWindow: 128_000, maxTokens: 16_384 },
+  { id: "web-chatgpt/gpt-4o-mini",      name: "GPT-4o Mini (web session)",       contextWindow: 128_000, maxTokens: 16_384 },
+  { id: "web-chatgpt/gpt-4.1",          name: "GPT-4.1 (web session)",           contextWindow: 1_047_576, maxTokens: 32_768 },
+  { id: "web-chatgpt/o3",               name: "o3 (web session)",                contextWindow: 200_000, maxTokens: 100_000 },
+  { id: "web-chatgpt/o4-mini",          name: "o4-mini (web session)",           contextWindow: 200_000, maxTokens: 100_000 },
+  { id: "web-chatgpt/gpt-5",            name: "GPT-5 (web session)",             contextWindow: 1_047_576, maxTokens: 32_768 },
+  { id: "web-chatgpt/gpt-5-mini",       name: "GPT-5 Mini (web session)",        contextWindow: 1_047_576, maxTokens: 32_768 },
 ];
 
 // ──────────────────────────────────────────────────────────────────────────────

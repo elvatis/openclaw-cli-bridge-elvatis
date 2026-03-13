@@ -38,18 +38,26 @@ const CHATGPT_HOME = "https://chatgpt.com";
 const MODEL_URLS: Record<string, string> = {
   "gpt-4o":       "https://chatgpt.com/?model=gpt-4o",
   "gpt-4o-mini":  "https://chatgpt.com/?model=gpt-4o-mini",
+  "gpt-4.1":      "https://chatgpt.com/?model=gpt-4.1",
   "o3":           "https://chatgpt.com/?model=o3",
   "o4-mini":      "https://chatgpt.com/?model=o4-mini",
   "gpt-5":        "https://chatgpt.com/?model=gpt-5",
+  "gpt-5-mini":   "https://chatgpt.com/?model=gpt-5-mini",
 };
 
 const MODEL_MAP: Record<string, string> = {
+  // canonical names
   "gpt-4o":        "gpt-4o",
   "gpt-4o-mini":   "gpt-4o-mini",
+  "gpt-4.1":       "gpt-4.1",
+  "o3":            "o3",
+  "o4-mini":       "o4-mini",
+  "gpt-5":         "gpt-5",
+  "gpt-5-mini":    "gpt-5-mini",
+  // aliases (web-chatgpt/* prefix stripped by proxy)
   "gpt-o3":        "o3",
   "gpt-o4-mini":   "o4-mini",
   "gpt-4-1":       "gpt-4.1",
-  "gpt-5":         "gpt-5",
 };
 
 function resolveModel(m?: string): string {

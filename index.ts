@@ -1975,7 +1975,7 @@ const plugin = {
                 return page.locator("#prompt-textarea").isVisible().catch(() => false);
               } catch { chatgptContext = null; return false; }
             },
-            models: "web-chatgpt/gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5",
+            models: "web-chatgpt/gpt-4o, gpt-4o-mini, gpt-4.1, o3, o4-mini, gpt-5, gpt-5-mini",
             loginCmd: "/chatgpt-login",
             expiry: () => { const e = loadChatGPTExpiry(); return e ? formatChatGPTExpiry(e) : null; },
           },
