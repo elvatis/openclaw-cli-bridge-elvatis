@@ -100,6 +100,7 @@ export const CLI_MODELS = [
   { id: "openai-codex/gpt-5.4",             name: "GPT-5.4",                   contextWindow: 200_000, maxTokens: 32_768 },
   { id: "openai-codex/gpt-5.1-codex-mini",  name: "GPT-5.1 Codex Mini",       contextWindow: 200_000, maxTokens: 32_768 },
   // Grok web-session models (requires /grok-login)
+  { id: "web-grok/grok-4",           name: "Grok 4 (web session)",           contextWindow: 131_072, maxTokens: 131_072 },
   { id: "web-grok/grok-3",           name: "Grok 3 (web session)",           contextWindow: 131_072, maxTokens: 131_072 },
   { id: "web-grok/grok-3-fast",      name: "Grok 3 Fast (web session)",      contextWindow: 131_072, maxTokens: 131_072 },
   { id: "web-grok/grok-3-mini",      name: "Grok 3 Mini (web session)",      contextWindow: 131_072, maxTokens: 131_072 },
