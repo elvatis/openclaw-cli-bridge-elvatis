@@ -51,7 +51,7 @@ const STABLE_INTERVAL_MS = 500; // ms between stability checks
 
 function resolveModel(m?: string): string {
   const clean = (m ?? "grok-3").replace("web-grok/", "");
-  const allowed = ["grok-3", "grok-3-fast", "grok-3-mini", "grok-3-mini-fast"];
+  const allowed = ["grok-4", "grok-3", "grok-3-fast", "grok-3-mini", "grok-3-mini-fast"];
   return allowed.includes(clean) ? clean : "grok-3";
 }
 
