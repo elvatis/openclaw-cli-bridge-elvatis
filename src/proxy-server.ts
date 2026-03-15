@@ -94,11 +94,12 @@ export const CLI_MODELS = [
   { id: "cli-gemini/gemini-3-pro-preview",   name: "Gemini 3 Pro Preview (CLI)",   contextWindow: 1_048_576, maxTokens: 65_536 },
   { id: "cli-gemini/gemini-3-flash-preview", name: "Gemini 3 Flash Preview (CLI)", contextWindow: 1_048_576, maxTokens: 65_536 },
   // Codex CLI models (via openai-codex provider, OAuth auth)
-  { id: "openai-codex/gpt-5.3-codex",       name: "GPT-5.3 Codex",            contextWindow: 200_000, maxTokens: 32_768 },
-  { id: "openai-codex/gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark",      contextWindow: 200_000, maxTokens: 32_768 },
-  { id: "openai-codex/gpt-5.2-codex",       name: "GPT-5.2 Codex",            contextWindow: 200_000, maxTokens: 32_768 },
-  { id: "openai-codex/gpt-5.4",             name: "GPT-5.4",                   contextWindow: 200_000, maxTokens: 32_768 },
-  { id: "openai-codex/gpt-5.1-codex-mini",  name: "GPT-5.1 Codex Mini",       contextWindow: 200_000, maxTokens: 32_768 },
+  // GPT-5.4: 1M ctx, 128K out | GPT-5.3: 400K ctx, 128K out | GPT-5.2: 200K, 32K | Mini: 128K, 16K
+  { id: "openai-codex/gpt-5.4",             name: "GPT-5.4",               contextWindow: 1_050_000, maxTokens: 128_000 },
+  { id: "openai-codex/gpt-5.3-codex",       name: "GPT-5.3 Codex",        contextWindow: 400_000,   maxTokens: 128_000 },
+  { id: "openai-codex/gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark",  contextWindow: 400_000,   maxTokens: 64_000 },
+  { id: "openai-codex/gpt-5.2-codex",       name: "GPT-5.2 Codex",        contextWindow: 200_000,   maxTokens: 32_768 },
+  { id: "openai-codex/gpt-5.1-codex-mini",  name: "GPT-5.1 Codex Mini",   contextWindow: 128_000,   maxTokens: 16_384 },
   // Grok web-session models (requires /grok-login)
   { id: "web-grok/grok-4",           name: "Grok 4 (web session)",           contextWindow: 131_072, maxTokens: 131_072 },
   { id: "web-grok/grok-3",           name: "Grok 3 (web session)",           contextWindow: 131_072, maxTokens: 131_072 },
