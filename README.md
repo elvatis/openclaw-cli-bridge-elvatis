@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.9.1`
+**Current version:** `1.9.2`
 
 ---
 
@@ -357,6 +357,15 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v1.9.2
+- **fix:** Correct `maxTokens` and `contextWindow` for all CLI_MODELS — were hardcoded to 8192 output tokens
+  - Claude Opus 4.6: 1M context / 128k output (was 200k/8k)
+  - Claude Sonnet 4.6: 1M context / 64k output (was 200k/8k)
+  - Claude Haiku 4.5: 200k context / 64k output (was 200k/8k)
+  - Gemini 2.5 Pro/Flash: 1M context / 65k output (was 1M/8k)
+  - Gemini 3 Pro/Flash Preview: 1M context / 65k output (was 1M/8k)
+  - Web-session Gemini models: same corrections
 
 ### v1.9.1
 - **feat:** Full slash command mapping on status page — all models now show their /cli-* command
