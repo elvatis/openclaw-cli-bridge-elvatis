@@ -85,14 +85,14 @@ export interface ProxyServerOptions {
 /** Available CLI bridge models for GET /v1/models */
 export const CLI_MODELS = [
   // ── Claude Code CLI ───────────────────────────────────────────────────────
-  { id: "cli-claude/claude-sonnet-4-6", name: "Claude Sonnet 4.6 (CLI)",  contextWindow: 200_000,   maxTokens: 8_192 },
-  { id: "cli-claude/claude-opus-4-6",   name: "Claude Opus 4.6 (CLI)",    contextWindow: 200_000,   maxTokens: 8_192 },
-  { id: "cli-claude/claude-haiku-4-5",  name: "Claude Haiku 4.5 (CLI)",   contextWindow: 200_000,   maxTokens: 8_192 },
+  { id: "cli-claude/claude-sonnet-4-6", name: "Claude Sonnet 4.6 (CLI)",  contextWindow: 1_000_000, maxTokens: 64_000 },
+  { id: "cli-claude/claude-opus-4-6",   name: "Claude Opus 4.6 (CLI)",    contextWindow: 1_000_000, maxTokens: 128_000 },
+  { id: "cli-claude/claude-haiku-4-5",  name: "Claude Haiku 4.5 (CLI)",   contextWindow: 200_000,   maxTokens: 64_000 },
   // ── Gemini CLI ────────────────────────────────────────────────────────────
-  { id: "cli-gemini/gemini-2.5-pro",      name: "Gemini 2.5 Pro (CLI)",   contextWindow: 1_000_000, maxTokens: 8_192 },
-  { id: "cli-gemini/gemini-2.5-flash",    name: "Gemini 2.5 Flash (CLI)", contextWindow: 1_000_000, maxTokens: 8_192 },
-  { id: "cli-gemini/gemini-3-pro-preview",   name: "Gemini 3 Pro Preview (CLI)",   contextWindow: 1_000_000, maxTokens: 8_192 },
-  { id: "cli-gemini/gemini-3-flash-preview", name: "Gemini 3 Flash Preview (CLI)", contextWindow: 1_000_000, maxTokens: 8_192 },
+  { id: "cli-gemini/gemini-2.5-pro",      name: "Gemini 2.5 Pro (CLI)",   contextWindow: 1_048_576, maxTokens: 65_535 },
+  { id: "cli-gemini/gemini-2.5-flash",    name: "Gemini 2.5 Flash (CLI)", contextWindow: 1_048_576, maxTokens: 65_535 },
+  { id: "cli-gemini/gemini-3-pro-preview",   name: "Gemini 3 Pro Preview (CLI)",   contextWindow: 1_048_576, maxTokens: 65_536 },
+  { id: "cli-gemini/gemini-3-flash-preview", name: "Gemini 3 Flash Preview (CLI)", contextWindow: 1_048_576, maxTokens: 65_536 },
   // Codex CLI models (via openai-codex provider, OAuth auth)
   { id: "openai-codex/gpt-5.3-codex",       name: "GPT-5.3 Codex",            contextWindow: 200_000, maxTokens: 32_768 },
   { id: "openai-codex/gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark",      contextWindow: 200_000, maxTokens: 32_768 },
@@ -106,10 +106,10 @@ export const CLI_MODELS = [
   { id: "web-grok/grok-3-mini",      name: "Grok 3 Mini (web session)",      contextWindow: 131_072, maxTokens: 131_072 },
   { id: "web-grok/grok-3-mini-fast", name: "Grok 3 Mini Fast (web session)", contextWindow: 131_072, maxTokens: 131_072 },
   // Gemini web-session models (requires /gemini-login)
-  { id: "web-gemini/gemini-2-5-pro",   name: "Gemini 2.5 Pro (web session)",   contextWindow: 1_000_000, maxTokens: 8192 },
-  { id: "web-gemini/gemini-2-5-flash", name: "Gemini 2.5 Flash (web session)", contextWindow: 1_000_000, maxTokens: 8192 },
-  { id: "web-gemini/gemini-3-pro",     name: "Gemini 3 Pro (web session)",     contextWindow: 1_000_000, maxTokens: 8192 },
-  { id: "web-gemini/gemini-3-flash",   name: "Gemini 3 Flash (web session)",   contextWindow: 1_000_000, maxTokens: 8192 },
+  { id: "web-gemini/gemini-2-5-pro",   name: "Gemini 2.5 Pro (web session)",   contextWindow: 1_048_576, maxTokens: 65_535 },
+  { id: "web-gemini/gemini-2-5-flash", name: "Gemini 2.5 Flash (web session)", contextWindow: 1_048_576, maxTokens: 65_535 },
+  { id: "web-gemini/gemini-3-pro",     name: "Gemini 3 Pro (web session)",     contextWindow: 1_048_576, maxTokens: 65_536 },
+  { id: "web-gemini/gemini-3-flash",   name: "Gemini 3 Flash (web session)",   contextWindow: 1_048_576, maxTokens: 65_536 },
   // Claude → use cli-claude/* instead (web-claude removed in v1.6.x)
   // ChatGPT → use openai-codex/* or copilot-proxy instead (web-chatgpt removed in v1.6.x)
   // ── Local BitNet inference ──────────────────────────────────────────────────
