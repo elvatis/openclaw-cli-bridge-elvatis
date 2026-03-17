@@ -18,6 +18,7 @@ import { claudeComplete, claudeCompleteStream, type ChatMessage as ClaudeBrowser
 import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrowserChatMessage } from "./chatgpt-browser.js";
 import type { BrowserContext } from "playwright";
 import { renderStatusPage, type StatusProvider } from "./status-template.js";
+import { sessionManager } from "./session-manager.js";
 
 export type GrokCompleteOptions = Parameters<typeof grokComplete>[1];
 export type GrokCompleteStreamOptions = Parameters<typeof grokCompleteStream>[1];
@@ -113,6 +114,10 @@ export const CLI_MODELS = [
   { id: "web-gemini/gemini-3-flash",   name: "Gemini 3 Flash (web session)",   contextWindow: 1_048_576, maxTokens: 65_536 },
   // Claude → use cli-claude/* instead (web-claude removed in v1.6.x)
   // ChatGPT → use openai-codex/* or copilot-proxy instead (web-chatgpt removed in v1.6.x)
+  // ── OpenCode CLI ──────────────────────────────────────────────────────────
+  { id: "opencode/default",             name: "OpenCode (CLI)",             contextWindow: 128_000,   maxTokens: 16_384 },
+  // ── Pi CLI ──────────────────────────────────────────────────────────────
+  { id: "pi/default",                   name: "Pi (CLI)",                   contextWindow: 128_000,   maxTokens: 16_384 },
   // ── Local BitNet inference ──────────────────────────────────────────────────
   { id: "local-bitnet/bitnet-2b",       name: "BitNet b1.58 2B (local CPU inference)", contextWindow: 4_096, maxTokens: 2_048 },
 ];
@@ -133,9 +138,10 @@ export function startProxyServer(opts: ProxyServerOptions): Promise<http.Server>
       });
     });
 
-    // Stop the token refresh interval when the server closes (timer-leak prevention)
+    // Stop the token refresh interval and session manager when the server closes (timer-leak prevention)
     server.on("close", () => {
       stopTokenRefresh();
+      sessionManager.stop();
     });
 
     server.on("error", (err) => reject(err));
@@ -238,7 +244,7 @@ async function handleRequest(
           owned_by: "openclaw-cli-bridge",
           // CLI-proxy models stream plain text — no tool/function call support
           capabilities: {
-            tools: !(m.id.startsWith("cli-gemini/") || m.id.startsWith("cli-claude/") || m.id.startsWith("local-bitnet/")),
+            tools: !(m.id.startsWith("cli-gemini/") || m.id.startsWith("cli-claude/") || m.id.startsWith("openai-codex/") || m.id.startsWith("opencode/") || m.id.startsWith("pi/") || m.id.startsWith("local-bitnet/")),
           },
         })),
       })
@@ -274,7 +280,8 @@ async function handleRequest(
       return;
     }
 
-    const { model, messages, stream = false } = parsed as { model: string; messages: ChatMessage[]; stream?: boolean; tools?: unknown };
+    const { model, messages, stream = false } = parsed as { model: string; messages: ChatMessage[]; stream?: boolean; tools?: unknown; workdir?: string };
+    const workdir = (parsed as { workdir?: string }).workdir;
     const hasTools = Array.isArray((parsed as { tools?: unknown }).tools) && (parsed as { tools?: unknown[] }).tools!.length > 0;
 
     if (!model || !messages?.length) {
@@ -286,7 +293,7 @@ async function handleRequest(
     // CLI-proxy models (cli-gemini/*, cli-claude/*) are plain text completions —
     // they cannot process tool/function call schemas. Return a clear 400 so
     // OpenClaw can surface a meaningful error instead of getting a garbled response.
-    const isCliModel = model.startsWith("cli-gemini/") || model.startsWith("cli-claude/"); // local-bitnet/* exempt: llama-server silently ignores tools
+    const isCliModel = model.startsWith("cli-gemini/") || model.startsWith("cli-claude/") || model.startsWith("openai-codex/") || model.startsWith("opencode/") || model.startsWith("pi/"); // local-bitnet/* exempt: llama-server silently ignores tools
     if (hasTools && isCliModel) {
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
@@ -593,7 +600,7 @@ async function handleRequest(
     let content: string;
     let usedModel = model;
     try {
-      content = await routeToCliRunner(model, messages, opts.timeoutMs ?? 120_000);
+      content = await routeToCliRunner(model, messages, opts.timeoutMs ?? 120_000, { workdir });
     } catch (err) {
       const msg = (err as Error).message;
       // ── Model fallback: retry once with a lighter model if configured ────
@@ -601,7 +608,7 @@ async function handleRequest(
       if (fallbackModel) {
         opts.warn(`[cli-bridge] ${model} failed (${msg}), falling back to ${fallbackModel}`);
         try {
-          content = await routeToCliRunner(fallbackModel, messages, opts.timeoutMs ?? 120_000);
+          content = await routeToCliRunner(fallbackModel, messages, opts.timeoutMs ?? 120_000, { workdir });
           usedModel = fallbackModel;
           opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded`);
         } catch (fallbackErr) {
@@ -666,6 +673,116 @@ async function handleRequest(
       res.end(JSON.stringify(response));
     }
 
+    return;
+  }
+
+  // ── Session Manager endpoints ──────────────────────────────────────────────
+
+  // POST /v1/sessions/spawn
+  if (url === "/v1/sessions/spawn" && req.method === "POST") {
+    const body = await readBody(req);
+    let parsed: { model: string; messages: ChatMessage[]; workdir?: string; timeout?: number };
+    try {
+      parsed = JSON.parse(body) as typeof parsed;
+    } catch {
+      res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders() });
+      res.end(JSON.stringify({ error: { message: "Invalid JSON body", type: "invalid_request_error" } }));
+      return;
+    }
+    if (!parsed.model || !parsed.messages?.length) {
+      res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders() });
+      res.end(JSON.stringify({ error: { message: "model and messages are required", type: "invalid_request_error" } }));
+      return;
+    }
+    const sessionId = sessionManager.spawn(parsed.model, parsed.messages, {
+      workdir: parsed.workdir,
+      timeout: parsed.timeout,
+    });
+    opts.log(`[cli-bridge] session spawned: ${sessionId} (${parsed.model})`);
+    res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+    res.end(JSON.stringify({ sessionId }));
+    return;
+  }
+
+  // GET /v1/sessions — list all sessions
+  if (url === "/v1/sessions" && req.method === "GET") {
+    const sessions = sessionManager.list();
+    res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+    res.end(JSON.stringify({ sessions }));
+    return;
+  }
+
+  // Session-specific endpoints: /v1/sessions/:id/*
+  const sessionMatch = url.match(/^\/v1\/sessions\/([a-f0-9]+)\/(poll|log|write|kill)$/);
+  if (sessionMatch) {
+    const sessionId = sessionMatch[1];
+    const action = sessionMatch[2];
+
+    if (action === "poll" && req.method === "GET") {
+      const result = sessionManager.poll(sessionId);
+      if (!result) {
+        res.writeHead(404, { "Content-Type": "application/json", ...corsHeaders() });
+        res.end(JSON.stringify({ error: { message: "Session not found", type: "not_found" } }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
+    if (action === "log" && req.method === "GET") {
+      // Parse ?offset=N from URL
+      const urlObj = new URL(url, `http://127.0.0.1:${opts.port}`);
+      const offset = parseInt(urlObj.searchParams.get("offset") ?? "0", 10) || 0;
+      const result = sessionManager.log(sessionId, offset);
+      if (!result) {
+        res.writeHead(404, { "Content-Type": "application/json", ...corsHeaders() });
+        res.end(JSON.stringify({ error: { message: "Session not found", type: "not_found" } }));
+        return;
+      }
+      res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
+    if (action === "write" && req.method === "POST") {
+      const body = await readBody(req);
+      let parsed: { data: string };
+      try {
+        parsed = JSON.parse(body) as typeof parsed;
+      } catch {
+        res.writeHead(400, { "Content-Type": "application/json", ...corsHeaders() });
+        res.end(JSON.stringify({ error: { message: "Invalid JSON body", type: "invalid_request_error" } }));
+        return;
+      }
+      const ok = sessionManager.write(sessionId, parsed.data ?? "");
+      res.writeHead(ok ? 200 : 404, { "Content-Type": "application/json", ...corsHeaders() });
+      res.end(JSON.stringify({ ok }));
+      return;
+    }
+
+    if (action === "kill" && req.method === "POST") {
+      const ok = sessionManager.kill(sessionId);
+      res.writeHead(ok ? 200 : 404, { "Content-Type": "application/json", ...corsHeaders() });
+      res.end(JSON.stringify({ ok }));
+      return;
+    }
+  }
+
+  // Also handle /v1/sessions/:id/log with query params (URL match above doesn't capture query strings)
+  const logMatch = url.match(/^\/v1\/sessions\/([a-f0-9]+)\/log\?/);
+  if (logMatch && req.method === "GET") {
+    const sessionId = logMatch[1];
+    const urlObj = new URL(url, `http://127.0.0.1:${opts.port}`);
+    const offset = parseInt(urlObj.searchParams.get("offset") ?? "0", 10) || 0;
+    const result = sessionManager.log(sessionId, offset);
+    if (!result) {
+      res.writeHead(404, { "Content-Type": "application/json", ...corsHeaders() });
+      res.end(JSON.stringify({ error: { message: "Session not found", type: "not_found" } }));
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+    res.end(JSON.stringify(result));
     return;
   }
 

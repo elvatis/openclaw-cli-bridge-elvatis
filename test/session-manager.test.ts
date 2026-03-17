@@ -1,0 +1,339 @@
+/**
+ * Unit tests for SessionManager.
+ *
+ * Mocks child_process.spawn so no real CLIs are executed.
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { EventEmitter } from "node:events";
+import type { ChildProcess } from "node:child_process";
+
+// ── Mock child_process.spawn ────────────────────────────────────────────────
+
+/** Minimal fake ChildProcess for testing. */
+function makeFakeProc(): ChildProcess & {
+  _stdout: EventEmitter;
+  _stderr: EventEmitter;
+  _emit: (event: string, ...args: unknown[]) => void;
+} {
+  const proc = new EventEmitter() as any;
+  proc._stdout = new EventEmitter();
+  proc._stderr = new EventEmitter();
+  proc.stdout = proc._stdout;
+  proc.stderr = proc._stderr;
+  proc.stdin = {
+    write: vi.fn((_data: string, _enc: string, cb?: () => void) => { cb?.(); }),
+    end: vi.fn(),
+  };
+  proc.kill = vi.fn(() => true);
+  proc.pid = 12345;
+  proc._emit = (event: string, ...args: unknown[]) => proc.emit(event, ...args);
+  return proc;
+}
+
+// vi.hoisted variables are available inside vi.mock factories
+const { mockSpawn, mockExecSync, latestProcRef } = vi.hoisted(() => ({
+  mockSpawn: vi.fn(),
+  mockExecSync: vi.fn(),
+  latestProcRef: { current: null as any },
+}));
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const orig = await importOriginal<typeof import("node:child_process")>();
+  return { ...orig, spawn: mockSpawn, execSync: mockExecSync };
+});
+
+// Mock claude-auth to prevent real token operations
+vi.mock("../src/claude-auth.js", () => ({
+  ensureClaudeToken: vi.fn(async () => {}),
+  refreshClaudeToken: vi.fn(async () => {}),
+  scheduleTokenRefresh: vi.fn(async () => {}),
+  stopTokenRefresh: vi.fn(),
+  setAuthLogger: vi.fn(),
+}));
+
+// Now import SessionManager (uses the mocked spawn)
+import { SessionManager } from "../src/session-manager.js";
+
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe("SessionManager", () => {
+  let mgr: SessionManager;
+
+  beforeEach(() => {
+    mgr = new SessionManager();
+    mockSpawn.mockImplementation(() => {
+      const proc = makeFakeProc();
+      latestProcRef.current = proc;
+      return proc;
+    });
+  });
+
+  afterEach(() => {
+    mgr.stop();
+  });
+
+  // ── spawn() ──────────────────────────────────────────────────────────────
+
+  describe("spawn()", () => {
+    it("returns a hex sessionId", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      expect(id).toMatch(/^[a-f0-9]{16}$/);
+    });
+
+    it("returns unique sessionIds on repeated calls", () => {
+      const id1 = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "a" }]);
+      const id2 = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "b" }]);
+      expect(id1).not.toBe(id2);
+    });
+  });
+
+  // ── poll() ─────────────────────────────────────────────────────────────
+
+  describe("poll()", () => {
+    it("returns running status for an active session", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      const result = mgr.poll(id);
+      expect(result).not.toBeNull();
+      expect(result!.running).toBe(true);
+      expect(result!.status).toBe("running");
+      expect(result!.exitCode).toBeNull();
+    });
+
+    it("returns exited status after process closes", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      // Simulate process exit
+      latestProcRef.current._emit("close", 0);
+      const result = mgr.poll(id);
+      expect(result!.running).toBe(false);
+      expect(result!.status).toBe("exited");
+      expect(result!.exitCode).toBe(0);
+    });
+
+    it("returns null for unknown sessionId", () => {
+      expect(mgr.poll("0000000000000000")).toBeNull();
+    });
+  });
+
+  // ── log() ──────────────────────────────────────────────────────────────
+
+  describe("log()", () => {
+    it("returns buffered stdout output", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      latestProcRef.current._stdout.emit("data", Buffer.from("Hello "));
+      latestProcRef.current._stdout.emit("data", Buffer.from("World"));
+      const result = mgr.log(id);
+      expect(result).not.toBeNull();
+      expect(result!.stdout).toBe("Hello World");
+      expect(result!.offset).toBe(11);
+    });
+
+    it("returns buffered stderr output", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      latestProcRef.current._stderr.emit("data", Buffer.from("warning"));
+      const result = mgr.log(id);
+      expect(result!.stderr).toBe("warning");
+    });
+
+    it("supports offset to get incremental output", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      latestProcRef.current._stdout.emit("data", Buffer.from("ABCDE"));
+      const result = mgr.log(id, 3);
+      expect(result!.stdout).toBe("DE");
+      expect(result!.offset).toBe(5);
+    });
+
+    it("returns null for unknown sessionId", () => {
+      expect(mgr.log("0000000000000000")).toBeNull();
+    });
+  });
+
+  // ── write() ────────────────────────────────────────────────────────────
+
+  describe("write()", () => {
+    it("writes data to stdin of a running session", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      const proc = latestProcRef.current;
+      const ok = mgr.write(id, "input data");
+      expect(ok).toBe(true);
+      expect(proc.stdin.write).toHaveBeenCalledWith("input data", "utf8");
+    });
+
+    it("returns false for unknown sessionId", () => {
+      expect(mgr.write("0000000000000000", "data")).toBe(false);
+    });
+
+    it("returns false for an exited session", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      latestProcRef.current._emit("close", 0);
+      expect(mgr.write(id, "data")).toBe(false);
+    });
+  });
+
+  // ── kill() ─────────────────────────────────────────────────────────────
+
+  describe("kill()", () => {
+    it("sends SIGTERM to a running session", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      const proc = latestProcRef.current;
+      const ok = mgr.kill(id);
+      expect(ok).toBe(true);
+      expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+      // Status should be "killed"
+      const poll = mgr.poll(id);
+      expect(poll!.status).toBe("killed");
+    });
+
+    it("returns false for unknown sessionId", () => {
+      expect(mgr.kill("0000000000000000")).toBe(false);
+    });
+
+    it("returns false for an already-exited session", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      latestProcRef.current._emit("close", 0);
+      expect(mgr.kill(id)).toBe(false);
+    });
+  });
+
+  // ── list() ─────────────────────────────────────────────────────────────
+
+  describe("list()", () => {
+    it("returns all sessions", () => {
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "a" }]);
+      mgr.spawn("cli-claude/claude-sonnet-4-6", [{ role: "user", content: "b" }]);
+      const list = mgr.list();
+      expect(list).toHaveLength(2);
+      expect(list[0].sessionId).toMatch(/^[a-f0-9]{16}$/);
+      expect(list[0].model).toBe("cli-gemini/gemini-2.5-pro");
+      expect(list[0].status).toBe("running");
+      expect(list[1].model).toBe("cli-claude/claude-sonnet-4-6");
+    });
+
+    it("returns empty array when no sessions exist", () => {
+      expect(mgr.list()).toHaveLength(0);
+    });
+  });
+
+  // ── cleanup() ──────────────────────────────────────────────────────────
+
+  describe("cleanup()", () => {
+    it("removes sessions older than TTL", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+
+      // Manually set startTime to far in the past
+      const sessions = (mgr as any).sessions as Map<string, any>;
+      const entry = sessions.get(id)!;
+      entry.startTime = Date.now() - 31 * 60 * 1000; // 31 minutes ago
+
+      mgr.cleanup();
+
+      expect(mgr.poll(id)).toBeNull();
+      expect(mgr.list()).toHaveLength(0);
+    });
+
+    it("kills running sessions before removing them", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      const proc = latestProcRef.current;
+
+      const sessions = (mgr as any).sessions as Map<string, any>;
+      sessions.get(id)!.startTime = Date.now() - 31 * 60 * 1000;
+
+      mgr.cleanup();
+
+      expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    });
+
+    it("does not remove recent sessions", () => {
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      mgr.cleanup();
+      expect(mgr.list()).toHaveLength(1);
+    });
+  });
+
+  // ── resolveCliCommand (via spawn behavior) ─────────────────────────────
+
+  describe("resolveCliCommand routing", () => {
+    it("routes cli-gemini/ to 'gemini' command", () => {
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "test" }]);
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "gemini",
+        expect.arrayContaining(["-m", "gemini-2.5-pro"]),
+        expect.any(Object)
+      );
+    });
+
+    it("routes cli-claude/ to 'claude' command", () => {
+      mgr.spawn("cli-claude/claude-sonnet-4-6", [{ role: "user", content: "test" }]);
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "claude",
+        expect.arrayContaining(["--model", "claude-sonnet-4-6"]),
+        expect.any(Object)
+      );
+    });
+
+    it("routes openai-codex/ to 'codex' command", () => {
+      mgr.spawn("openai-codex/gpt-5.3-codex", [{ role: "user", content: "test" }]);
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "codex",
+        expect.arrayContaining(["--model", "gpt-5.3-codex"]),
+        expect.any(Object)
+      );
+    });
+
+    it("routes opencode/ to 'opencode' command", () => {
+      mgr.spawn("opencode/default", [{ role: "user", content: "test" }]);
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "opencode",
+        expect.arrayContaining(["run"]),
+        expect.any(Object)
+      );
+    });
+
+    it("routes pi/ to 'pi' command", () => {
+      mgr.spawn("pi/default", [{ role: "user", content: "test" }]);
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "pi",
+        expect.arrayContaining(["-p"]),
+        expect.any(Object)
+      );
+    });
+
+    it("passes workdir option as cwd", () => {
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "test" }], { workdir: "/tmp/test" });
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "gemini",
+        expect.any(Array),
+        expect.objectContaining({ cwd: "/tmp/test" })
+      );
+    });
+  });
+
+  // ── process error handling ─────────────────────────────────────────────
+
+  describe("process error handling", () => {
+    it("marks session as exited on process error", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      latestProcRef.current._emit("error", new Error("spawn ENOENT"));
+      const result = mgr.poll(id);
+      expect(result!.running).toBe(false);
+      expect(result!.status).toBe("exited");
+      expect(result!.exitCode).toBe(1);
+    });
+  });
+
+  // ── stop() ─────────────────────────────────────────────────────────────
+
+  describe("stop()", () => {
+    it("kills all running sessions", () => {
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "a" }]);
+      const proc1 = latestProcRef.current;
+      mgr.spawn("cli-claude/claude-sonnet-4-6", [{ role: "user", content: "b" }]);
+      const proc2 = latestProcRef.current;
+
+      mgr.stop();
+
+      expect(proc1.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(proc2.kill).toHaveBeenCalledWith("SIGTERM");
+    });
+  });
+});
