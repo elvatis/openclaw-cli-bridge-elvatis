@@ -1,19 +1,25 @@
 /**
  * cli-runner.ts
  *
- * Spawns CLI subprocesses (gemini, claude) and captures their output.
- * Input: OpenAI-format messages → formatted prompt string → CLI stdin.
+ * Spawns CLI subprocesses (gemini, claude, codex, opencode, pi) and captures their output.
+ * Input: OpenAI-format messages → formatted prompt string → CLI stdin (or CLI arg).
  *
- * Both Gemini and Claude receive the prompt via stdin to avoid:
- *   - E2BIG (arg list too long) for large conversation histories
- *   - Gemini agentic mode (triggered by @file syntax + workspace cwd)
+ * Prompt delivery:
+ *   - Gemini/Claude/Codex receive the prompt via stdin to avoid E2BIG and agentic mode.
+ *   - OpenCode receives the prompt as a CLI argument (`opencode run "prompt"`).
+ *   - Pi receives the prompt via `-p "prompt"` flag.
  *
- * Gemini is always spawned with cwd = tmpdir() so it doesn't scan the
- * workspace and enter agentic mode.
+ * Workdir isolation:
+ *   - Gemini: defaults to tmpdir() (prevents agentic workspace scanning).
+ *   - Claude/Codex: defaults to homedir().
+ *   - OpenCode/Pi: defaults to homedir().
+ *   - All runners accept an explicit `workdir` override via RouteOptions.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import { tmpdir, homedir } from "node:os";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { ensureClaudeToken, refreshClaudeToken } from "./claude-auth.js";
 
 /** Max messages to include in the prompt sent to the CLI. */
@@ -198,6 +204,41 @@ export function runCli(
   });
 }
 
+/**
+ * Spawn a CLI with the prompt delivered as a CLI argument (not stdin).
+ * Used by OpenCode which expects `opencode run "prompt"`.
+ */
+export function runCliWithArg(
+  cmd: string,
+  args: string[],
+  timeoutMs = 120_000,
+  opts: RunCliOptions = {}
+): Promise<CliRunResult> {
+  const cwd = opts.cwd ?? homedir();
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn(cmd, args, {
+      timeout: timeoutMs,
+      env: buildMinimalEnv(),
+      cwd,
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    proc.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
+    proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+
+    proc.on("close", (code) => {
+      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
+    });
+
+    proc.on("error", (err) => {
+      reject(new Error(`Failed to spawn '${cmd}': ${err.message}`));
+    });
+  });
+}
+
 // ──────────────────────────────────────────────────────────────────────────────
 // Gemini CLI
 // ──────────────────────────────────────────────────────────────────────────────
@@ -215,17 +256,20 @@ export function runCli(
  * Gemini CLI: -p "" triggers headless mode; stdin content is the actual prompt
  * (per Gemini docs: "prompt is appended to input on stdin (if any)").
  *
- * cwd = tmpdir() — neutral empty-ish dir, prevents workspace context scanning.
+ * cwd = tmpdir() by default — neutral empty-ish dir, prevents workspace context scanning.
+ * Override with explicit workdir.
  */
 export async function runGemini(
   prompt: string,
   modelId: string,
-  timeoutMs: number
+  timeoutMs: number,
+  workdir?: string
 ): Promise<string> {
   const model = stripPrefix(modelId);
   // -p "" = headless mode trigger; actual prompt arrives via stdin
   const args = ["-m", model, "-p", ""];
-  const result = await runCli("gemini", args, prompt, timeoutMs, { cwd: tmpdir() });
+  const cwd = workdir ?? tmpdir();
+  const result = await runCli("gemini", args, prompt, timeoutMs, { cwd });
 
   // Filter out [WARN] lines from stderr (Gemini emits noisy permission warnings)
   const cleanStderr = result.stderr
@@ -248,11 +292,13 @@ export async function runGemini(
 /**
  * Run Claude Code CLI in headless mode with prompt delivered via stdin.
  * Strips the model prefix ("cli-claude/claude-opus-4-6" → "claude-opus-4-6").
+ * cwd = homedir() by default. Override with explicit workdir.
  */
 export async function runClaude(
   prompt: string,
   modelId: string,
-  timeoutMs: number
+  timeoutMs: number,
+  workdir?: string
 ): Promise<string> {
   // Proactively refresh OAuth token if it's about to expire (< 5 min remaining).
   // No-op for API-key users.
@@ -267,7 +313,8 @@ export async function runClaude(
     "--model", model,
   ];
 
-  const result = await runCli("claude", args, prompt, timeoutMs);
+  const cwd = workdir ?? homedir();
+  const result = await runCli("claude", args, prompt, timeoutMs, { cwd });
 
   // On 401: attempt one token refresh + retry before giving up.
   if (result.exitCode !== 0 && result.stdout.length === 0) {
@@ -275,7 +322,7 @@ export async function runClaude(
     if (stderr.includes("401") || stderr.includes("Invalid authentication credentials") || stderr.includes("authentication_error")) {
       // Refresh and retry once
       await refreshClaudeToken();
-      const retry = await runCli("claude", args, prompt, timeoutMs);
+      const retry = await runCli("claude", args, prompt, timeoutMs, { cwd });
       if (retry.exitCode !== 0 && retry.stdout.length === 0) {
         const retryStderr = retry.stderr || "(no output)";
         if (retryStderr.includes("401") || retryStderr.includes("authentication_error") || retryStderr.includes("Invalid authentication credentials")) {
@@ -292,6 +339,97 @@ export async function runClaude(
   }
 
   return result.stdout;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Codex CLI
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Ensure the workdir is a git repository. Codex CLI requires a git repo.
+ * If the directory exists but is not a git repo, run `git init`.
+ */
+function ensureGitRepo(dir: string): void {
+  if (!existsSync(join(dir, ".git"))) {
+    execSync("git init", { cwd: dir, stdio: "ignore" });
+  }
+}
+
+/**
+ * Run Codex CLI in non-interactive mode with prompt via stdin.
+ * cwd = homedir() by default. Override with explicit workdir.
+ * Auto-initializes git if workdir is not already a git repo.
+ */
+export async function runCodex(
+  prompt: string,
+  modelId: string,
+  timeoutMs: number,
+  workdir?: string
+): Promise<string> {
+  const model = stripPrefix(modelId);
+  const args = ["--model", model, "--quiet", "--full-auto"];
+  const cwd = workdir ?? homedir();
+
+  // Codex requires a git repo in the working directory
+  ensureGitRepo(cwd);
+
+  const result = await runCli("codex", args, prompt, timeoutMs, { cwd });
+
+  if (result.exitCode !== 0 && result.stdout.length === 0) {
+    throw new Error(`codex exited ${result.exitCode}: ${result.stderr || "(no output)"}`);
+  }
+
+  return result.stdout || result.stderr;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// OpenCode CLI
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Run OpenCode CLI. Prompt is passed as a CLI argument: `opencode run "prompt"`.
+ * cwd = homedir() by default. Override with explicit workdir.
+ */
+export async function runOpenCode(
+  prompt: string,
+  _modelId: string,
+  timeoutMs: number,
+  workdir?: string
+): Promise<string> {
+  const args = ["run", prompt];
+  const cwd = workdir ?? homedir();
+  const result = await runCliWithArg("opencode", args, timeoutMs, { cwd });
+
+  if (result.exitCode !== 0 && result.stdout.length === 0) {
+    throw new Error(`opencode exited ${result.exitCode}: ${result.stderr || "(no output)"}`);
+  }
+
+  return result.stdout || result.stderr;
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Pi CLI
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Run Pi CLI in non-interactive mode: `pi -p "prompt"`.
+ * cwd = homedir() by default. Override with explicit workdir.
+ */
+export async function runPi(
+  prompt: string,
+  _modelId: string,
+  timeoutMs: number,
+  workdir?: string
+): Promise<string> {
+  const args = ["-p", prompt];
+  const cwd = workdir ?? homedir();
+  const result = await runCliWithArg("pi", args, timeoutMs, { cwd });
+
+  if (result.exitCode !== 0 && result.stdout.length === 0) {
+    throw new Error(`pi exited ${result.exitCode}: ${result.stderr || "(no output)"}`);
+  }
+
+  return result.stdout || result.stderr;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -319,6 +457,16 @@ export const DEFAULT_ALLOWED_CLI_MODELS: ReadonlySet<string> = new Set([
   // Aliases (map to preview variants internally)
   "cli-gemini/gemini-3-pro",   // alias → gemini-3-pro-preview
   "cli-gemini/gemini-3-flash", // alias → gemini-3-flash-preview
+  // Codex CLI
+  "openai-codex/gpt-5.3-codex",
+  "openai-codex/gpt-5.3-codex-spark",
+  "openai-codex/gpt-5.2-codex",
+  "openai-codex/gpt-5.4",
+  "openai-codex/gpt-5.1-codex-mini",
+  // OpenCode CLI
+  "opencode/default",
+  // Pi CLI
+  "pi/default",
 ]);
 
 /** Normalize model aliases to their canonical CLI model names. */
@@ -341,12 +489,20 @@ export interface RouteOptions {
    * Defaults to DEFAULT_ALLOWED_CLI_MODELS.
    */
   allowedModels?: ReadonlySet<string> | null;
+  /**
+   * Working directory for the CLI subprocess.
+   * Overrides the per-runner default (tmpdir for gemini, homedir for others).
+   */
+  workdir?: string;
 }
 
 /**
  * Route a chat completion to the correct CLI based on model prefix.
- *   cli-gemini/<id>  → gemini CLI
- *   cli-claude/<id>  → claude CLI
+ *   cli-gemini/<id>      → gemini CLI
+ *   cli-claude/<id>      → claude CLI
+ *   openai-codex/<id>    → codex CLI
+ *   opencode/<id>        → opencode CLI
+ *   pi/<id>              → pi CLI
  *
  * Enforces DEFAULT_ALLOWED_CLI_MODELS by default (T-103).
  * Pass `allowedModels: null` to skip the allowlist check.
@@ -379,11 +535,14 @@ export async function routeToCliRunner(
   // Resolve aliases (e.g. gemini-3-pro → gemini-3-pro-preview) after allowlist check
   const resolved = normalizeModelAlias(normalized);
 
-  if (resolved.startsWith("cli-gemini/")) return runGemini(prompt, resolved, timeoutMs);
-  if (resolved.startsWith("cli-claude/")) return runClaude(prompt, resolved, timeoutMs);
+  if (resolved.startsWith("cli-gemini/"))   return runGemini(prompt, resolved, timeoutMs, opts.workdir);
+  if (resolved.startsWith("cli-claude/"))   return runClaude(prompt, resolved, timeoutMs, opts.workdir);
+  if (resolved.startsWith("openai-codex/")) return runCodex(prompt, resolved, timeoutMs, opts.workdir);
+  if (resolved.startsWith("opencode/"))     return runOpenCode(prompt, resolved, timeoutMs, opts.workdir);
+  if (resolved.startsWith("pi/"))           return runPi(prompt, resolved, timeoutMs, opts.workdir);
 
   throw new Error(
-    `Unknown CLI bridge model: "${model}". Use "vllm/cli-gemini/<model>" or "vllm/cli-claude/<model>".`
+    `Unknown CLI bridge model: "${model}". Use "vllm/cli-gemini/<model>", "vllm/cli-claude/<model>", "openai-codex/<model>", "opencode/<model>", or "pi/<model>".`
   );
 }
 
