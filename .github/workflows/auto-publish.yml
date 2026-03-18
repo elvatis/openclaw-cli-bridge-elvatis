@@ -53,13 +53,14 @@ jobs:
 
       - run: npm install -g clawhub
 
-      - name: Prepare and publish
+      - name: Authenticate and publish
         run: |
           SLUG=$(node -p "require('./package.json').name.replace('@elvatis_com/', '')")
           VERSION=$(node -p "require('./package.json').version")
           TMPDIR=$(mktemp -d)/$SLUG
           mkdir -p "$TMPDIR"
           rsync -a --exclude=node_modules --exclude=.git --exclude=dist --exclude=package-lock.json --exclude=.github ./ "$TMPDIR/"
+          clawhub login --token "$CLAWHUB_TOKEN" --no-browser
           clawhub publish "$TMPDIR" --slug "$SLUG" --version "$VERSION"
           rm -rf "$(dirname $TMPDIR)"
         env:
