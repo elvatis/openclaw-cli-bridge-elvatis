@@ -25,5 +25,6 @@
   },
   "dependencies": {
     "playwright": "^1.58.2"
-  }
+  },
+  "license": "Apache-2.0"
 }
