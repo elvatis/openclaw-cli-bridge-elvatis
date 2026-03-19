@@ -17,6 +17,8 @@
  *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro-preview   (Gemini CLI proxy)
  *   /cli-codex        → openai-codex/gpt-5.3-codex             (Codex CLI OAuth, direct API)
  *   /cli-codex54      → openai-codex/gpt-5.4                   (Codex CLI OAuth, direct API)
+ *   /cli-opencode     → vllm/opencode/default                  (OpenCode CLI proxy)
+ *   /cli-pi           → vllm/pi/default                        (Pi CLI proxy)
  *   /cli-back         → restore model that was active before last /cli-* switch
  *   /cli-test [model] → one-shot proxy health check (does NOT switch global model)
  *   /cli-list         → list all registered CLI bridge models with commands
@@ -760,6 +762,10 @@ const CLI_MODEL_COMMANDS = [
   { name: "cli-codex52",      model: "openai-codex/gpt-5.2-codex",          description: "GPT-5.2 Codex (Codex CLI auth)",        label: "GPT-5.2 Codex" },
   { name: "cli-codex54",      model: "openai-codex/gpt-5.4",                description: "GPT-5.4 (Codex CLI auth)",              label: "GPT-5.4" },
   { name: "cli-codex-mini",   model: "openai-codex/gpt-5.1-codex-mini",     description: "GPT-5.1 Codex Mini (Codex CLI auth)",   label: "GPT-5.1 Codex Mini" },
+  // ── OpenCode CLI (via local proxy) ─────────────────────────────────────────
+  { name: "cli-opencode",     model: "vllm/opencode/default",               description: "OpenCode (CLI)",                         label: "OpenCode (CLI)" },
+  // ── Pi CLI (via local proxy) ─────────────────────────────────────────────────
+  { name: "cli-pi",           model: "vllm/pi/default",                     description: "Pi (CLI)",                               label: "Pi (CLI)" },
   // ── BitNet local inference (via local proxy → llama-server) ─────────────────
   { name: "cli-bitnet",       model: "vllm/local-bitnet/bitnet-2b",         description: "BitNet b1.58 2B (local CPU, no API key)", label: "BitNet 2B (local)" },
 ] as const;
