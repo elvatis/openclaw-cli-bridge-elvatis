@@ -1,6 +1,6 @@
 # STATUS — openclaw-cli-bridge-elvatis
 
-## Current Version: 1.9.2
+## Current Version: 2.1.0
 
 - **npm:** @elvatis_com/openclaw-cli-bridge-elvatis (not yet published to npm)
 - **ClawHub:** openclaw-cli-bridge-elvatis@1.9.2
@@ -47,6 +47,8 @@ This is by design — CLI tools output plain text only.
 - /bridge-status shows cookie-based status
 
 ## Release History (recent)
+- v2.1.0 (2026-03-19): Issue #6 workdir isolation, Issue #4 session mgmt enhancements, Issue #2 codex auth auto-import
+- v2.0.0: Major version bump
 - v1.9.2 (2026-03-15): Fix maxTokens/contextWindow for all CLI_MODELS (were 8192, now correct per vendor specs)
 - v1.9.1: Previous stable
 - v1.7.3 (2026-03-13): Fix cookie expiry tracking

@@ -7,7 +7,7 @@ _Last updated: 2026-03-13_
 
 | Status  | Count |
 |---------|-------|
-| Done    | 13    |
+| Done    | 16    |
 | Ready   | 0     |
 | Blocked | 0     |
 <!-- /SECTION: summary -->
@@ -30,6 +30,9 @@ _No blocked tasks._
 
 | Task  | Title                                                              | Date       |
 |-------|--------------------------------------------------------------------|------------|
+| T-016 | Issue #2: Codex auth auto-import into agent auth store            | 2026-03-19 |
+| T-015 | Issue #4: Background session mgmt with workdir isolation          | 2026-03-19 |
+| T-014 | Issue #6: Workdir isolation (createIsolatedWorkdir, cleanup, sweep) | 2026-03-19 |
 | T-013 | Fix cookie expiry tracking — longest-lived auth cookie (all 4)    | 2026-03-13 |
 | T-012 | Persistent browser fallback for Claude/Gemini/ChatGPT (no CDP)    | 2026-03-12 |
 | T-011 | Session-safe staged model switching (/cli-apply, /cli-pending)     | 2026-03-11 |

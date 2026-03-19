@@ -32,10 +32,13 @@ function makeFakeProc(): ChildProcess & {
 }
 
 // vi.hoisted variables are available inside vi.mock factories
-const { mockSpawn, mockExecSync, latestProcRef } = vi.hoisted(() => ({
+const { mockSpawn, mockExecSync, latestProcRef, mockCreateIsolatedWorkdir, mockCleanupWorkdir, mockSweepOrphanedWorkdirs } = vi.hoisted(() => ({
   mockSpawn: vi.fn(),
   mockExecSync: vi.fn(),
   latestProcRef: { current: null as any },
+  mockCreateIsolatedWorkdir: vi.fn(() => "/tmp/cli-bridge-fake123"),
+  mockCleanupWorkdir: vi.fn(() => true),
+  mockSweepOrphanedWorkdirs: vi.fn(() => 0),
 }));
 
 vi.mock("node:child_process", async (importOriginal) => {
@@ -50,6 +53,13 @@ vi.mock("../src/claude-auth.js", () => ({
   scheduleTokenRefresh: vi.fn(async () => {}),
   stopTokenRefresh: vi.fn(),
   setAuthLogger: vi.fn(),
+}));
+
+// Mock workdir module to prevent real FS operations in unit tests
+vi.mock("../src/workdir.js", () => ({
+  createIsolatedWorkdir: mockCreateIsolatedWorkdir,
+  cleanupWorkdir: mockCleanupWorkdir,
+  sweepOrphanedWorkdirs: mockSweepOrphanedWorkdirs,
 }));
 
 // Now import SessionManager (uses the mocked spawn)
@@ -334,6 +344,103 @@ describe("SessionManager", () => {
 
       expect(proc1.kill).toHaveBeenCalledWith("SIGTERM");
       expect(proc2.kill).toHaveBeenCalledWith("SIGTERM");
+    });
+
+    it("cleans up isolated workdirs on stop", () => {
+      mockCleanupWorkdir.mockClear();
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "a" }], { isolateWorkdir: true });
+
+      mgr.stop();
+
+      expect(mockCleanupWorkdir).toHaveBeenCalledWith("/tmp/cli-bridge-fake123");
+    });
+  });
+
+  // ── workdir isolation (Issue #6) ───────────────────────────────────────
+
+  describe("workdir isolation", () => {
+    beforeEach(() => {
+      mockCreateIsolatedWorkdir.mockClear();
+      mockCleanupWorkdir.mockClear();
+      mockSweepOrphanedWorkdirs.mockClear();
+    });
+
+    it("creates an isolated workdir when isolateWorkdir is true", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }], { isolateWorkdir: true });
+      expect(mockCreateIsolatedWorkdir).toHaveBeenCalledTimes(1);
+
+      // The session should use the created workdir as cwd
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "gemini",
+        expect.any(Array),
+        expect.objectContaining({ cwd: "/tmp/cli-bridge-fake123" })
+      );
+
+      // Session info should include the isolated workdir
+      const list = mgr.list();
+      const session = list.find(s => s.sessionId === id);
+      expect(session?.isolatedWorkdir).toBe("/tmp/cli-bridge-fake123");
+    });
+
+    it("does not create isolated workdir when isolateWorkdir is false", () => {
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      expect(mockCreateIsolatedWorkdir).not.toHaveBeenCalled();
+    });
+
+    it("does not create isolated workdir when explicit workdir is provided", () => {
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }], {
+        isolateWorkdir: true,
+        workdir: "/explicit/dir",
+      });
+      expect(mockCreateIsolatedWorkdir).not.toHaveBeenCalled();
+
+      // Should use the explicit workdir
+      expect(mockSpawn).toHaveBeenCalledWith(
+        "gemini",
+        expect.any(Array),
+        expect.objectContaining({ cwd: "/explicit/dir" })
+      );
+    });
+
+    it("cleans up isolated workdir when process exits", () => {
+      mockCleanupWorkdir.mockClear();
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }], { isolateWorkdir: true });
+
+      // Simulate process exit
+      latestProcRef.current._emit("close", 0);
+
+      expect(mockCleanupWorkdir).toHaveBeenCalledWith("/tmp/cli-bridge-fake123");
+    });
+
+    it("cleans up isolated workdir on process error", () => {
+      mockCleanupWorkdir.mockClear();
+      mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }], { isolateWorkdir: true });
+
+      // Simulate process error
+      latestProcRef.current._emit("error", new Error("spawn ENOENT"));
+
+      expect(mockCleanupWorkdir).toHaveBeenCalledWith("/tmp/cli-bridge-fake123");
+    });
+
+    it("cleans up isolated workdir during cleanup sweep", () => {
+      mockCleanupWorkdir.mockClear();
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }], { isolateWorkdir: true });
+
+      // Make the session old enough for cleanup
+      const sessions = (mgr as any).sessions as Map<string, any>;
+      sessions.get(id)!.startTime = Date.now() - 31 * 60 * 1000;
+
+      mgr.cleanup();
+
+      expect(mockCleanupWorkdir).toHaveBeenCalledWith("/tmp/cli-bridge-fake123");
+      expect(mockSweepOrphanedWorkdirs).toHaveBeenCalled();
+    });
+
+    it("session without isolation has null isolatedWorkdir", () => {
+      const id = mgr.spawn("cli-gemini/gemini-2.5-pro", [{ role: "user", content: "hi" }]);
+      const list = mgr.list();
+      const session = list.find(s => s.sessionId === id);
+      expect(session?.isolatedWorkdir).toBeNull();
     });
   });
 });
