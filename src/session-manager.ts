@@ -15,6 +15,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { formatPrompt, type ChatMessage } from "./cli-runner.js";
+import { createIsolatedWorkdir, cleanupWorkdir, sweepOrphanedWorkdirs } from "./workdir.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -30,6 +31,8 @@ export interface SessionEntry {
   exitCode: number | null;
   model: string;
   status: SessionStatus;
+  /** Isolated workdir created for this session (null if caller provided explicit workdir). */
+  isolatedWorkdir: string | null;
 }
 
 export interface SessionInfo {
@@ -38,11 +41,20 @@ export interface SessionInfo {
   status: SessionStatus;
   startTime: number;
   exitCode: number | null;
+  /** Isolated workdir path (null if not using workdir isolation). */
+  isolatedWorkdir: string | null;
 }
 
 export interface SpawnOptions {
   workdir?: string;
   timeout?: number;
+  /**
+   * If true, create an isolated temp directory for this session.
+   * The directory is automatically cleaned up when the session exits or is killed.
+   * Ignored if `workdir` is explicitly set.
+   * Default: false (uses per-runner defaults: tmpdir for gemini, homedir for others).
+   */
+  isolateWorkdir?: boolean;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -102,7 +114,15 @@ export class SessionManager {
     const sessionId = randomBytes(8).toString("hex");
     const prompt = formatPrompt(messages);
 
-    const { cmd, args, cwd, useStdin } = this.resolveCliCommand(model, prompt, opts);
+    // Workdir isolation: create a temp dir if requested and no explicit workdir given
+    let isolatedDir: string | null = null;
+    const effectiveOpts = { ...opts };
+    if (opts.isolateWorkdir && !opts.workdir) {
+      isolatedDir = createIsolatedWorkdir();
+      effectiveOpts.workdir = isolatedDir;
+    }
+
+    const { cmd, args, cwd, useStdin } = this.resolveCliCommand(model, prompt, effectiveOpts);
 
     const proc = spawn(cmd, args, {
       env: buildMinimalEnv(),
@@ -118,6 +138,7 @@ export class SessionManager {
       exitCode: null,
       model,
       status: "running",
+      isolatedWorkdir: isolatedDir,
     };
 
     if (useStdin) {
@@ -132,11 +153,19 @@ export class SessionManager {
     proc.on("close", (code) => {
       entry.exitCode = code ?? 0;
       if (entry.status === "running") entry.status = "exited";
+      // Auto-cleanup isolated workdir on process exit
+      if (entry.isolatedWorkdir) {
+        cleanupWorkdir(entry.isolatedWorkdir);
+      }
     });
 
     proc.on("error", () => {
       if (entry.status === "running") entry.status = "exited";
       entry.exitCode = entry.exitCode ?? 1;
+      // Auto-cleanup isolated workdir on error too
+      if (entry.isolatedWorkdir) {
+        cleanupWorkdir(entry.isolatedWorkdir);
+      }
     });
 
     this.sessions.set(sessionId, entry);
@@ -196,12 +225,13 @@ export class SessionManager {
         status: entry.status,
         startTime: entry.startTime,
         exitCode: entry.exitCode,
+        isolatedWorkdir: entry.isolatedWorkdir,
       });
     }
     return result;
   }
 
-  /** Remove sessions older than SESSION_TTL_MS. Kill running ones first. */
+  /** Remove sessions older than SESSION_TTL_MS. Kill running ones first. Clean up isolated workdirs. */
   cleanup(): void {
     const now = Date.now();
     for (const [sessionId, entry] of this.sessions) {
@@ -210,9 +240,15 @@ export class SessionManager {
           entry.proc.kill("SIGTERM");
           entry.status = "killed";
         }
+        // Clean up isolated workdir if it wasn't cleaned on exit
+        if (entry.isolatedWorkdir) {
+          cleanupWorkdir(entry.isolatedWorkdir);
+        }
         this.sessions.delete(sessionId);
       }
     }
+    // Sweep orphaned workdirs from crashed sessions
+    sweepOrphanedWorkdirs();
   }
 
   /** Stop the cleanup timer (for graceful shutdown). */
@@ -221,11 +257,14 @@ export class SessionManager {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
-    // Kill all running sessions
+    // Kill all running sessions and clean up their workdirs
     for (const [, entry] of this.sessions) {
       if (entry.status === "running") {
         entry.proc.kill("SIGTERM");
         entry.status = "killed";
+      }
+      if (entry.isolatedWorkdir) {
+        cleanupWorkdir(entry.isolatedWorkdir);
       }
     }
   }

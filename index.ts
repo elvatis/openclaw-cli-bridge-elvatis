@@ -57,6 +57,7 @@ import {
   DEFAULT_MODEL as CODEX_DEFAULT_MODEL,
   readCodexCredentials,
 } from "./src/codex-auth.js";
+import { importCodexAuth } from "./src/codex-auth-import.js";
 import { startProxyServer } from "./src/proxy-server.js";
 import { patchOpencllawConfig } from "./src/config-patcher.js";
 import {
@@ -1236,6 +1237,11 @@ const plugin = {
         refreshOAuth: async (cred: ProviderAuthContext) => {
           try {
             const fresh = await readCodexCredentials(codexAuthPath);
+            // Also update the agent auth store with refreshed tokens
+            void importCodexAuth({
+              codexAuthPath,
+              log: (msg) => api.logger.info(`[cli-bridge:codex-refresh] ${msg}`),
+            });
             return {
               ...cred,
               access: fresh.accessToken,
@@ -1249,6 +1255,22 @@ const plugin = {
       });
 
       api.logger.info("[cli-bridge] openai-codex provider registered");
+
+      // Auto-import Codex CLI credentials into the agent auth store (Issue #2).
+      // This ensures `openai-codex/*` models work immediately without manual
+      // `openclaw models auth login`. Runs async, non-blocking.
+      void importCodexAuth({
+        codexAuthPath,
+        log: (msg) => api.logger.info(`[cli-bridge:codex-import] ${msg}`),
+      }).then((result) => {
+        if (result.imported) {
+          api.logger.info("[cli-bridge] Codex auth auto-imported into agent auth store ✅");
+        } else if (result.skipped) {
+          api.logger.info("[cli-bridge] Codex auth already current in agent auth store");
+        } else if (result.error) {
+          api.logger.warn(`[cli-bridge] Codex auth import failed: ${result.error}`);
+        }
+      });
     }
 
     // ── Phase 2: CLI request proxy ─────────────────────────────────────────────
