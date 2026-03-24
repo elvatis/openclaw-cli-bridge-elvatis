@@ -149,6 +149,10 @@ export function startProxyServer(opts: ProxyServerOptions): Promise<http.Server>
       opts.log(
         `[cli-bridge] proxy server listening on http://127.0.0.1:${opts.port}`
       );
+      // unref() so the proxy server does not keep the Node.js event loop alive
+      // when openclaw doctor or other short-lived CLI commands load plugins.
+      // The gateway's own main loop keeps the process alive during normal operation.
+      server.unref();
       // Start proactive OAuth token refresh scheduler for Claude Code CLI.
       setAuthLogger(opts.log);
       void scheduleTokenRefresh();
