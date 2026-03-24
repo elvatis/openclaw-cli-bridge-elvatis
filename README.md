@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `1.9.2`
+**Current version:** `2.1.3`
 
 ---
 
@@ -376,6 +376,22 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.1.3
+- **docs:** All documentation updated to reflect current version (README, SKILL.md, STATUS.md, MANIFEST.json)
+
+### v2.1.2
+- **fix:** Updated ChatGPT web session model list: gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, o3, o4-mini, gpt-5, gpt-5-mini
+- **fix:** `server.unref()` — proxy server no longer keeps `openclaw doctor` hanging indefinitely
+
+### v2.1.1
+- **fix:** `server.unref()` on proxy server so `openclaw doctor` (and short-lived CLI commands) exit cleanly
+
+### v2.1.0
+- **feat:** Session manager for isolated per-request workdirs
+- **feat:** Register OpenCode and Pi slash commands (`/cli-opencode`, `/cli-pi`)
+- **feat:** Codex auth auto-import support
+- **feat:** Workdir isolation for all CLI runners
 
 ### v1.9.2
 - **fix:** Correct `maxTokens` and `contextWindow` for all CLI_MODELS — were hardcoded to 8192 output tokens

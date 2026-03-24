@@ -1,10 +1,10 @@
 # STATUS — openclaw-cli-bridge-elvatis
 
-## Current Version: 2.1.0
+## Current Version: 2.1.3
 
-- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis (not yet published to npm)
-- **ClawHub:** openclaw-cli-bridge-elvatis@1.9.2
-- **GitHub:** https://github.com/elvatis/openclaw-cli-bridge-elvatis/releases/tag/v1.9.2
+- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis@2.1.3
+- **ClawHub:** openclaw-cli-bridge-elvatis@2.1.3
+- **GitHub:** https://github.com/elvatis/openclaw-cli-bridge-elvatis/releases/tag/v2.1.3
 
 ## CLI Model Token Limits (corrected in v1.9.2)
 | Model | Context Window | Max Output |
