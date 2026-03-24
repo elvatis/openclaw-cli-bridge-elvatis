@@ -2270,7 +2270,7 @@ const plugin = {
         }
         const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatChatGPTExpiry(expiry)}` : "";
 
-        return { text: `✅ ChatGPT session ready!\n\nModels available:\n• \`vllm/web-chatgpt/gpt-4o\`\n• \`vllm/web-chatgpt/gpt-4o-mini\`\n• \`vllm/web-chatgpt/gpt-o3\`\n• \`vllm/web-chatgpt/gpt-o4-mini\`\n• \`vllm/web-chatgpt/gpt-5\`${expiryLine}` };
+        return { text: `✅ ChatGPT session ready!\n\nModels available:\n• \`vllm/web-chatgpt/gpt-4o\`\n• \`vllm/web-chatgpt/gpt-4o-mini\`\n• \`vllm/web-chatgpt/gpt-4.1\`\n• \`vllm/web-chatgpt/gpt-4.1-mini\`\n• \`vllm/web-chatgpt/o3\`\n• \`vllm/web-chatgpt/o4-mini\`\n• \`vllm/web-chatgpt/gpt-5\`\n• \`vllm/web-chatgpt/gpt-5-mini\`${expiryLine}` };
       },
     } satisfies OpenClawPluginCommandDefinition);
 
@@ -2288,7 +2288,7 @@ const plugin = {
           if (editor) {
             const expiry = loadChatGPTExpiry();
             const expiryLine = expiry ? `\n🕐 ${formatChatGPTExpiry(expiry)}` : "";
-            return { text: `✅ chatgpt.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-chatgpt/gpt-4o, gpt-4o-mini, gpt-o3, gpt-o4-mini, gpt-5${expiryLine}` };
+            return { text: `✅ chatgpt.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-chatgpt/gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, o3, o4-mini, gpt-5, gpt-5-mini${expiryLine}` };
           }
         } catch { /* fall through */ }
         chatgptContext = null;
@@ -2367,7 +2367,7 @@ const plugin = {
                 return page.locator("#prompt-textarea").isVisible().catch(() => false);
               } catch { chatgptContext = null; return false; }
             },
-            models: "web-chatgpt/gpt-4o, gpt-4o-mini, gpt-4.1, o3, o4-mini, gpt-5, gpt-5-mini",
+            models: "web-chatgpt/gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, o3, o4-mini, gpt-5, gpt-5-mini",
             loginCmd: "/chatgpt-login",
             expiry: () => { const e = loadChatGPTExpiry(); return e ? formatChatGPTExpiry(e) : null; },
           },
