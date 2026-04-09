@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.1.3`
+**Current version:** `2.2.0`
 
 ---
 
@@ -191,11 +191,10 @@ openclaw gateway restart
 ### 2. Verify (check gateway logs)
 
 ```
-[cli-bridge] proxy ready on :31337
-[cli-bridge] registered 14 commands: /cli-sonnet, /cli-opus, /cli-haiku,
-             /cli-gemini, /cli-gemini-flash, /cli-gemini3, /cli-gemini3-flash,
-             /cli-codex, /cli-codex-spark, /cli-codex52, /cli-codex54, /cli-codex-mini,
-             /cli-back, /cli-test, /cli-list
+[cli-bridge] system Chrome found: Google Chrome 146.x
+[cli-bridge] openai-codex provider registered
+[cli-bridge] registered 32 commands (use /cli-list to see all)
+[cli-bridge] proxy ready on :31337 — vllm/cli-gemini/* and vllm/cli-claude/* available
 ```
 
 ### 3. Register Codex auth (optional — Phase 1 only)
@@ -376,6 +375,14 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.2.0
+- **fix:** Module-level guards prevent duplicate log spam — `register()` is called per-agent (~11×), now logs Chrome/provider/commands only once
+- **fix:** Shortened command registration log: count + `/cli-list` reference instead of listing all 32 commands
+- **fix:** Removed `fuser -k` port cleanup — was killing the gateway process itself, causing systemd restart loops
+- **fix:** EADDRINUSE now handled gracefully (skip + log) instead of process killing
+- **fix:** Session restore (4× Chromium) only runs in gateway mode — CLI commands like `openclaw models status` no longer hang
+- **fix:** Codex auth import runs once per startup, not per-agent
 
 ### v2.1.3
 - **docs:** All documentation updated to reflect current version (README, SKILL.md, STATUS.md, MANIFEST.json)

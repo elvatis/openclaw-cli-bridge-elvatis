@@ -74,9 +74,22 @@ export function startProxyServer(opts) {
             stopTokenRefresh();
             sessionManager.stop();
         });
-        server.on("error", (err) => reject(err));
+        server.on("error", (err) => {
+            if (err.code === "EADDRINUSE") {
+                // Port is held by a previous gateway process. probeExisting() should have
+                // caught a healthy proxy and reused it. If we get here, the old proxy is
+                // unhealthy but the OS hasn't released the socket yet. Just log and skip —
+                // do NOT fuser -k: the proxy runs in-process and killing the port holder
+                // would kill the gateway itself, causing a systemd restart loop.
+                opts.log(`[cli-bridge] port ${opts.port} in use by another process — proxy skipped (will retry on next gateway restart)`);
+                resolve(server); // resolve without a listening server — probeExisting handles reuse
+            }
+            else {
+                reject(err);
+            }
+        });
         server.listen(opts.port, "127.0.0.1", () => {
-            opts.log(`[cli-bridge] proxy server listening on http://127.0.0.1:${opts.port}`);
+            opts.log(`[cli-bridge] proxy listening on :${opts.port}`);
             // unref() so the proxy server does not keep the Node.js event loop alive
             // when openclaw doctor or other short-lived CLI commands load plugins.
             // The gateway's own main loop keeps the process alive during normal operation.
