@@ -1,13 +1,13 @@
 # DASHBOARD.md — openclaw-cli-bridge-elvatis
 
-_Last updated: 2026-03-13_
+_Last updated: 2026-04-09_
 
 <!-- SECTION: plugin_status -->
 ## Plugin Status
 
 | Component | Version | Build | Tests | Status |
 |-----------|---------|-------|-------|--------|
-| openclaw-cli-bridge-elvatis | 1.7.3 | ✅ | ✅ 96/96 | ✅ Stable |
+| openclaw-cli-bridge-elvatis | 2.2.0 | ✅ | ✅ | ✅ Stable |
 <!-- /SECTION: plugin_status -->
 
 <!-- SECTION: release_state -->
@@ -15,8 +15,9 @@ _Last updated: 2026-03-13_
 
 | Platform | Published Version | Status |
 |----------|------------------|--------|
-| GitHub | v1.3.5 | ✅ Tagged + Release |
-| Local | 1.7.3 | ⏳ Built, pending push |
+| GitHub | v2.2.0 | ✅ Pushed to main |
+| npm | 2.1.3 | ⏳ Pending publish |
+| ClawHub | 2.1.3 | ⏳ Pending publish |
 <!-- /SECTION: release_state -->
 
 <!-- SECTION: open_tasks -->
@@ -30,19 +31,14 @@ _No open tasks._
 
 | Task | Title | Version |
 |------|-------|---------|
-| T-013 | Fix cookie expiry tracking — longest-lived auth cookie for all 4 providers | 1.7.3 |
-| T-012 | Persistent browser fallback for Claude/Gemini/ChatGPT (no CDP required) | 1.4.0 |
+| T-017 | Fix log spam, restart loops, CLI blocking | 2.2.0 |
+| T-016 | Issue #2: Codex auth auto-import into agent auth store | 2.1.0 |
+| T-015 | Issue #4: Background session mgmt with workdir isolation | 2.1.0 |
+| T-014 | Issue #6: Workdir isolation (createIsolatedWorkdir, cleanup, sweep) | 2.1.0 |
+| T-013 | Fix cookie expiry tracking — longest-lived auth cookie (all 4) | 1.7.3 |
+| T-012 | Persistent browser fallback for Claude/Gemini/ChatGPT (no CDP) | 1.4.0 |
 | T-011 | Session-safe staged model switching (/cli-apply, /cli-pending, --now) | 0.2.25 |
 | T-009 | Stability: sleep-resilient token refresh + stopTokenRefresh cleanup | 0.2.25 |
-| T-103 | Explicit model allowlist for CLI execution | 0.2.23 |
-| T-102 | Proxy auth key rotation via config | 0.2.23 |
-| T-101 | Unit tests for prompt formatter + model router | 0.2.23 |
 | T-008 | Validate proxy endpoints + vllm model calls end-to-end | 0.2.21 |
 | T-007 | Create GitHub repo and push initial code | 0.2.5 |
-| T-006 | Implement Claude Code CLI request bridge | 0.2.5 |
-| T-005 | Implement Gemini CLI request bridge | 0.2.5 |
-| T-004 | Verify model call: gpt-5.2 / gpt-5.3-codex responds | 0.2.5 |
-| T-003 | Test auth flow: openclaw models auth login --provider openai-codex | 0.2.5 |
-| T-002 | Implement openai-codex provider (Codex CLI auth bridge) | 0.2.5 |
-| T-001 | Scaffold plugin structure + AAHP handoff | 0.2.5 |
 <!-- /SECTION: completed_tasks -->

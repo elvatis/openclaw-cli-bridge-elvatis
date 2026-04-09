@@ -4,6 +4,35 @@ _Last 10 sessions. Older entries in LOG-ARCHIVE.md._
 
 ---
 
+## 2026-04-09 — Session 9 (Claude Opus 4.6)
+
+> **Agent:** claude-opus-4-6
+> **Phase:** fix
+> **Commit before:** v2.1.3
+> **Commit after:** v2.2.0
+
+**T-017: Fix log spam, restart loops, CLI blocking**
+
+### Problems
+1. `register()` called per-agent (~11×) — every call logged Chrome check, provider registration, and all 32 commands
+2. `fuser -k` port cleanup killed the gateway process itself (proxy runs in-process), causing systemd restart loops
+3. `openclaw models status` (and other CLI commands) hung indefinitely because session restore launched 4 Chromium instances
+
+### Fixes (index.ts, src/proxy-server.ts)
+- Module-level `_registerLoggedOnce` guard — Chrome/provider/commands logged once per process start
+- Module-level `_proxyStarted` guard — proxy start runs once, not per-agent
+- Shortened command log: count + `/cli-list` reference instead of listing all 32 names
+- Removed `fuser -k` — EADDRINUSE handled gracefully (skip + log)
+- `_proxyOwnedByThisProcess` flag — session restore only runs in gateway mode, skipped for CLI commands
+- Codex auth import runs once per startup, not per-agent
+
+### Also in this session
+- Installed cli-bridge plugin on production server (chef-linux@192.168.177.6)
+- Set default model to `vllm/cli-claude/claude-sonnet-4-6` (Claude CLI, no API costs)
+- Merged 3 Dependabot PRs (#13, #17, #19)
+
+---
+
 ## 2026-03-13 — Session 8 (Claude Opus 4.6)
 
 > **Agent:** claude-opus-4-6
