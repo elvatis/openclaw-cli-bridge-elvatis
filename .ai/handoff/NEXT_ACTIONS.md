@@ -1,13 +1,13 @@
 # NEXT_ACTIONS.md — openclaw-cli-bridge-elvatis
 
-_Last updated: 2026-03-13_
+_Last updated: 2026-04-09_
 
 <!-- SECTION: summary -->
 ## Status Summary
 
 | Status  | Count |
 |---------|-------|
-| Done    | 16    |
+| Done    | 17    |
 | Ready   | 0     |
 | Blocked | 0     |
 <!-- /SECTION: summary -->
@@ -30,6 +30,7 @@ _No blocked tasks._
 
 | Task  | Title                                                              | Date       |
 |-------|--------------------------------------------------------------------|------------|
+| T-017 | Fix log spam, restart loops, CLI blocking (v2.2.0)               | 2026-04-09 |
 | T-016 | Issue #2: Codex auth auto-import into agent auth store            | 2026-03-19 |
 | T-015 | Issue #4: Background session mgmt with workdir isolation          | 2026-03-19 |
 | T-014 | Issue #6: Workdir isolation (createIsolatedWorkdir, cleanup, sweep) | 2026-03-19 |

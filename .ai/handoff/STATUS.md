@@ -1,10 +1,10 @@
 # STATUS — openclaw-cli-bridge-elvatis
 
-## Current Version: 2.1.3
+## Current Version: 2.2.0
 
-- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis@2.1.3
-- **ClawHub:** openclaw-cli-bridge-elvatis@2.1.3
-- **GitHub:** https://github.com/elvatis/openclaw-cli-bridge-elvatis/releases/tag/v2.1.3
+- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis@2.2.0 (pending publish)
+- **ClawHub:** openclaw-cli-bridge-elvatis@2.2.0 (pending publish)
+- **GitHub:** https://github.com/elvatis/openclaw-cli-bridge-elvatis (pushed to main)
 
 ## CLI Model Token Limits (corrected in v1.9.2)
 | Model | Context Window | Max Output |
@@ -47,6 +47,7 @@ This is by design — CLI tools output plain text only.
 - /bridge-status shows cookie-based status
 
 ## Release History (recent)
+- v2.2.0 (2026-04-09): Fix log spam (module-level guards), remove fuser -k restart loops, session restore gateway-only, EADDRINUSE graceful handling
 - v2.1.0 (2026-03-19): Issue #6 workdir isolation, Issue #4 session mgmt enhancements, Issue #2 codex auth auto-import
 - v2.0.0: Major version bump
 - v1.9.2 (2026-03-15): Fix maxTokens/contextWindow for all CLI_MODELS (were 8192, now correct per vendor specs)
