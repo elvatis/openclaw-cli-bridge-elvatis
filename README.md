@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.6.2`
+**Current version:** `2.6.3`
 
 ---
 
@@ -405,6 +405,9 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.6.3
+- **security:** Bump `vite` 8.0.2 → 8.0.5 — fixes 3 CVEs: `server.fs.deny` bypass via query strings, arbitrary file read via WebSocket, path traversal in optimized deps `.map` handling (merged Dependabot PR #18)
 
 ### v2.6.2
 - **fix:** Codex CLI `--quiet` flag removed in latest Codex version — replaced with `codex exec` subcommand for non-interactive execution. All `openai-codex/*` models were failing with "unexpected argument '--quiet'" error.
