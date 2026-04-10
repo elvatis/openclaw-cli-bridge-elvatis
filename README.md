@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.2.2`
+**Current version:** `2.3.0`
 
 ---
 
@@ -375,6 +375,14 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.3.0
+- **feat:** OpenAI tool calling protocol support for all CLI models — tool definitions are injected into the prompt, structured `tool_calls` responses are parsed and returned in OpenAI format
+- **feat:** Multimodal content support — images and audio from webchat are extracted to temp files and passed to CLIs (Codex uses native `-i` flag, Claude/Gemini reference file paths in prompt)
+- **feat:** Autonomous execution mode — Claude uses `--permission-mode bypassPermissions`, Gemini uses `--approval-mode yolo`, Codex uses `--full-auto`. CLI models never ask interactive questions.
+- **feat:** New `src/tool-protocol.ts` module — tool prompt builder, response parser, call ID generator
+- **fix:** Removed `--tools ""` from Claude CLI args — allows native tool execution when needed
+- **fix:** Model capabilities now report `tools: true` for all CLI models (was `false`)
 
 ### v2.2.1
 - **fix:** Config-patcher now validates `apiKey` value — re-patches if `__OPENCLAW_KEEP__` or any wrong value is present (prevents vllm 401 Unauthorized after config migrations)

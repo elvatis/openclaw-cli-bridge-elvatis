@@ -71,8 +71,11 @@ vi.mock("../src/cli-runner.js", async (importOriginal) => {
       if (!normalized.startsWith("cli-gemini/") && !normalized.startsWith("cli-claude/") && !normalized.startsWith("openai-codex/") && !normalized.startsWith("opencode/") && !normalized.startsWith("pi/")) {
         throw new Error(`Unknown CLI bridge model: "${model}"`);
       }
-      return `Mock response from ${normalized}`;
+      // Returns CliToolResult (content + optional tool_calls)
+      return { content: `Mock response from ${normalized}` };
     }),
+    extractMultimodalParts: vi.fn((messages: unknown[]) => ({ cleanMessages: messages, mediaFiles: [] })),
+    cleanupMediaFiles: vi.fn(),
   };
 });
 
@@ -444,29 +447,29 @@ describe("Error handling", () => {
 // Tool/function call rejection for CLI-proxy models
 // ──────────────────────────────────────────────────────────────────────────────
 
-describe("Tool call rejection", () => {
-  it("rejects tools for cli-gemini models with tools_not_supported", async () => {
+describe("Tool call support", () => {
+  it("accepts tools for cli-gemini models (200)", async () => {
     const res = await json("/v1/chat/completions", {
       model: "cli-gemini/gemini-2.5-pro",
       messages: [{ role: "user", content: "hi" }],
       tools: [{ type: "function", function: { name: "test", parameters: {} } }],
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.error.code).toBe("tools_not_supported");
+    expect(body.choices[0].message.content).toBeDefined();
   });
 
-  it("rejects tools for cli-claude models with tools_not_supported", async () => {
+  it("accepts tools for cli-claude models (200)", async () => {
     const res = await json("/v1/chat/completions", {
       model: "cli-claude/claude-sonnet-4-6",
       messages: [{ role: "user", content: "hi" }],
       tools: [{ type: "function", function: { name: "test", parameters: {} } }],
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const body = JSON.parse(res.body);
-    expect(body.error.code).toBe("tools_not_supported");
+    expect(body.choices[0].message.content).toBeDefined();
   });
 
   it("does NOT reject tools for web-grok models (returns 503 no session)", async () => {
@@ -476,7 +479,7 @@ describe("Tool call rejection", () => {
       tools: [{ type: "function", function: { name: "test", parameters: {} } }],
     });
 
-    // Should NOT be 400 tools_not_supported — reaches provider logic, gets 503 (no session)
+    // Reaches provider logic, gets 503 (no session)
     expect(res.status).not.toBe(400);
     expect(res.status).toBe(503);
     const body = JSON.parse(res.body);
@@ -489,23 +492,23 @@ describe("Tool call rejection", () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe("Model capabilities", () => {
-  it("cli-gemini models have capabilities.tools===false", async () => {
+  it("cli-gemini models have capabilities.tools===true", async () => {
     const res = await fetch("/v1/models");
     const body = JSON.parse(res.body);
     const cliGeminiModels = body.data.filter((m: { id: string }) => m.id.startsWith("cli-gemini/"));
     expect(cliGeminiModels.length).toBeGreaterThan(0);
     for (const m of cliGeminiModels) {
-      expect(m.capabilities.tools).toBe(false);
+      expect(m.capabilities.tools).toBe(true);
     }
   });
 
-  it("cli-claude models have capabilities.tools===false", async () => {
+  it("cli-claude models have capabilities.tools===true", async () => {
     const res = await fetch("/v1/models");
     const body = JSON.parse(res.body);
     const cliClaudeModels = body.data.filter((m: { id: string }) => m.id.startsWith("cli-claude/"));
     expect(cliClaudeModels.length).toBeGreaterThan(0);
     for (const m of cliClaudeModels) {
-      expect(m.capabilities.tools).toBe(false);
+      expect(m.capabilities.tools).toBe(true);
     }
   });
 
@@ -519,33 +522,33 @@ describe("Model capabilities", () => {
     }
   });
 
-  it("openai-codex models have capabilities.tools===false", async () => {
+  it("openai-codex models have capabilities.tools===true", async () => {
     const res = await fetch("/v1/models");
     const body = JSON.parse(res.body);
     const codexModels = body.data.filter((m: { id: string }) => m.id.startsWith("openai-codex/"));
     expect(codexModels.length).toBeGreaterThan(0);
     for (const m of codexModels) {
-      expect(m.capabilities.tools).toBe(false);
+      expect(m.capabilities.tools).toBe(true);
     }
   });
 
-  it("opencode models have capabilities.tools===false", async () => {
+  it("opencode models have capabilities.tools===true", async () => {
     const res = await fetch("/v1/models");
     const body = JSON.parse(res.body);
     const ocModels = body.data.filter((m: { id: string }) => m.id.startsWith("opencode/"));
     expect(ocModels.length).toBeGreaterThan(0);
     for (const m of ocModels) {
-      expect(m.capabilities.tools).toBe(false);
+      expect(m.capabilities.tools).toBe(true);
     }
   });
 
-  it("pi models have capabilities.tools===false", async () => {
+  it("pi models have capabilities.tools===true", async () => {
     const res = await fetch("/v1/models");
     const body = JSON.parse(res.body);
     const piModels = body.data.filter((m: { id: string }) => m.id.startsWith("pi/"));
     expect(piModels.length).toBeGreaterThan(0);
     for (const m of piModels) {
-      expect(m.capabilities.tools).toBe(false);
+      expect(m.capabilities.tools).toBe(true);
     }
   });
 });
@@ -585,34 +588,34 @@ describe("POST /v1/chat/completions — new model prefixes", () => {
     expect(body.choices[0].message.content).toBe("Mock response from pi/default");
   });
 
-  it("rejects tools for openai-codex models", async () => {
+  it("accepts tools for openai-codex models", async () => {
     const res = await json("/v1/chat/completions", {
       model: "openai-codex/gpt-5.3-codex",
       messages: [{ role: "user", content: "hi" }],
       tools: [{ type: "function", function: { name: "test", parameters: {} } }],
     });
-    expect(res.status).toBe(400);
-    expect(JSON.parse(res.body).error.code).toBe("tools_not_supported");
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).choices[0].message.content).toBeDefined();
   });
 
-  it("rejects tools for opencode models", async () => {
+  it("accepts tools for opencode models", async () => {
     const res = await json("/v1/chat/completions", {
       model: "opencode/default",
       messages: [{ role: "user", content: "hi" }],
       tools: [{ type: "function", function: { name: "test", parameters: {} } }],
     });
-    expect(res.status).toBe(400);
-    expect(JSON.parse(res.body).error.code).toBe("tools_not_supported");
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).choices[0].message.content).toBeDefined();
   });
 
-  it("rejects tools for pi models", async () => {
+  it("accepts tools for pi models", async () => {
     const res = await json("/v1/chat/completions", {
       model: "pi/default",
       messages: [{ role: "user", content: "hi" }],
       tools: [{ type: "function", function: { name: "test", parameters: {} } }],
     });
-    expect(res.status).toBe(400);
-    expect(JSON.parse(res.body).error.code).toBe("tools_not_supported");
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).choices[0].message.content).toBeDefined();
   });
 });
 

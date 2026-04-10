@@ -4,6 +4,25 @@ _Last 10 sessions. Older entries in LOG-ARCHIVE.md._
 
 ---
 
+## 2026-04-10 — Session 11 (Claude Opus 4.6)
+
+> **Agent:** claude-opus-4-6
+> **Phase:** feature
+> **Commit before:** v2.2.2
+> **Commit after:** v2.3.0
+
+**Full-featured CLI bridge: tool calls + multimodal + autonomous execution**
+
+- Added OpenAI tool calling protocol: tool definitions injected into prompts, structured `tool_calls` parsed from CLI output
+- Added multimodal content support: images/audio extracted to temp files, passed to CLIs via native mechanisms
+- Autonomous execution: Claude `--permission-mode bypassPermissions`, Gemini `--approval-mode yolo`
+- New `src/tool-protocol.ts` module (prompt builder, response parser, Claude wrapper extraction)
+- Removed HTTP 400 tool rejection — all CLI models now accept tool-calling requests
+- Model capabilities report `tools: true` for all CLI models
+- Reverted self-healing DEFAULT_MODEL_ORDER back to CLI models
+
+---
+
 ## 2026-04-10 — Session 10 (Claude Opus 4.6)
 
 > **Agent:** claude-opus-4-6

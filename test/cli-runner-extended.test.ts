@@ -189,7 +189,7 @@ describe("routeToCliRunner — new model prefixes", () => {
       [{ role: "user", content: "hi" }],
       5000
     );
-    expect(result).toBe("routed output");
+    expect(result).toEqual({ content: "routed output" });
     expect(mockSpawn).toHaveBeenCalledWith("codex", expect.any(Array), expect.any(Object));
   });
 
@@ -200,7 +200,7 @@ describe("routeToCliRunner — new model prefixes", () => {
       5000,
       { allowedModels: null }
     );
-    expect(result).toBe("routed output");
+    expect(result).toEqual({ content: "routed output" });
     expect(mockSpawn).toHaveBeenCalledWith("codex", expect.any(Array), expect.any(Object));
   });
 
@@ -210,7 +210,7 @@ describe("routeToCliRunner — new model prefixes", () => {
       [{ role: "user", content: "hi" }],
       5000
     );
-    expect(result).toBe("routed output");
+    expect(result).toEqual({ content: "routed output" });
     expect(mockSpawn).toHaveBeenCalledWith("opencode", expect.any(Array), expect.any(Object));
   });
 
@@ -220,7 +220,7 @@ describe("routeToCliRunner — new model prefixes", () => {
       [{ role: "user", content: "hi" }],
       5000
     );
-    expect(result).toBe("routed output");
+    expect(result).toEqual({ content: "routed output" });
     expect(mockSpawn).toHaveBeenCalledWith("pi", expect.any(Array), expect.any(Object));
   });
 

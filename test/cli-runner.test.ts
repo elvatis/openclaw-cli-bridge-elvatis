@@ -123,7 +123,7 @@ describe("formatPrompt", () => {
     expect(result).toContain("Part two");
   });
 
-  it("ignores non-text ContentParts (e.g. image)", () => {
+  it("includes placeholder for non-text ContentParts (e.g. image)", () => {
     const result = formatPrompt([
       {
         role: "user",
@@ -133,7 +133,8 @@ describe("formatPrompt", () => {
         ],
       },
     ]);
-    expect(result).toBe("describe this");
+    expect(result).toContain("describe this");
+    expect(result).toContain("[Attached image");
   });
 
   it("coerces plain object content to JSON string (not [object Object])", () => {

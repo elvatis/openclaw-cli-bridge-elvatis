@@ -7,7 +7,7 @@ _Last updated: 2026-04-10_
 
 | Status  | Count |
 |---------|-------|
-| Done    | 18    |
+| Done    | 19    |
 | Ready   | 0     |
 | Blocked | 0     |
 <!-- /SECTION: summary -->
@@ -30,6 +30,7 @@ _No blocked tasks._
 
 | Task  | Title                                                              | Date       |
 |-------|--------------------------------------------------------------------|------------|
+| T-019 | Full CLI bridge: tool calls + multimodal + autonomous (v2.3.0)  | 2026-04-10 |
 | T-018 | Fix vllm apiKey corruption (401) + harden config-patcher (v2.2.1)| 2026-04-10 |
 | T-017 | Fix log spam, restart loops, CLI blocking (v2.2.0)               | 2026-04-09 |
 | T-016 | Issue #2: Codex auth auto-import into agent auth store            | 2026-03-19 |

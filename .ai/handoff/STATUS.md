@@ -1,9 +1,9 @@
 # STATUS — openclaw-cli-bridge-elvatis
 
-## Current Version: 2.2.2
+## Current Version: 2.3.0
 
-- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis@2.2.2
-- **ClawHub:** openclaw-cli-bridge-elvatis@2.2.2
+- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis@2.3.0
+- **ClawHub:** openclaw-cli-bridge-elvatis@2.3.0
 - **GitHub:** https://github.com/elvatis/openclaw-cli-bridge-elvatis (pushed to main)
 
 ## CLI Model Token Limits (corrected in v1.9.2)
@@ -20,18 +20,18 @@
 ## Architecture
 - **Proxy server:** `http://127.0.0.1:31337/v1` (OpenAI-compatible)
 - **OpenClaw connects via** `vllm` provider with `api: openai-completions`
-- **CLI models** (`cli-claude/*`, `cli-gemini/*`): plain text completions only — NO tool/function call support
+- **CLI models** (`cli-claude/*`, `cli-gemini/*`, `openai-codex/*`): full tool calling + multimodal support via prompt injection + autonomous execution
 - **Web-session models** (`web-grok/*`, `web-gemini/*`): browser-based, require `/xxx-login`
 - **Codex models** (`openai-codex/*`): OAuth auth bridge
 - **BitNet** (`local-bitnet/*`): local CPU inference
 
-## Tool Support Limitation
-CLI models explicitly reject tool/function call requests (HTTP 400):
-```
-Model cli-claude/claude-opus-4-6 does not support tool/function calls.
-Use a native API model (e.g. github-copilot/gpt-5-mini) for agents that need tools.
-```
-This is by design — CLI tools output plain text only.
+## Tool Calling Support (v2.3.0)
+All CLI models now support the OpenAI tool calling protocol:
+- Tool definitions are injected into the prompt as structured instructions
+- CLI output is parsed for structured `tool_calls` JSON responses
+- Responses are returned in standard OpenAI `tool_calls` format with `finish_reason: "tool_calls"`
+- Multimodal content (images, audio) is extracted to temp files and passed to CLIs
+- All models run in autonomous mode: Claude `bypassPermissions`, Gemini `yolo`, Codex `full-auto`
 
 ## All 4 Browser Providers
 | Provider | Models | Login Cmd | Profile Dir |
@@ -47,6 +47,7 @@ This is by design — CLI tools output plain text only.
 - /bridge-status shows cookie-based status
 
 ## Release History (recent)
+- v2.3.0 (2026-04-10): Tool calling protocol, multimodal content, autonomous execution mode
 - v2.2.1 (2026-04-10): Fix vllm apiKey corruption (401 Unauthorized) + harden config-patcher to re-patch on wrong apiKey
 - v2.2.0 (2026-04-09): Fix log spam (module-level guards), remove fuser -k restart loops, session restore gateway-only, EADDRINUSE graceful handling
 - v2.1.0 (2026-03-19): Issue #6 workdir isolation, Issue #4 session mgmt enhancements, Issue #2 codex auth auto-import

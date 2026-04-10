@@ -15,21 +15,55 @@
  *   - OpenCode/Pi: defaults to homedir().
  *   - All runners accept an explicit `workdir` override via RouteOptions.
  */
+import { type ToolDefinition, type CliToolResult } from "./tool-protocol.js";
 export interface ContentPart {
     type: string;
     text?: string;
 }
 export interface ChatMessage {
-    role: "system" | "user" | "assistant";
+    role: "system" | "user" | "assistant" | "tool";
     /** Plain string or OpenAI-style content array (multimodal / structured). */
     content: string | ContentPart[] | unknown;
+    /** Tool calls made by the assistant (OpenAI tool calling protocol). */
+    tool_calls?: Array<{
+        id: string;
+        type: string;
+        function: {
+            name: string;
+            arguments: string;
+        };
+    }>;
+    /** ID linking a tool result to the assistant's tool_call. */
+    tool_call_id?: string;
+    /** Function name for tool result messages. */
+    name?: string;
 }
+export type { ToolDefinition, CliToolResult } from "./tool-protocol.js";
 /**
  * Convert OpenAI messages to a single flat prompt string.
  * Truncates to MAX_MESSAGES (keeping the most recent) and MAX_MSG_CHARS per
  * message to avoid oversized payloads.
+ *
+ * Handles tool-calling messages:
+ *   - role "tool": formatted as [Tool Result: name]
+ *   - role "assistant" with tool_calls: formatted as [Assistant Tool Call: name(args)]
  */
 export declare function formatPrompt(messages: ChatMessage[]): string;
+export interface MediaFile {
+    path: string;
+    mimeType: string;
+}
+/**
+ * Extract non-text content parts (images, audio) from messages.
+ * Saves base64 data to temp files and replaces media parts with file references.
+ * Returns cleaned messages + list of saved media files for CLI -i flags.
+ */
+export declare function extractMultimodalParts(messages: ChatMessage[]): {
+    cleanMessages: ChatMessage[];
+    mediaFiles: MediaFile[];
+};
+/** Schedule deletion of temp media files after a delay. */
+export declare function cleanupMediaFiles(files: MediaFile[], delayMs?: number): void;
 export interface CliRunResult {
     stdout: string;
     stderr: string;
@@ -71,19 +105,26 @@ export declare function runCliWithArg(cmd: string, args: string[], timeoutMs?: n
  * cwd = tmpdir() by default — neutral empty-ish dir, prevents workspace context scanning.
  * Override with explicit workdir.
  */
-export declare function runGemini(prompt: string, modelId: string, timeoutMs: number, workdir?: string): Promise<string>;
+export declare function runGemini(prompt: string, modelId: string, timeoutMs: number, workdir?: string, opts?: {
+    tools?: ToolDefinition[];
+}): Promise<string>;
 /**
  * Run Claude Code CLI in headless mode with prompt delivered via stdin.
  * Strips the model prefix ("cli-claude/claude-opus-4-6" → "claude-opus-4-6").
  * cwd = homedir() by default. Override with explicit workdir.
  */
-export declare function runClaude(prompt: string, modelId: string, timeoutMs: number, workdir?: string): Promise<string>;
+export declare function runClaude(prompt: string, modelId: string, timeoutMs: number, workdir?: string, opts?: {
+    tools?: ToolDefinition[];
+}): Promise<string>;
 /**
  * Run Codex CLI in non-interactive mode with prompt via stdin.
  * cwd = homedir() by default. Override with explicit workdir.
  * Auto-initializes git if workdir is not already a git repo.
  */
-export declare function runCodex(prompt: string, modelId: string, timeoutMs: number, workdir?: string): Promise<string>;
+export declare function runCodex(prompt: string, modelId: string, timeoutMs: number, workdir?: string, opts?: {
+    tools?: ToolDefinition[];
+    mediaFiles?: MediaFile[];
+}): Promise<string>;
 /**
  * Run OpenCode CLI. Prompt is passed as a CLI argument: `opencode run "prompt"`.
  * cwd = homedir() by default. Override with explicit workdir.
@@ -115,6 +156,16 @@ export interface RouteOptions {
      * Overrides the per-runner default (tmpdir for gemini, homedir for others).
      */
     workdir?: string;
+    /**
+     * OpenAI tool definitions. When present, tool instructions are injected
+     * into the prompt and structured tool_call responses are parsed.
+     */
+    tools?: ToolDefinition[];
+    /**
+     * Media files extracted from multimodal message content.
+     * Passed to CLIs that support native media input (e.g. codex -i).
+     */
+    mediaFiles?: MediaFile[];
 }
 /**
  * Route a chat completion to the correct CLI based on model prefix.
@@ -124,8 +175,11 @@ export interface RouteOptions {
  *   opencode/<id>        → opencode CLI
  *   pi/<id>              → pi CLI
  *
+ * When `tools` are provided, tool instructions are injected into the prompt
+ * and the response is parsed for structured tool_calls.
+ *
  * Enforces DEFAULT_ALLOWED_CLI_MODELS by default (T-103).
  * Pass `allowedModels: null` to skip the allowlist check.
  */
-export declare function routeToCliRunner(model: string, messages: ChatMessage[], timeoutMs: number, opts?: RouteOptions): Promise<string>;
+export declare function routeToCliRunner(model: string, messages: ChatMessage[], timeoutMs: number, opts?: RouteOptions): Promise<CliToolResult>;
 //# sourceMappingURL=cli-runner.d.ts.map

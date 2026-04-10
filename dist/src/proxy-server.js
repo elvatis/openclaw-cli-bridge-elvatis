@@ -9,7 +9,7 @@
  */
 import http from "node:http";
 import { randomBytes } from "node:crypto";
-import { routeToCliRunner } from "./cli-runner.js";
+import { routeToCliRunner, extractMultimodalParts, cleanupMediaFiles } from "./cli-runner.js";
 import { scheduleTokenRefresh, setAuthLogger, stopTokenRefresh } from "./claude-auth.js";
 import { grokComplete, grokCompleteStream } from "./grok-client.js";
 import { geminiComplete, geminiCompleteStream } from "./gemini-browser.js";
@@ -176,9 +176,8 @@ async function handleRequest(req, res, opts) {
                 object: "model",
                 created: now,
                 owned_by: "openclaw-cli-bridge",
-                // CLI-proxy models stream plain text — no tool/function call support
                 capabilities: {
-                    tools: !(m.id.startsWith("cli-gemini/") || m.id.startsWith("cli-claude/") || m.id.startsWith("openai-codex/") || m.id.startsWith("opencode/") || m.id.startsWith("pi/") || m.id.startsWith("local-bitnet/")),
+                    tools: !m.id.startsWith("local-bitnet/"), // all CLI models support tools via prompt injection; only bitnet is text-only
                 },
             })),
         }));
@@ -208,28 +207,16 @@ async function handleRequest(req, res, opts) {
         }
         const { model, messages, stream = false } = parsed;
         const workdir = parsed.workdir;
-        const hasTools = Array.isArray(parsed.tools) && parsed.tools.length > 0;
+        const tools = parsed.tools;
+        const hasTools = Array.isArray(tools) && tools.length > 0;
         if (!model || !messages?.length) {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(JSON.stringify({ error: { message: "model and messages are required", type: "invalid_request_error" } }));
             return;
         }
-        // CLI-proxy models (cli-gemini/*, cli-claude/*) are plain text completions —
-        // they cannot process tool/function call schemas. Return a clear 400 so
-        // OpenClaw can surface a meaningful error instead of getting a garbled response.
-        const isCliModel = model.startsWith("cli-gemini/") || model.startsWith("cli-claude/") || model.startsWith("openai-codex/") || model.startsWith("opencode/") || model.startsWith("pi/"); // local-bitnet/* exempt: llama-server silently ignores tools
-        if (hasTools && isCliModel) {
-            res.writeHead(400, { "Content-Type": "application/json" });
-            res.end(JSON.stringify({
-                error: {
-                    message: `Model ${model} does not support tool/function calls. Use a native API model (e.g. github-copilot/gpt-5-mini) for agents that need tools.`,
-                    type: "invalid_request_error",
-                    code: "tools_not_supported",
-                }
-            }));
-            return;
-        }
-        opts.log(`[cli-bridge] ${model} · ${messages.length} msg(s) · stream=${stream}${hasTools ? " · tools=unsupported→rejected" : ""}`);
+        // Extract multimodal content (images, audio) from messages → temp files
+        const { cleanMessages, mediaFiles } = extractMultimodalParts(messages);
+        opts.log(`[cli-bridge] ${model} · ${cleanMessages.length} msg(s) · stream=${stream}${hasTools ? ` · tools=${tools.length}` : ""}${mediaFiles.length ? ` · media=${mediaFiles.length}` : ""}`);
         const id = `chatcmpl-cli-${randomBytes(6).toString("hex")}`;
         const created = Math.floor(Date.now() / 1000);
         // ── Grok web-session routing ──────────────────────────────────────────────
@@ -499,11 +486,12 @@ async function handleRequest(req, res, opts) {
             return;
         }
         // ─────────────────────────────────────────────────────────────────────────
-        // ── CLI runner routing (Gemini / Claude Code) ─────────────────────────────
-        let content;
+        // ── CLI runner routing (Gemini / Claude Code / Codex) ──────────────────────
+        let result;
         let usedModel = model;
+        const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined };
         try {
-            content = await routeToCliRunner(model, messages, opts.timeoutMs ?? 120_000, { workdir });
+            result = await routeToCliRunner(model, cleanMessages, opts.timeoutMs ?? 120_000, routeOpts);
         }
         catch (err) {
             const msg = err.message;
@@ -512,7 +500,7 @@ async function handleRequest(req, res, opts) {
             if (fallbackModel) {
                 opts.warn(`[cli-bridge] ${model} failed (${msg}), falling back to ${fallbackModel}`);
                 try {
-                    content = await routeToCliRunner(fallbackModel, messages, opts.timeoutMs ?? 120_000, { workdir });
+                    result = await routeToCliRunner(fallbackModel, cleanMessages, opts.timeoutMs ?? 120_000, routeOpts);
                     usedModel = fallbackModel;
                     opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded`);
                 }
@@ -531,6 +519,12 @@ async function handleRequest(req, res, opts) {
                 return;
             }
         }
+        finally {
+            // Clean up temp media files after response
+            cleanupMediaFiles(mediaFiles);
+        }
+        const hasToolCalls = !!(result.tool_calls?.length);
+        const finishReason = hasToolCalls ? "tool_calls" : "stop";
         if (stream) {
             res.writeHead(200, {
                 "Content-Type": "text/event-stream",
@@ -538,25 +532,60 @@ async function handleRequest(req, res, opts) {
                 Connection: "keep-alive",
                 ...corsHeaders(),
             });
-            // Role chunk
-            sendSseChunk(res, { id, created, model: usedModel, delta: { role: "assistant" }, finish_reason: null });
-            // Content in chunks (~50 chars each for natural feel)
-            const chunkSize = 50;
-            for (let i = 0; i < content.length; i += chunkSize) {
+            if (hasToolCalls) {
+                // Stream tool_calls in OpenAI SSE format
+                const toolCalls = result.tool_calls;
+                // Role chunk with all tool_calls (name + empty arguments)
                 sendSseChunk(res, {
-                    id,
-                    created,
-                    model: usedModel,
-                    delta: { content: content.slice(i, i + chunkSize) },
+                    id, created, model: usedModel,
+                    delta: {
+                        role: "assistant",
+                        tool_calls: toolCalls.map((tc, idx) => ({
+                            index: idx, id: tc.id, type: "function",
+                            function: { name: tc.function.name, arguments: "" },
+                        })),
+                    },
                     finish_reason: null,
                 });
+                // Arguments chunks (one per tool call)
+                for (let idx = 0; idx < toolCalls.length; idx++) {
+                    sendSseChunk(res, {
+                        id, created, model: usedModel,
+                        delta: {
+                            tool_calls: [{ index: idx, function: { arguments: toolCalls[idx].function.arguments } }],
+                        },
+                        finish_reason: null,
+                    });
+                }
+                // Stop chunk
+                sendSseChunk(res, { id, created, model: usedModel, delta: {}, finish_reason: "tool_calls" });
             }
-            // Stop chunk
-            sendSseChunk(res, { id, created, model: usedModel, delta: {}, finish_reason: "stop" });
+            else {
+                // Standard text streaming
+                sendSseChunk(res, { id, created, model: usedModel, delta: { role: "assistant" }, finish_reason: null });
+                const content = result.content ?? "";
+                const chunkSize = 50;
+                for (let i = 0; i < content.length; i += chunkSize) {
+                    sendSseChunk(res, {
+                        id, created, model: usedModel,
+                        delta: { content: content.slice(i, i + chunkSize) },
+                        finish_reason: null,
+                    });
+                }
+                sendSseChunk(res, { id, created, model: usedModel, delta: {}, finish_reason: "stop" });
+            }
             res.write("data: [DONE]\n\n");
             res.end();
         }
         else {
+            const message = { role: "assistant" };
+            if (hasToolCalls) {
+                message.content = null;
+                message.tool_calls = result.tool_calls;
+            }
+            else {
+                message.content = result.content;
+            }
             const response = {
                 id,
                 object: "chat.completion",
@@ -565,8 +594,8 @@ async function handleRequest(req, res, opts) {
                 choices: [
                     {
                         index: 0,
-                        message: { role: "assistant", content },
-                        finish_reason: "stop",
+                        message,
+                        finish_reason: finishReason,
                     },
                 ],
                 usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
