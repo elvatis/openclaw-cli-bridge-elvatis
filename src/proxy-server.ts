@@ -19,6 +19,7 @@ import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrow
 import type { BrowserContext } from "playwright";
 import { renderStatusPage, type StatusProvider } from "./status-template.js";
 import { sessionManager } from "./session-manager.js";
+import { metrics } from "./metrics.js";
 
 export type GrokCompleteOptions = Parameters<typeof grokComplete>[1];
 export type GrokCompleteStreamOptions = Parameters<typeof grokCompleteStream>[1];
@@ -222,6 +223,7 @@ async function handleRequest(
         chatgpt: sessionStatus("chatgpt", opts.getChatGPTContext, expiry.chatgpt),
       },
       models: CLI_MODELS.length,
+      metrics: metrics.getMetrics(),
     };
     res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
     res.end(JSON.stringify(health, null, 2));
@@ -240,7 +242,7 @@ async function handleRequest(
       { name: "ChatGPT",  icon: "◉",  expiry: expiry.chatgpt, loginCmd: "/chatgpt-login", ctx: opts.getChatGPTContext?.() ?? null },
     ];
 
-    const html = renderStatusPage({ version, port: opts.port, providers, models: CLI_MODELS, modelCommands: opts.modelCommands });
+    const html = renderStatusPage({ version, port: opts.port, providers, models: CLI_MODELS, modelCommands: opts.modelCommands, metrics: metrics.getMetrics() });
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
     return;
@@ -331,6 +333,7 @@ async function handleRequest(
       const grokMessages = messages as GrokChatMessage[];
       const doGrokComplete = opts._grokComplete ?? grokComplete;
       const doGrokCompleteStream = opts._grokCompleteStream ?? grokCompleteStream;
+      const grokStart = Date.now();
       try {
         if (stream) {
           res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
@@ -341,11 +344,13 @@ async function handleRequest(
             (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }),
             opts.log
           );
+          metrics.recordRequest(model, Date.now() - grokStart, true, result.promptTokens, result.completionTokens);
           sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
           res.write("data: [DONE]\n\n");
           res.end();
         } else {
           const result = await doGrokComplete(grokCtx, { messages: grokMessages, model: grokModel, timeoutMs }, opts.log);
+          metrics.recordRequest(model, Date.now() - grokStart, true, result.promptTokens, result.completionTokens);
           res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
           res.end(JSON.stringify({
             id, object: "chat.completion", created, model,
@@ -354,6 +359,7 @@ async function handleRequest(
           }));
         }
       } catch (err) {
+        metrics.recordRequest(model, Date.now() - grokStart, false);
         const msg = (err as Error).message;
         opts.warn(`[cli-bridge] Grok error for ${model}: ${msg}`);
         if (!res.headersSent) {
@@ -380,6 +386,7 @@ async function handleRequest(
       const geminiMessages = messages as GeminiBrowserChatMessage[];
       const doGeminiComplete = opts._geminiComplete ?? geminiComplete;
       const doGeminiCompleteStream = opts._geminiCompleteStream ?? geminiCompleteStream;
+      const geminiStart = Date.now();
       try {
         if (stream) {
           res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
@@ -390,11 +397,13 @@ async function handleRequest(
             (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }),
             opts.log
           );
+          metrics.recordRequest(model, Date.now() - geminiStart, true);
           sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
           res.write("data: [DONE]\n\n");
           res.end();
         } else {
           const result = await doGeminiComplete(geminiCtx, { messages: geminiMessages, model, timeoutMs }, opts.log);
+          metrics.recordRequest(model, Date.now() - geminiStart, true);
           res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
           res.end(JSON.stringify({
             id, object: "chat.completion", created, model,
@@ -403,6 +412,7 @@ async function handleRequest(
           }));
         }
       } catch (err) {
+        metrics.recordRequest(model, Date.now() - geminiStart, false);
         const msg = (err as Error).message;
         opts.warn(`[cli-bridge] Gemini browser error for ${model}: ${msg}`);
         if (!res.headersSent) {
@@ -429,6 +439,7 @@ async function handleRequest(
       const claudeMessages = messages as ClaudeBrowserChatMessage[];
       const doClaudeComplete = opts._claudeComplete ?? claudeComplete;
       const doClaudeCompleteStream = opts._claudeCompleteStream ?? claudeCompleteStream;
+      const claudeStart = Date.now();
       try {
         if (stream) {
           res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
@@ -439,11 +450,13 @@ async function handleRequest(
             (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }),
             opts.log
           );
+          metrics.recordRequest(model, Date.now() - claudeStart, true);
           sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
           res.write("data: [DONE]\n\n");
           res.end();
         } else {
           const result = await doClaudeComplete(claudeCtx, { messages: claudeMessages, model, timeoutMs }, opts.log);
+          metrics.recordRequest(model, Date.now() - claudeStart, true);
           res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
           res.end(JSON.stringify({
             id, object: "chat.completion", created, model,
@@ -452,6 +465,7 @@ async function handleRequest(
           }));
         }
       } catch (err) {
+        metrics.recordRequest(model, Date.now() - claudeStart, false);
         const msg = (err as Error).message;
         opts.warn(`[cli-bridge] Claude browser error for ${model}: ${msg}`);
         if (!res.headersSent) {
@@ -479,6 +493,7 @@ async function handleRequest(
       const chatgptMessages = messages as ChatGPTBrowserChatMessage[];
       const doChatGPTComplete = opts._chatgptComplete ?? chatgptComplete;
       const doChatGPTCompleteStream = opts._chatgptCompleteStream ?? chatgptCompleteStream;
+      const chatgptStart = Date.now();
       try {
         if (stream) {
           res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
@@ -489,11 +504,13 @@ async function handleRequest(
             (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }),
             opts.log
           );
+          metrics.recordRequest(model, Date.now() - chatgptStart, true);
           sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
           res.write("data: [DONE]\n\n");
           res.end();
         } else {
           const result = await doChatGPTComplete(chatgptCtx, { messages: chatgptMessages, model: chatgptModel, timeoutMs }, opts.log);
+          metrics.recordRequest(model, Date.now() - chatgptStart, true);
           res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
           res.end(JSON.stringify({
             id, object: "chat.completion", created, model,
@@ -502,6 +519,7 @@ async function handleRequest(
           }));
         }
       } catch (err) {
+        metrics.recordRequest(model, Date.now() - chatgptStart, false);
         const msg = (err as Error).message;
         opts.warn(`[cli-bridge] ChatGPT browser error for ${model}: ${msg}`);
         if (!res.headersSent) {
@@ -546,6 +564,7 @@ async function handleRequest(
       const bitnetMessages = [{ role: "system", content: BITNET_SYSTEM }, ...truncated];
       const requestBody = JSON.stringify({ ...parsed, messages: bitnetMessages, tools: undefined });
 
+      const bitnetStart = Date.now();
       try {
         const targetUrl = new URL("/v1/chat/completions", bitnetUrl);
         const proxyRes = await new Promise<http.IncomingMessage>((resolve, reject) => {
@@ -566,6 +585,7 @@ async function handleRequest(
           proxyReq.end();
         });
 
+        metrics.recordRequest(model, Date.now() - bitnetStart, true);
         // Forward status + headers
         const fwdHeaders: Record<string, string> = { ...corsHeaders() };
         const ct = proxyRes.headers["content-type"];
@@ -577,6 +597,7 @@ async function handleRequest(
         res.writeHead(proxyRes.statusCode ?? 200, fwdHeaders);
         proxyRes.pipe(res);
       } catch (err) {
+        metrics.recordRequest(model, Date.now() - bitnetStart, false);
         const msg = (err as Error).message;
         if (msg.includes("ECONNREFUSED") || msg.includes("ECONNRESET") || msg.includes("ENOTFOUND")) {
           res.writeHead(503, { "Content-Type": "application/json", ...corsHeaders() });
@@ -625,19 +646,26 @@ async function handleRequest(
       keepaliveInterval = setInterval(() => { res.write(": keepalive\n\n"); }, 15_000);
     }
 
+    const cliStart = Date.now();
     try {
       result = await routeToCliRunner(model, cleanMessages, effectiveTimeout, routeOpts);
+      metrics.recordRequest(model, Date.now() - cliStart, true);
     } catch (err) {
+      const primaryDuration = Date.now() - cliStart;
       const msg = (err as Error).message;
       // ── Model fallback: retry once with a lighter model if configured ────
       const fallbackModel = opts.modelFallbacks?.[model];
       if (fallbackModel) {
+        metrics.recordRequest(model, primaryDuration, false);
         opts.warn(`[cli-bridge] ${model} failed (${msg}), falling back to ${fallbackModel}`);
+        const fallbackStart = Date.now();
         try {
           result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
+          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true);
           usedModel = fallbackModel;
           opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded`);
         } catch (fallbackErr) {
+          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, false);
           const fallbackMsg = (fallbackErr as Error).message;
           opts.warn(`[cli-bridge] fallback ${fallbackModel} also failed: ${fallbackMsg}`);
           if (sseHeadersSent) {
@@ -651,6 +679,7 @@ async function handleRequest(
           return;
         }
       } else {
+        metrics.recordRequest(model, primaryDuration, false);
         opts.warn(`[cli-bridge] CLI error for ${model}: ${msg}`);
         if (sseHeadersSent) {
           res.write(`data: ${JSON.stringify({ error: { message: msg, type: "cli_error" } })}\n\n`);
