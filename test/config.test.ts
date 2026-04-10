@@ -38,7 +38,7 @@ describe("config.ts exports", () => {
     expect(DEFAULT_PROXY_TIMEOUT_MS).toBe(300_000);
     expect(DEFAULT_CLI_TIMEOUT_MS).toBe(120_000);
     expect(TIMEOUT_GRACE_MS).toBe(5_000);
-    expect(MAX_EFFECTIVE_TIMEOUT_MS).toBe(600_000);
+    expect(MAX_EFFECTIVE_TIMEOUT_MS).toBe(900_000);
     expect(SESSION_TTL_MS).toBe(30 * 60 * 1000);
     expect(CLEANUP_INTERVAL_MS).toBe(5 * 60 * 1000);
     expect(SESSION_KILL_GRACE_MS).toBe(5_000);
@@ -47,7 +47,7 @@ describe("config.ts exports", () => {
 
   it("exports dynamic timeout scaling factors", () => {
     expect(TIMEOUT_PER_EXTRA_MSG_MS).toBe(2_000);
-    expect(TIMEOUT_PER_TOOL_MS).toBe(5_000);
+    expect(TIMEOUT_PER_TOOL_MS).toBe(7_000);
   });
 
   it("exports message limits", () => {
@@ -64,8 +64,8 @@ describe("config.ts exports", () => {
     expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-opus-4-6"]).toBe(300_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-sonnet-4-6"]).toBe(180_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-haiku-4-5"]).toBe(90_000);
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-pro"]).toBe(180_000);
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-flash"]).toBe(90_000);
+    expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-pro"]).toBe(300_000);
+    expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-flash"]).toBe(180_000);
     expect(DEFAULT_MODEL_TIMEOUTS["openai-codex/gpt-5.4"]).toBe(300_000);
   });
 

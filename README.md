@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.7.2`
+**Current version:** `2.7.3`
 
 ---
 
@@ -405,6 +405,11 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.7.3
+- **fix:** Gemini image generation timeouts — Gemini Pro models bumped from 180s → 300s base timeout, Flash models from 90s → 180s. Image generation needs significantly more time than text completion.
+- **tune:** Per-tool timeout bonus increased from 5s → 7s per tool definition (21 tools = 147s instead of 105s)
+- **tune:** Max effective timeout cap raised from 600s (10 min) → 900s (15 min) to accommodate long-running image generation with many tools
 
 ### v2.7.2
 - **fix:** Self-heal plugin `modelOrder` still referenced `openai-codex/gpt-5.1` (not in bridge allowlist), causing failover errors. Updated to `vllm/openai-codex/gpt-5.2-codex`.
