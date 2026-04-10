@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.7.1`
+**Current version:** `2.7.2`
 
 ---
 
@@ -405,6 +405,9 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.7.2
+- **fix:** Self-heal plugin `modelOrder` still referenced `openai-codex/gpt-5.1` (not in bridge allowlist), causing failover errors. Updated to `vllm/openai-codex/gpt-5.2-codex`.
 
 ### v2.7.1
 - **fix:** Fallback model `openai-codex/gpt-5.1` → `openai-codex/gpt-5.2-codex` — the bare `gpt-5.1` model ID doesn't exist in the CLI bridge allowlist, causing fallback failures with "model not allowed" errors
