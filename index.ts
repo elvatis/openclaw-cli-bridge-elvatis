@@ -1406,6 +1406,27 @@ const plugin = {
           api.logger.info(
             `[cli-bridge] proxy ready on :${port} — vllm/cli-gemini/* and vllm/cli-claude/* available`
           );
+
+          // Warn if OpenClaw's LLM idle timeout is too low for CLI models.
+          // CLI subprocesses (especially with large prompts) need time before producing
+          // the first token. The default 60s causes premature 408 timeouts.
+          const llmIdleTimeout = (api.pluginConfig as Record<string, unknown>)?._resolvedAgentDefaults?.llm?.idleTimeoutSeconds;
+          if (llmIdleTimeout === undefined) {
+            // Can't read the resolved config — check the raw file instead
+            try {
+              const ocConfig = JSON.parse(readFileSync(join(OPENCLAW_DIR, "openclaw.json"), "utf-8")) as Record<string, unknown>;
+              const agentDefaults = (ocConfig?.agents as Record<string, unknown>)?.defaults as Record<string, unknown> | undefined;
+              const llm = agentDefaults?.llm as Record<string, unknown> | undefined;
+              const idle = llm?.idleTimeoutSeconds as number | undefined;
+              if (idle === undefined || (idle > 0 && idle < 120)) {
+                api.logger.warn(
+                  `[cli-bridge] ⚠️  agents.defaults.llm.idleTimeoutSeconds is ${idle ?? "not set (default 60s)"} — ` +
+                  `CLI models need at least 120–300s. Set to 300 in openclaw.json to prevent premature 408 timeouts.`
+                );
+              }
+            } catch { /* non-fatal — just skip the check */ }
+          }
+
           const result = patchOpencllawConfig(port);
           if (result.patched) {
             api.logger.info(

@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.6.0`
+**Current version:** `2.6.1`
 
 ---
 
@@ -296,6 +296,26 @@ In `~/.openclaw/openclaw.json` → `plugins.entries.openclaw-cli-bridge-elvatis.
 }
 ```
 
+### Required: OpenClaw LLM idle timeout
+
+**Important:** OpenClaw's embedded agent has a default **LLM idle timeout of 60 seconds**. CLI subprocesses (especially Claude/Gemini with large prompts) often need longer than 60s before producing the first token. Without this setting, you'll see `exit 143` / `status:408` / `FailoverError: LLM request timed out.`
+
+Add to `~/.openclaw/openclaw.json`:
+
+```json5
+{
+  "agents": {
+    "defaults": {
+      "llm": {
+        "idleTimeoutSeconds": 300  // 5 min — must be >= longest per-model timeout
+      }
+    }
+  }
+}
+```
+
+> **Note:** Cron-triggered agents automatically have `idleTimeoutSeconds: 0` (disabled) in OpenClaw, so crons are not affected.
+
 ---
 
 ## Model Allowlist
@@ -385,6 +405,11 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.6.1
+- **fix:** Root cause of Exit 143 / 408 timeouts identified — OpenClaw's `agents.defaults.llm.idleTimeoutSeconds` defaults to 60s, which is too short for CLI subprocesses that need time before producing the first token
+- **feat:** Startup warning when `idleTimeoutSeconds` is not set or < 120s — tells you exactly what to add to `openclaw.json`
+- **docs:** Added "Required: OpenClaw LLM idle timeout" section to README with recommended config
 
 ### v2.6.0
 - **feat:** Provider session registry (`src/provider-sessions.ts`) — persistent sessions that survive across runs. When a CLI run times out, the session is preserved (not deleted) so follow-up runs can resume in the same context. Sessions are stored in `~/.openclaw/cli-bridge/sessions.json`.
