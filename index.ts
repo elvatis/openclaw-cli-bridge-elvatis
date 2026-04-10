@@ -98,6 +98,7 @@ interface CliPluginConfig {
   proxyPort?: number;
   proxyApiKey?: string;
   proxyTimeoutMs?: number;
+  modelTimeouts?: Record<string, number>;
   grokSessionPath?: string;
 }
 
@@ -987,7 +988,22 @@ const plugin = {
     const enableProxy = cfg.enableProxy ?? true;
     const port = cfg.proxyPort ?? DEFAULT_PROXY_PORT;
     const apiKey = cfg.proxyApiKey ?? DEFAULT_PROXY_API_KEY;
-    const timeoutMs = cfg.proxyTimeoutMs ?? 120_000;
+    const timeoutMs = cfg.proxyTimeoutMs ?? 300_000;
+    // Per-model timeout overrides — fall back to sensible defaults if not configured.
+    // Interactive/fast models get shorter timeouts, heavy models get more time.
+    const defaultModelTimeouts: Record<string, number> = {
+      "cli-claude/claude-opus-4-6":       300_000,  // 5 min — heavy, agentic tasks
+      "cli-claude/claude-sonnet-4-6":     180_000,  // 3 min — standard interactive chat
+      "cli-claude/claude-haiku-4-5":       90_000,  // 90s  — fast responses
+      "cli-gemini/gemini-2.5-pro":        180_000,
+      "cli-gemini/gemini-2.5-flash":       90_000,
+      "cli-gemini/gemini-3-pro-preview":  180_000,
+      "cli-gemini/gemini-3-flash-preview": 90_000,
+      "openai-codex/gpt-5.4":            300_000,
+      "openai-codex/gpt-5.3-codex":      180_000,
+      "openai-codex/gpt-5.1-codex-mini":  90_000,
+    };
+    const modelTimeouts = { ...defaultModelTimeouts, ...cfg.modelTimeouts };
     const codexAuthPath = cfg.codexAuthPath ?? DEFAULT_CODEX_AUTH_PATH;
     const grokSessionPath = cfg.grokSessionPath ?? DEFAULT_SESSION_PATH;
 
@@ -1379,6 +1395,7 @@ const plugin = {
             version: plugin.version,
             modelCommands,
             modelFallbacks,
+            modelTimeouts,
             getExpiryInfo: () => ({
               grok:    (() => { const e = loadGrokExpiry();    return e ? formatExpiryInfo(e)    : null; })(),
               gemini:  (() => { const e = loadGeminiExpiry();  return e ? formatGeminiExpiry(e)  : null; })(),
@@ -1415,7 +1432,7 @@ const plugin = {
             // One final attempt
             try {
               const server = await startProxyServer({
-                port, apiKey, timeoutMs, modelCommands, modelFallbacks,
+                port, apiKey, timeoutMs, modelCommands, modelFallbacks, modelTimeouts,
                 log: (msg) => api.logger.info(msg),
                 warn: (msg) => api.logger.warn(msg),
                 getGrokContext: () => grokContext,

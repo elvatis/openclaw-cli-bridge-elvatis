@@ -265,3 +265,75 @@ describe("Codex auto-git-init via routeToCliRunner", () => {
     expect(mockExecSync).toHaveBeenCalledWith("git init", expect.objectContaining({ cwd: "/no-git-dir" }));
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Timeout handling: graceful SIGTERM → SIGKILL and exit 143 annotation
+// ──────────────────────────────────────────────────────────────────────────────
+
+import { runCli, annotateExitError } from "../src/cli-runner.js";
+
+describe("runCli() timeout handling", () => {
+  it("does NOT pass timeout to spawn options (manual timer instead)", async () => {
+    mockSpawn.mockImplementation(() => makeFakeProc("ok", 0));
+    await runCli("echo", [], "hello", 60_000);
+    const spawnOpts = mockSpawn.mock.calls[0][2];
+    expect(spawnOpts.timeout).toBeUndefined();
+  });
+
+  it("sends SIGTERM after timeout fires", async () => {
+    vi.useFakeTimers();
+    const proc = new EventEmitter() as any;
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    proc.stdin = { write: vi.fn((_d: string, _e: string, cb?: () => void) => { cb?.(); }), end: vi.fn() };
+    proc.kill = vi.fn(() => { proc.emit("close", 143); });
+    proc.killed = false;
+    mockSpawn.mockImplementation(() => proc);
+
+    const logMessages: string[] = [];
+    const promise = runCli("claude", [], "prompt", 100, { log: (m) => logMessages.push(m) });
+
+    // Advance past the timeout
+    vi.advanceTimersByTime(101);
+
+    const result = await promise;
+    expect(proc.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(result.timedOut).toBe(true);
+    expect(result.exitCode).toBe(143);
+    expect(logMessages.some(m => m.includes("timeout") && m.includes("SIGTERM"))).toBe(true);
+    vi.useRealTimers();
+  });
+
+  it("sets timedOut=false for normal exits", async () => {
+    mockSpawn.mockImplementation(() => makeFakeProc("output", 0));
+    const result = await runCli("echo", [], "hello", 60_000);
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).toBe(0);
+  });
+});
+
+describe("annotateExitError()", () => {
+  it("annotates exit 143 as timeout", () => {
+    const msg = annotateExitError(143, "(no output)", false, "cli-claude/claude-sonnet-4-6");
+    expect(msg).toContain("timeout");
+    expect(msg).toContain("supervisor");
+    expect(msg).toContain("cli-claude/claude-sonnet-4-6");
+  });
+
+  it("annotates when timedOut is true regardless of exit code", () => {
+    const msg = annotateExitError(1, "some error", true, "cli-claude/claude-sonnet-4-6");
+    expect(msg).toContain("timeout");
+    expect(msg).toContain("supervisor");
+  });
+
+  it("returns plain error when not a timeout", () => {
+    const msg = annotateExitError(1, "auth error", false, "cli-claude/claude-sonnet-4-6");
+    expect(msg).toBe("auth error");
+    expect(msg).not.toContain("timeout");
+  });
+
+  it("returns (no output) placeholder when stderr is empty and not a timeout", () => {
+    const msg = annotateExitError(1, "", false, "cli-claude/claude-sonnet-4-6");
+    expect(msg).toBe("(no output)");
+  });
+});

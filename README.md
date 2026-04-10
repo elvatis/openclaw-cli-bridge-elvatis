@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.3.0`
+**Current version:** `2.5.0`
 
 ---
 
@@ -282,7 +282,17 @@ In `~/.openclaw/openclaw.json` → `plugins.entries.openclaw-cli-bridge-elvatis.
   "enableProxy": true,         // start local CLI proxy server (default: true)
   "proxyPort": 31337,          // proxy port (default: 31337)
   "proxyApiKey": "cli-bridge", // key between OpenClaw vllm provider and proxy (default: "cli-bridge")
-  "proxyTimeoutMs": 120000     // CLI subprocess timeout in ms (default: 120s)
+  "proxyTimeoutMs": 300000,    // base CLI subprocess timeout in ms (default: 300s, scales dynamically)
+  "modelTimeouts": {           // per-model timeout overrides in ms (optional)
+    "cli-claude/claude-opus-4-6":       300000,   // 5 min — heavy/agentic tasks
+    "cli-claude/claude-sonnet-4-6":     180000,   // 3 min — interactive chat
+    "cli-claude/claude-haiku-4-5":       90000,   // 90s  — fast responses
+    "cli-gemini/gemini-2.5-pro":        180000,
+    "cli-gemini/gemini-2.5-flash":       90000,
+    "openai-codex/gpt-5.4":            300000,
+    "openai-codex/gpt-5.3-codex":      180000,
+    "openai-codex/gpt-5.1-codex-mini":  90000
+  }
 }
 ```
 
@@ -368,13 +378,24 @@ Model fallback (v1.9.0):
 ```bash
 npm run lint        # eslint (TypeScript-aware)
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (121 tests)
+npm test            # vitest run (217 tests)
 npm run ci          # lint + typecheck + test
 ```
 
 ---
 
 ## Changelog
+
+### v2.5.0
+- **feat:** Graceful timeout handling — replaces Node's `spawn({ timeout })` with manual SIGTERM→SIGKILL sequence (5s grace period). Exit 143 is now clearly annotated as "timeout by supervisor" in logs, not a cryptic model error.
+- **feat:** Per-model timeout profiles — new `modelTimeouts` config option sets sensible defaults per model: Opus 5 min, Sonnet 3 min, Haiku 90s, Flash models 90s. Scales dynamically with conversation size (+2s/msg beyond 10, +5s/tool).
+- **feat:** Timeout logging — every timeout event logs model, elapsed time, SIGTERM/SIGKILL steps. Fallback messages now show "timeout by supervisor" instead of raw exit codes.
+- **fix:** Base timeout raised from 120s to 300s (was causing frequent Exit 143 on normal Sonnet conversations)
+- **fix:** Session manager `kill()`, `cleanup()`, and `stop()` now use graceful SIGTERM→SIGKILL instead of immediate SIGTERM
+- **test:** 7 new tests for timeout handling and exit code annotation (217 total)
+
+### v2.4.0
+- **feat:** Metrics & health dashboard — request volume, latency, errors, token usage
 
 ### v2.3.0
 - **feat:** OpenAI tool calling protocol support for all CLI models — tool definitions are injected into the prompt, structured `tool_calls` responses are parsed and returned in OpenAI format

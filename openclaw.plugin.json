@@ -2,7 +2,7 @@
   "id": "openclaw-cli-bridge-elvatis",
   "slug": "openclaw-cli-bridge-elvatis",
   "name": "OpenClaw CLI Bridge",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "license": "MIT",
   "description": "Phase 1: openai-codex auth bridge. Phase 2: local HTTP proxy routing model calls through gemini/claude CLIs (vllm provider).",
   "providers": [
@@ -34,7 +34,26 @@
       },
       "proxyTimeoutMs": {
         "type": "number",
-        "description": "Max time to wait for a CLI response in ms (default: 120000)"
+        "description": "Base timeout for CLI responses in ms (default: 300000). Scales dynamically with conversation size."
+      },
+      "modelTimeouts": {
+        "type": "object",
+        "description": "Per-model timeout overrides in ms. Keys are model IDs (e.g. 'cli-claude/claude-sonnet-4-6'). Use this to give heavy models more time or limit fast models. When not set, falls back to proxyTimeoutMs.",
+        "additionalProperties": {
+          "type": "number"
+        },
+        "default": {
+          "cli-claude/claude-opus-4-6": 300000,
+          "cli-claude/claude-sonnet-4-6": 180000,
+          "cli-claude/claude-haiku-4-5": 90000,
+          "cli-gemini/gemini-2.5-pro": 180000,
+          "cli-gemini/gemini-2.5-flash": 90000,
+          "cli-gemini/gemini-3-pro-preview": 180000,
+          "cli-gemini/gemini-3-flash-preview": 90000,
+          "openai-codex/gpt-5.4": 300000,
+          "openai-codex/gpt-5.3-codex": 180000,
+          "openai-codex/gpt-5.1-codex-mini": 90000
+        }
       }
     }
   }

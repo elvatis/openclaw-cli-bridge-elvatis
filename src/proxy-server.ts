@@ -82,6 +82,20 @@ export interface ProxyServerOptions {
    * with the fallback model. Example: "cli-gemini/gemini-2.5-pro" → "cli-gemini/gemini-2.5-flash"
    */
   modelFallbacks?: Record<string, string>;
+  /**
+   * Per-model timeout overrides (ms). Keys are model IDs (without "vllm/" prefix).
+   * Use this to give heavy models more time or limit fast models.
+   *
+   * Example:
+   *   {
+   *     "cli-claude/claude-sonnet-4-6": 180_000,   // 3 min for interactive chat
+   *     "cli-claude/claude-opus-4-6":   300_000,    // 5 min for heavy tasks
+   *     "cli-claude/claude-haiku-4-5":  90_000,     // 90s for fast responses
+   *   }
+   *
+   * When not set for a model, falls back to proxyTimeoutMs (default 300s base).
+   */
+  modelTimeouts?: Record<string, number>;
 }
 
 /** Available CLI bridge models for GET /v1/models */
@@ -623,13 +637,16 @@ async function handleRequest(
     // ── CLI runner routing (Gemini / Claude Code / Codex) ──────────────────────
     let result: CliToolResult;
     let usedModel = model;
-    const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined };
+    const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined, log: opts.log };
 
     // ── Dynamic timeout: scale with conversation size ────────────────────────
-    const baseTimeout = opts.timeoutMs ?? 300_000; // 5 min default (was 120s)
+    // Per-model timeout takes precedence, then global proxyTimeoutMs, then 300s default.
+    const perModelTimeout = opts.modelTimeouts?.[model];
+    const baseTimeout = perModelTimeout ?? opts.timeoutMs ?? 300_000;
     const msgExtra = Math.max(0, cleanMessages.length - 10) * 2_000;
     const toolExtra = (tools?.length ?? 0) * 5_000;
     const effectiveTimeout = Math.min(baseTimeout + msgExtra + toolExtra, 600_000);
+    opts.log(`[cli-bridge] ${model} timeout: ${Math.round(effectiveTimeout / 1000)}s (base=${Math.round(baseTimeout / 1000)}s${perModelTimeout ? " per-model" : ""}, +${Math.round(msgExtra / 1000)}s msgs, +${Math.round(toolExtra / 1000)}s tools)`);
 
     // ── SSE keepalive: send headers early so OpenClaw doesn't read-timeout ──
     let sseHeadersSent = false;
@@ -654,10 +671,12 @@ async function handleRequest(
       const primaryDuration = Date.now() - cliStart;
       const msg = (err as Error).message;
       // ── Model fallback: retry once with a lighter model if configured ────
+      const isTimeout = msg.includes("timeout:") || msg.includes("exit 143") || msg.includes("exited 143");
       const fallbackModel = opts.modelFallbacks?.[model];
       if (fallbackModel) {
         metrics.recordRequest(model, primaryDuration, false);
-        opts.warn(`[cli-bridge] ${model} failed (${msg}), falling back to ${fallbackModel}`);
+        const reason = isTimeout ? "timeout by supervisor" : msg;
+        opts.warn(`[cli-bridge] ${model} failed (${reason}), falling back to ${fallbackModel}`);
         const fallbackStart = Date.now();
         try {
           result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
