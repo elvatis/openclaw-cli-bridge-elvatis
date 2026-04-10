@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.8.0`
+**Current version:** `2.8.1`
 
 ---
 
@@ -405,6 +405,9 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.8.1
+- **fix:** increase Sonnet-4-6 base timeout from 180s to 300s to prevent premature SIGTERM kills causing FailoverError fallback to gpt-5.2-codex
 
 ### v2.8.0
 - **feat:** Gemini API provider (`gemini-api/gemini-2.5-flash`, `gemini-api/gemini-2.5-pro`) — direct Google Generative AI SDK integration with native **image generation** support via `responseModalities: ["TEXT", "IMAGE"]`. No CLI subprocess overhead, no browser needed.

@@ -62,7 +62,7 @@ describe("config.ts exports", () => {
 
   it("exports per-model timeouts for all major models", () => {
     expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-opus-4-6"]).toBe(300_000);
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-sonnet-4-6"]).toBe(180_000);
+    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-sonnet-4-6"]).toBe(300_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-haiku-4-5"]).toBe(90_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-pro"]).toBe(300_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-flash"]).toBe(180_000);
