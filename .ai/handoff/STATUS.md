@@ -1,9 +1,9 @@
 # STATUS — openclaw-cli-bridge-elvatis
 
-## Current Version: 2.2.0
+## Current Version: 2.2.1
 
-- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis@2.2.0 (pending publish)
-- **ClawHub:** openclaw-cli-bridge-elvatis@2.2.0 (pending publish)
+- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis@2.2.1 (pending publish)
+- **ClawHub:** openclaw-cli-bridge-elvatis@2.2.1 (pending publish)
 - **GitHub:** https://github.com/elvatis/openclaw-cli-bridge-elvatis (pushed to main)
 
 ## CLI Model Token Limits (corrected in v1.9.2)
@@ -47,6 +47,7 @@ This is by design — CLI tools output plain text only.
 - /bridge-status shows cookie-based status
 
 ## Release History (recent)
+- v2.2.1 (2026-04-10): Fix vllm apiKey corruption (401 Unauthorized) + harden config-patcher to re-patch on wrong apiKey
 - v2.2.0 (2026-04-09): Fix log spam (module-level guards), remove fuser -k restart loops, session restore gateway-only, EADDRINUSE graceful handling
 - v2.1.0 (2026-03-19): Issue #6 workdir isolation, Issue #4 session mgmt enhancements, Issue #2 codex auth auto-import
 - v2.0.0: Major version bump

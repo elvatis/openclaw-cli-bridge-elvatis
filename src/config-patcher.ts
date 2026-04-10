@@ -52,7 +52,10 @@ export function patchOpencllawConfig(port: number): PatchResult {
     !!allowedModels["vllm/cli-gemini/gemini-2.5-pro"] ||
     !!allowedModels["vllm/cli-claude/claude-sonnet-4-6"];
 
-  if (hasBridgeProviderModels && hasBridgeAllowlist) {
+  const existingApiKey = (cfg as any)?.models?.providers?.vllm?.apiKey;
+  const hasCorrectApiKey = existingApiKey === CLI_BRIDGE_API_KEY;
+
+  if (hasBridgeProviderModels && hasBridgeAllowlist && hasCorrectApiKey) {
     return { patched: false, reason: "vllm provider + agent allowlist already include cli-bridge models." };
   }
 

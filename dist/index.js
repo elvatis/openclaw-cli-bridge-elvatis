@@ -176,18 +176,12 @@ let _cdpBrowserLaunchPromise = null;
 // Startup restore guard — module-level so it survives hot-reloads (SIGUSR1).
 // Set to true after first run; hot-reloads see true and skip the restore loop.
 let _startupRestoreDone = false;
-// Registration guard — register() is called once per agent (~11 times on a
-// typical gateway). Only log noisy one-time info (Chrome check, provider
-// registration, command list, proxy status) on the FIRST call.
-let _registerLoggedOnce = false;
-// Proxy start guard — prevents multiple concurrent startProxy() calls from
-// racing. The first call wins; subsequent calls detect the running proxy via
-// probeExisting() and reuse it silently.
+// ── Proxy guards ─────────────────────────────────────────────────────────────
+// register() is called per-agent (~11×) AND on every hot-reload (~60s).
+// All noisy info logs removed. Only warnings/errors remain. These simple
+// module-level booleans are sufficient — probeExisting() handles the real
+// deduplication for the proxy.
 let _proxyStarted = false;
-// Tracks whether THIS process owns the proxy (freshly started it, not just reusing
-// an external one). Used to decide if heavyweight startup tasks (session restores,
-// keep-alive intervals) should run. Short-lived CLI commands (models status, doctor)
-// reuse the gateway's proxy but should NOT launch Chromium instances.
 let _proxyOwnedByThisProcess = false;
 // Session keep-alive interval — refreshes browser cookies every 20h
 let _keepAliveInterval = null;
@@ -922,15 +916,11 @@ const plugin = {
         // Stealth mode uses channel: "chrome" (real system Chrome). If it's missing,
         // browser launches will fail or Cloudflare will block the bundled Chromium.
         const chromeCheck = checkSystemChrome();
-        if (!_registerLoggedOnce) {
-            if (chromeCheck.available) {
-                api.logger.info(`[cli-bridge] system Chrome found: ${chromeCheck.version ?? chromeCheck.path}`);
-            }
-            else {
-                api.logger.warn(`[cli-bridge] ⚠ system Chrome not found! Web browser providers (/grok-login, /gemini-login, etc.) ` +
-                    `require Google Chrome or Chromium installed system-wide. ` +
-                    `Install with: sudo apt install google-chrome-stable (or chromium-browser)`);
-            }
+        // Chrome warning only — success is silent (logged hundreds of times per minute otherwise)
+        if (!chromeCheck.available) {
+            api.logger.warn(`[cli-bridge] ⚠ system Chrome not found! Web browser providers (/grok-login, /gemini-login, etc.) ` +
+                `require Google Chrome or Chromium installed system-wide. ` +
+                `Install with: sudo apt install google-chrome-stable (or chromium-browser)`);
         }
         // ── Session restore: only on first plugin load (not on hot-reloads) ──────
         // The gateway polls every ~60s via openclaw status, which triggers a hot-reload
@@ -1157,27 +1147,23 @@ const plugin = {
                     }
                 },
             });
-            if (!_registerLoggedOnce) {
-                api.logger.info("[cli-bridge] openai-codex provider registered");
-            }
+            // Provider registration is silent — logged hundreds of times otherwise
             // Auto-import Codex CLI credentials into the agent auth store (Issue #2).
             // This ensures `openai-codex/*` models work immediately without manual
             // `openclaw models auth login`. Runs async, non-blocking.
-            // Only run Codex auth import once — it fires per-agent and spams logs otherwise
-            if (!_registerLoggedOnce) {
-                void importCodexAuth({
-                    codexAuthPath,
-                    log: (msg) => api.logger.info(`[cli-bridge:codex-import] ${msg}`),
-                }).then((result) => {
-                    if (result.imported) {
-                        api.logger.info("[cli-bridge] Codex auth auto-imported into agent auth store ✅");
-                    }
-                    else if (result.error) {
-                        api.logger.warn(`[cli-bridge] Codex auth import failed: ${result.error}`);
-                    }
-                    // skipped = already current → no log needed
-                });
-            }
+            // Codex auth import: silent log callback (suppress "already up-to-date" spam)
+            // Only log on actual import or error — not on skip/already-current.
+            void importCodexAuth({
+                codexAuthPath,
+                log: () => { }, // silent — internal "already up-to-date" spam suppressed
+            }).then((result) => {
+                if (result.imported) {
+                    api.logger.info("[cli-bridge] Codex auth auto-imported into agent auth store ✅");
+                }
+                else if (result.error) {
+                    api.logger.warn(`[cli-bridge] Codex auth import failed: ${result.error}`);
+                }
+            });
         }
         // ── Phase 2: CLI request proxy ─────────────────────────────────────────────
         let proxyServer = null;
@@ -1198,14 +1184,14 @@ const plugin = {
             };
             const startProxy = async () => {
                 // Guard: only the first register() call starts the proxy.
-                // Subsequent per-agent calls skip entirely.
+                // Subsequent per-agent calls AND hot-reloads skip entirely.
                 if (_proxyStarted)
                     return;
                 _proxyStarted = true;
                 // If a healthy proxy is already up, reuse it — no need to rebind.
                 const alive = await probeExisting();
                 if (alive) {
-                    api.logger.info(`[cli-bridge] proxy already running on :${port} — reusing`);
+                    // Silent — this fires on every hot-reload (~60s) and every register() call
                     return;
                 }
                 try {
@@ -2320,10 +2306,7 @@ const plugin = {
             "/bridge-status",
             "/cli-help",
         ];
-        if (!_registerLoggedOnce) {
-            api.logger.info(`[cli-bridge] registered ${allCommands.length} commands (use /cli-list to see all)`);
-        }
-        _registerLoggedOnce = true;
+        // Command registration is silent — fires on every register() call
     },
 };
 export default plugin;
