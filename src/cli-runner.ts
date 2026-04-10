@@ -278,6 +278,8 @@ export interface CliRunResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  /** True when the process was killed due to a timeout (exit 143 = SIGTERM). */
+  timedOut: boolean;
 }
 
 export interface RunCliOptions {
@@ -287,10 +289,24 @@ export interface RunCliOptions {
    */
   cwd?: string;
   timeoutMs?: number;
+  /** Optional logger for timeout events. */
+  log?: (msg: string) => void;
 }
 
 /**
+ * Grace period between SIGTERM and SIGKILL when a timeout fires.
+ * Gives the CLI process 5 seconds to flush output and exit cleanly.
+ */
+const TIMEOUT_GRACE_MS = 5_000;
+
+/**
  * Spawn a CLI and deliver the prompt via stdin.
+ *
+ * Timeout handling (replaces Node's spawn({ timeout }) for better control):
+ *   1. After `timeoutMs`, send SIGTERM and log a clear message.
+ *   2. If the process doesn't exit within TIMEOUT_GRACE_MS (5s), send SIGKILL.
+ *   3. The result's `timedOut` flag is set so callers can distinguish
+ *      supervisor timeouts from real CLI errors.
  *
  * cwd defaults to homedir() so CLIs that scan the working directory for
  * project context (like Gemini) don't accidentally enter agentic mode.
@@ -303,16 +319,40 @@ export function runCli(
   opts: RunCliOptions = {}
 ): Promise<CliRunResult> {
   const cwd = opts.cwd ?? homedir();
+  const log = opts.log ?? (() => {});
 
   return new Promise((resolve, reject) => {
+    // Do NOT pass timeout to spawn() — we manage it ourselves for graceful shutdown.
     const proc = spawn(cmd, args, {
-      timeout: timeoutMs,
       env: buildMinimalEnv(),
       cwd,
     });
 
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearTimers = () => {
+      if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+      if (killTimer) { clearTimeout(killTimer); killTimer = null; }
+    };
+
+    // ── Timeout sequence: SIGTERM → grace → SIGKILL ──────────────────────
+    timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      const elapsed = Math.round(timeoutMs / 1000);
+      log(`[cli-bridge] timeout after ${elapsed}s for ${cmd}, sending SIGTERM`);
+      proc.kill("SIGTERM");
+
+      killTimer = setTimeout(() => {
+        if (!proc.killed) {
+          log(`[cli-bridge] ${cmd} still running after ${TIMEOUT_GRACE_MS / 1000}s grace, sending SIGKILL`);
+          proc.kill("SIGKILL");
+        }
+      }, TIMEOUT_GRACE_MS);
+    }, timeoutMs);
 
     proc.stdin.write(prompt, "utf8", () => {
       proc.stdin.end();
@@ -322,10 +362,12 @@ export function runCli(
     proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
 
     proc.on("close", (code) => {
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
+      clearTimers();
+      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0, timedOut });
     });
 
     proc.on("error", (err) => {
+      clearTimers();
       reject(new Error(`Failed to spawn '${cmd}': ${err.message}`));
     });
   });
@@ -334,6 +376,7 @@ export function runCli(
 /**
  * Spawn a CLI with the prompt delivered as a CLI argument (not stdin).
  * Used by OpenCode which expects `opencode run "prompt"`.
+ * Uses the same graceful SIGTERM→SIGKILL timeout sequence as runCli.
  */
 export function runCliWithArg(
   cmd: string,
@@ -342,28 +385,64 @@ export function runCliWithArg(
   opts: RunCliOptions = {}
 ): Promise<CliRunResult> {
   const cwd = opts.cwd ?? homedir();
+  const log = opts.log ?? (() => {});
 
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, args, {
-      timeout: timeoutMs,
       env: buildMinimalEnv(),
       cwd,
     });
 
     let stdout = "";
     let stderr = "";
+    let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearTimers = () => {
+      if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
+      if (killTimer) { clearTimeout(killTimer); killTimer = null; }
+    };
+
+    timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      const elapsed = Math.round(timeoutMs / 1000);
+      log(`[cli-bridge] timeout after ${elapsed}s for ${cmd}, sending SIGTERM`);
+      proc.kill("SIGTERM");
+
+      killTimer = setTimeout(() => {
+        if (!proc.killed) {
+          log(`[cli-bridge] ${cmd} still running after ${TIMEOUT_GRACE_MS / 1000}s grace, sending SIGKILL`);
+          proc.kill("SIGKILL");
+        }
+      }, TIMEOUT_GRACE_MS);
+    }, timeoutMs);
 
     proc.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
     proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
 
     proc.on("close", (code) => {
-      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0 });
+      clearTimers();
+      resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0, timedOut });
     });
 
     proc.on("error", (err) => {
+      clearTimers();
       reject(new Error(`Failed to spawn '${cmd}': ${err.message}`));
     });
   });
+}
+
+/**
+ * Annotate an error message when exit code 143 (SIGTERM) is detected.
+ * Makes it clear in logs that this was a supervisor timeout, not a model error.
+ */
+export function annotateExitError(exitCode: number, stderr: string, timedOut: boolean, model: string): string {
+  const base = stderr || "(no output)";
+  if (timedOut || exitCode === 143) {
+    return `timeout: ${model} killed by supervisor (exit ${exitCode}, likely timeout) — ${base}`;
+  }
+  return base;
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -391,7 +470,7 @@ export async function runGemini(
   modelId: string,
   timeoutMs: number,
   workdir?: string,
-  opts?: { tools?: ToolDefinition[] }
+  opts?: { tools?: ToolDefinition[]; log?: (msg: string) => void }
 ): Promise<string> {
   const model = stripPrefix(modelId);
   // -p "" = headless mode trigger; actual prompt arrives via stdin
@@ -404,7 +483,7 @@ export async function runGemini(
     ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt
     : prompt;
 
-  const result = await runCli("gemini", args, effectivePrompt, timeoutMs, { cwd });
+  const result = await runCli("gemini", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
 
   // Filter out [WARN] lines from stderr (Gemini emits noisy permission warnings)
   const cleanStderr = result.stderr
@@ -414,7 +493,7 @@ export async function runGemini(
     .trim();
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
-    throw new Error(`gemini exited ${result.exitCode}: ${cleanStderr || "(no output)"}`);
+    throw new Error(`gemini exited ${result.exitCode}: ${annotateExitError(result.exitCode, cleanStderr, result.timedOut, modelId)}`);
   }
 
   return result.stdout || cleanStderr;
@@ -434,7 +513,7 @@ export async function runClaude(
   modelId: string,
   timeoutMs: number,
   workdir?: string,
-  opts?: { tools?: ToolDefinition[] }
+  opts?: { tools?: ToolDefinition[]; log?: (msg: string) => void }
 ): Promise<string> {
   // Proactively refresh OAuth token if it's about to expire (< 5 min remaining).
   // No-op for API-key users.
@@ -457,15 +536,19 @@ export async function runClaude(
     : prompt;
 
   const cwd = workdir ?? homedir();
-  const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd });
+  const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
 
   // On 401: attempt one token refresh + retry before giving up.
   if (result.exitCode !== 0 && result.stdout.length === 0) {
+    // If this was a timeout, don't bother with auth retry — it's a supervisor kill, not a 401.
+    if (result.timedOut) {
+      throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, true, modelId)}`);
+    }
     const stderr = result.stderr || "(no output)";
     if (stderr.includes("401") || stderr.includes("Invalid authentication credentials") || stderr.includes("authentication_error")) {
       // Refresh and retry once
       await refreshClaudeToken();
-      const retry = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd });
+      const retry = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
       if (retry.exitCode !== 0 && retry.stdout.length === 0) {
         const retryStderr = retry.stderr || "(no output)";
         if (retryStderr.includes("401") || retryStderr.includes("authentication_error") || retryStderr.includes("Invalid authentication credentials")) {
@@ -478,7 +561,7 @@ export async function runClaude(
       }
       return retry.stdout;
     }
-    throw new Error(`claude exited ${result.exitCode}: ${stderr}`);
+    throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, stderr, false, modelId)}`);
   }
 
   return result.stdout;
@@ -508,7 +591,7 @@ export async function runCodex(
   modelId: string,
   timeoutMs: number,
   workdir?: string,
-  opts?: { tools?: ToolDefinition[]; mediaFiles?: MediaFile[] }
+  opts?: { tools?: ToolDefinition[]; mediaFiles?: MediaFile[]; log?: (msg: string) => void }
 ): Promise<string> {
   const model = stripPrefix(modelId);
   const args = ["--model", model, "--quiet", "--full-auto"];
@@ -532,10 +615,10 @@ export async function runCodex(
     ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt
     : prompt;
 
-  const result = await runCli("codex", args, effectivePrompt, timeoutMs, { cwd });
+  const result = await runCli("codex", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
-    throw new Error(`codex exited ${result.exitCode}: ${result.stderr || "(no output)"}`);
+    throw new Error(`codex exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, result.timedOut, modelId)}`);
   }
 
   return result.stdout || result.stderr;
@@ -553,14 +636,15 @@ export async function runOpenCode(
   prompt: string,
   _modelId: string,
   timeoutMs: number,
-  workdir?: string
+  workdir?: string,
+  opts?: { log?: (msg: string) => void }
 ): Promise<string> {
   const args = ["run", prompt];
   const cwd = workdir ?? homedir();
-  const result = await runCliWithArg("opencode", args, timeoutMs, { cwd });
+  const result = await runCliWithArg("opencode", args, timeoutMs, { cwd, log: opts?.log });
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
-    throw new Error(`opencode exited ${result.exitCode}: ${result.stderr || "(no output)"}`);
+    throw new Error(`opencode exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, result.timedOut, "opencode")}`);
   }
 
   return result.stdout || result.stderr;
@@ -578,14 +662,15 @@ export async function runPi(
   prompt: string,
   _modelId: string,
   timeoutMs: number,
-  workdir?: string
+  workdir?: string,
+  opts?: { log?: (msg: string) => void }
 ): Promise<string> {
   const args = ["-p", prompt];
   const cwd = workdir ?? homedir();
-  const result = await runCliWithArg("pi", args, timeoutMs, { cwd });
+  const result = await runCliWithArg("pi", args, timeoutMs, { cwd, log: opts?.log });
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
-    throw new Error(`pi exited ${result.exitCode}: ${result.stderr || "(no output)"}`);
+    throw new Error(`pi exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, result.timedOut, "pi")}`);
   }
 
   return result.stdout || result.stderr;
@@ -663,6 +748,8 @@ export interface RouteOptions {
    * Passed to CLIs that support native media input (e.g. codex -i).
    */
   mediaFiles?: MediaFile[];
+  /** Logger for timeout and lifecycle events. */
+  log?: (msg: string) => void;
 }
 
 /**
@@ -708,12 +795,13 @@ export async function routeToCliRunner(
   // Resolve aliases (e.g. gemini-3-pro → gemini-3-pro-preview) after allowlist check
   const resolved = normalizeModelAlias(normalized);
 
+  const log = opts.log;
   let rawText: string;
-  if (resolved.startsWith("cli-gemini/"))        rawText = await runGemini(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools });
-  else if (resolved.startsWith("cli-claude/"))   rawText = await runClaude(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools });
-  else if (resolved.startsWith("openai-codex/")) rawText = await runCodex(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, mediaFiles: opts.mediaFiles });
-  else if (resolved.startsWith("opencode/"))     rawText = await runOpenCode(prompt, resolved, timeoutMs, opts.workdir);
-  else if (resolved.startsWith("pi/"))           rawText = await runPi(prompt, resolved, timeoutMs, opts.workdir);
+  if (resolved.startsWith("cli-gemini/"))        rawText = await runGemini(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, log });
+  else if (resolved.startsWith("cli-claude/"))   rawText = await runClaude(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, log });
+  else if (resolved.startsWith("openai-codex/")) rawText = await runCodex(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, mediaFiles: opts.mediaFiles, log });
+  else if (resolved.startsWith("opencode/"))     rawText = await runOpenCode(prompt, resolved, timeoutMs, opts.workdir, { log });
+  else if (resolved.startsWith("pi/"))           rawText = await runPi(prompt, resolved, timeoutMs, opts.workdir, { log });
   else throw new Error(
     `Unknown CLI bridge model: "${model}". Use "vllm/cli-gemini/<model>", "vllm/cli-claude/<model>", "openai-codex/<model>", "opencode/<model>", or "pi/<model>".`
   );

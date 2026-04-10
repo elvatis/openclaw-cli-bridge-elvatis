@@ -95,6 +95,8 @@ function buildMinimalEnv(): Record<string, string> {
 /** Auto-cleanup interval: 30 minutes. */
 const SESSION_TTL_MS = 30 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+/** Grace period between SIGTERM and SIGKILL for session termination. */
+const KILL_GRACE_MS = 5_000;
 
 export class SessionManager {
   private sessions = new Map<string, SessionEntry>();
@@ -213,12 +215,19 @@ export class SessionManager {
     }
   }
 
-  /** Send SIGTERM to the session process. */
+  /**
+   * Gracefully terminate a session: SIGTERM first, then SIGKILL after grace period.
+   * This prevents the ambiguous "exit 143 (no output)" pattern.
+   */
   kill(sessionId: string): boolean {
     const entry = this.sessions.get(sessionId);
     if (!entry || entry.status !== "running") return false;
     entry.status = "killed";
     entry.proc.kill("SIGTERM");
+    // If the process doesn't exit within the grace period, force-kill it
+    setTimeout(() => {
+      try { if (!entry.proc.killed) entry.proc.kill("SIGKILL"); } catch { /* already dead */ }
+    }, KILL_GRACE_MS);
     return true;
   }
 
@@ -238,7 +247,7 @@ export class SessionManager {
     return result;
   }
 
-  /** Remove sessions older than SESSION_TTL_MS. Kill running ones first. Clean up isolated workdirs. */
+  /** Remove sessions older than SESSION_TTL_MS. Kill running ones with graceful SIGTERM→SIGKILL. */
   cleanup(): void {
     const now = Date.now();
     for (const [sessionId, entry] of this.sessions) {
@@ -246,6 +255,10 @@ export class SessionManager {
         if (entry.status === "running") {
           entry.proc.kill("SIGTERM");
           entry.status = "killed";
+          // Escalate to SIGKILL after grace period
+          setTimeout(() => {
+            try { if (!entry.proc.killed) entry.proc.kill("SIGKILL"); } catch { /* already dead */ }
+          }, KILL_GRACE_MS);
         }
         // Clean up isolated workdir if it wasn't cleaned on exit
         if (entry.isolatedWorkdir) {
@@ -258,17 +271,20 @@ export class SessionManager {
     sweepOrphanedWorkdirs();
   }
 
-  /** Stop the cleanup timer (for graceful shutdown). */
+  /** Stop the cleanup timer (for graceful shutdown). SIGTERM all sessions, SIGKILL after grace. */
   stop(): void {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
-    // Kill all running sessions and clean up their workdirs
+    // Kill all running sessions with graceful SIGTERM → SIGKILL escalation
     for (const [, entry] of this.sessions) {
       if (entry.status === "running") {
         entry.proc.kill("SIGTERM");
         entry.status = "killed";
+        setTimeout(() => {
+          try { if (!entry.proc.killed) entry.proc.kill("SIGKILL"); } catch { /* already dead */ }
+        }, KILL_GRACE_MS);
       }
       if (entry.isolatedWorkdir) {
         cleanupWorkdir(entry.isolatedWorkdir);
