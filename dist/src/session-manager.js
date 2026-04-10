@@ -64,6 +64,12 @@ export class SessionManager {
      * Returns a unique sessionId (random hex).
      */
     spawn(model, messages, opts = {}) {
+        // Validate model ID before it reaches spawn() args to prevent command injection
+        // (CodeQL js/command-line-injection). Allow only safe chars: letters, digits,
+        // dots, hyphens, underscores, and forward slashes (for provider prefixes).
+        if (!/^[a-zA-Z0-9._\-\/]+$/.test(model)) {
+            throw new Error(`Invalid model ID: "${model}". Only alphanumeric characters, dots, hyphens, underscores, and slashes are allowed.`);
+        }
         const sessionId = randomBytes(8).toString("hex");
         const prompt = formatPrompt(messages);
         // Workdir isolation: create a temp dir if requested and no explicit workdir given
