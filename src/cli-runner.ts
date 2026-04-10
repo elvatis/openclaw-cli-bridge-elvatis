@@ -28,11 +28,13 @@ import {
   buildToolPromptBlock,
   parseToolCallResponse,
 } from "./tool-protocol.js";
-
-/** Max messages to include in the prompt sent to the CLI. */
-const MAX_MESSAGES = 20;
-/** Max characters per message content before truncation. */
-const MAX_MSG_CHARS = 4000;
+import {
+  MAX_MESSAGES,
+  MAX_MSG_CHARS,
+  DEFAULT_CLI_TIMEOUT_MS,
+  TIMEOUT_GRACE_MS,
+  MEDIA_TMP_DIR,
+} from "./config.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Message formatting
@@ -152,7 +154,7 @@ export interface MediaFile {
   mimeType: string;
 }
 
-const MEDIA_TMP_DIR = join(tmpdir(), "cli-bridge-media");
+// MEDIA_TMP_DIR imported from config.ts
 
 /**
  * Extract non-text content parts (images, audio) from messages.
@@ -293,11 +295,7 @@ export interface RunCliOptions {
   log?: (msg: string) => void;
 }
 
-/**
- * Grace period between SIGTERM and SIGKILL when a timeout fires.
- * Gives the CLI process 5 seconds to flush output and exit cleanly.
- */
-const TIMEOUT_GRACE_MS = 5_000;
+// TIMEOUT_GRACE_MS imported from config.ts
 
 /**
  * Spawn a CLI and deliver the prompt via stdin.
@@ -315,7 +313,7 @@ export function runCli(
   cmd: string,
   args: string[],
   prompt: string,
-  timeoutMs = 120_000,
+  timeoutMs = DEFAULT_CLI_TIMEOUT_MS,
   opts: RunCliOptions = {}
 ): Promise<CliRunResult> {
   const cwd = opts.cwd ?? homedir();
@@ -381,7 +379,7 @@ export function runCli(
 export function runCliWithArg(
   cmd: string,
   args: string[],
-  timeoutMs = 120_000,
+  timeoutMs = DEFAULT_CLI_TIMEOUT_MS,
   opts: RunCliOptions = {}
 ): Promise<CliRunResult> {
   const cwd = opts.cwd ?? homedir();

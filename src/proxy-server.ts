@@ -20,6 +20,17 @@ import type { BrowserContext } from "playwright";
 import { renderStatusPage, type StatusProvider } from "./status-template.js";
 import { sessionManager } from "./session-manager.js";
 import { metrics } from "./metrics.js";
+import { providerSessions } from "./provider-sessions.js";
+import {
+  DEFAULT_PROXY_TIMEOUT_MS,
+  MAX_EFFECTIVE_TIMEOUT_MS,
+  TIMEOUT_PER_EXTRA_MSG_MS,
+  TIMEOUT_PER_TOOL_MS,
+  SSE_KEEPALIVE_INTERVAL_MS,
+  DEFAULT_BITNET_SERVER_URL,
+  BITNET_MAX_MESSAGES,
+  BITNET_SYSTEM_PROMPT,
+} from "./config.js";
 
 export type GrokCompleteOptions = Parameters<typeof grokComplete>[1];
 export type GrokCompleteStreamOptions = Parameters<typeof grokCompleteStream>[1];
@@ -153,10 +164,11 @@ export function startProxyServer(opts: ProxyServerOptions): Promise<http.Server>
       });
     });
 
-    // Stop the token refresh interval and session manager when the server closes (timer-leak prevention)
+    // Stop timers and flush state when the server closes (timer-leak prevention)
     server.on("close", () => {
       stopTokenRefresh();
       sessionManager.stop();
+      providerSessions.stop();
     });
 
     server.on("error", (err: NodeJS.ErrnoException) => {
@@ -547,7 +559,7 @@ async function handleRequest(
 
     // ── BitNet local inference routing ────────────────────────────────────────
     if (model.startsWith("local-bitnet/")) {
-      const bitnetUrl = opts.getBitNetServerUrl?.() ?? "http://127.0.0.1:8082";
+      const bitnetUrl = opts.getBitNetServerUrl?.() ?? DEFAULT_BITNET_SERVER_URL;
       const timeoutMs = opts.timeoutMs ?? 120_000;
       // llama-server (BitNet build) crashes with std::runtime_error on multi-part
       // content arrays (ref: https://github.com/ggerganov/llama.cpp/issues/8367).
@@ -564,18 +576,14 @@ async function handleRequest(
       };
       // BitNet has a 4096 token context window. Long sessions blow it up and
       // cause a hard C++ crash (no graceful error). Truncate to system prompt +
-      // last 10 messages (~2k tokens max) to stay safely within the limit.
-      const BITNET_MAX_MESSAGES = 6;
-      // Replace the full system prompt (MEMORY.md etc, ~2k+ tokens) with a
-      // minimal one so BitNet's 4096-token context isn't blown by the system msg alone.
-      const BITNET_SYSTEM = "You are Akido, a concise AI assistant. Answer briefly and directly. Current user: Emre. Timezone: Europe/Berlin.";
+      // last N messages (~2k tokens max) to stay safely within the limit.
       const allFlat = parsed.messages.map((m) => ({
         role: m.role,
         content: flattenContent(m.content),
       }));
       const nonSystemMsgs = allFlat.filter((m) => m.role !== "system");
       const truncated = nonSystemMsgs.slice(-BITNET_MAX_MESSAGES);
-      const bitnetMessages = [{ role: "system", content: BITNET_SYSTEM }, ...truncated];
+      const bitnetMessages = [{ role: "system", content: BITNET_SYSTEM_PROMPT }, ...truncated];
       const requestBody = JSON.stringify({ ...parsed, messages: bitnetMessages, tools: undefined });
 
       const bitnetStart = Date.now();
@@ -639,14 +647,23 @@ async function handleRequest(
     let usedModel = model;
     const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined, log: opts.log };
 
+    // ── Provider session: ensure a persistent session for this model ────────
+    // Extract provider prefix from model (e.g. "cli-claude" from "cli-claude/claude-sonnet-4-6")
+    const providerPrefix = model.split("/")[0];
+    const incomingSessionId = (parsed as { providerSessionId?: string }).providerSessionId;
+    const session = incomingSessionId
+      ? (providerSessions.getSession(incomingSessionId) ?? providerSessions.ensureSession(providerPrefix, model))
+      : providerSessions.ensureSession(providerPrefix, model);
+    providerSessions.touchSession(session.id);
+
     // ── Dynamic timeout: scale with conversation size ────────────────────────
     // Per-model timeout takes precedence, then global proxyTimeoutMs, then 300s default.
     const perModelTimeout = opts.modelTimeouts?.[model];
-    const baseTimeout = perModelTimeout ?? opts.timeoutMs ?? 300_000;
-    const msgExtra = Math.max(0, cleanMessages.length - 10) * 2_000;
-    const toolExtra = (tools?.length ?? 0) * 5_000;
-    const effectiveTimeout = Math.min(baseTimeout + msgExtra + toolExtra, 600_000);
-    opts.log(`[cli-bridge] ${model} timeout: ${Math.round(effectiveTimeout / 1000)}s (base=${Math.round(baseTimeout / 1000)}s${perModelTimeout ? " per-model" : ""}, +${Math.round(msgExtra / 1000)}s msgs, +${Math.round(toolExtra / 1000)}s tools)`);
+    const baseTimeout = perModelTimeout ?? opts.timeoutMs ?? DEFAULT_PROXY_TIMEOUT_MS;
+    const msgExtra = Math.max(0, cleanMessages.length - 10) * TIMEOUT_PER_EXTRA_MSG_MS;
+    const toolExtra = (tools?.length ?? 0) * TIMEOUT_PER_TOOL_MS;
+    const effectiveTimeout = Math.min(baseTimeout + msgExtra + toolExtra, MAX_EFFECTIVE_TIMEOUT_MS);
+    opts.log(`[cli-bridge] ${model} session=${session.id} timeout: ${Math.round(effectiveTimeout / 1000)}s (base=${Math.round(baseTimeout / 1000)}s${perModelTimeout ? " per-model" : ""}, +${Math.round(msgExtra / 1000)}s msgs, +${Math.round(toolExtra / 1000)}s tools)`);
 
     // ── SSE keepalive: send headers early so OpenClaw doesn't read-timeout ──
     let sseHeadersSent = false;
@@ -660,22 +677,25 @@ async function handleRequest(
       });
       sseHeadersSent = true;
       res.write(": keepalive\n\n");
-      keepaliveInterval = setInterval(() => { res.write(": keepalive\n\n"); }, 15_000);
+      keepaliveInterval = setInterval(() => { res.write(": keepalive\n\n"); }, SSE_KEEPALIVE_INTERVAL_MS);
     }
 
     const cliStart = Date.now();
     try {
       result = await routeToCliRunner(model, cleanMessages, effectiveTimeout, routeOpts);
       metrics.recordRequest(model, Date.now() - cliStart, true);
+      providerSessions.recordRun(session.id, false);
     } catch (err) {
       const primaryDuration = Date.now() - cliStart;
       const msg = (err as Error).message;
       // ── Model fallback: retry once with a lighter model if configured ────
       const isTimeout = msg.includes("timeout:") || msg.includes("exit 143") || msg.includes("exited 143");
+      // Record the run (with timeout flag) — session is preserved, not deleted
+      providerSessions.recordRun(session.id, isTimeout);
       const fallbackModel = opts.modelFallbacks?.[model];
       if (fallbackModel) {
         metrics.recordRequest(model, primaryDuration, false);
-        const reason = isTimeout ? "timeout by supervisor" : msg;
+        const reason = isTimeout ? `timeout by supervisor, session=${session.id} preserved` : msg;
         opts.warn(`[cli-bridge] ${model} failed (${reason}), falling back to ${fallbackModel}`);
         const fallbackStart = Date.now();
         try {
@@ -787,6 +807,8 @@ async function handleRequest(
           },
         ],
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        // Propagate session ID so callers can resume in the same session
+        provider_session_id: session.id,
       };
 
       res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
@@ -903,6 +925,26 @@ async function handleRequest(
     }
     res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
     res.end(JSON.stringify(result));
+    return;
+  }
+
+  // ── Provider session endpoints ──────────────────────────────────────────────
+
+  // GET /v1/provider-sessions — list all provider sessions with stats
+  if (url === "/v1/provider-sessions" && req.method === "GET") {
+    const sessions = providerSessions.listSessions();
+    const stats = providerSessions.stats();
+    res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+    res.end(JSON.stringify({ sessions, stats }));
+    return;
+  }
+
+  // DELETE /v1/provider-sessions/:id — delete a specific provider session
+  const provSessionMatch = url.match(/^\/v1\/provider-sessions\/([a-zA-Z0-9:_-]+)$/);
+  if (provSessionMatch && req.method === "DELETE") {
+    const ok = providerSessions.deleteSession(decodeURIComponent(provSessionMatch[1]));
+    res.writeHead(ok ? 200 : 404, { "Content-Type": "application/json", ...corsHeaders() });
+    res.end(JSON.stringify({ ok }));
     return;
   }
 

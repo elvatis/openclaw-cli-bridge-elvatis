@@ -62,6 +62,20 @@ vi.mock("../src/workdir.js", () => ({
   sweepOrphanedWorkdirs: mockSweepOrphanedWorkdirs,
 }));
 
+// Mock config module — provide all constants needed by session-manager.ts and cli-runner.ts
+vi.mock("../src/config.js", async () => {
+  return {
+    SESSION_TTL_MS: 30 * 60 * 1000,
+    CLEANUP_INTERVAL_MS: 5 * 60 * 1000,
+    SESSION_KILL_GRACE_MS: 5_000,
+    DEFAULT_CLI_TIMEOUT_MS: 120_000,
+    TIMEOUT_GRACE_MS: 5_000,
+    MAX_MESSAGES: 20,
+    MAX_MSG_CHARS: 4_000,
+    MEDIA_TMP_DIR: "/tmp/cli-bridge-media",
+  };
+});
+
 // Now import SessionManager (uses the mocked spawn)
 import { SessionManager } from "../src/session-manager.js";
 

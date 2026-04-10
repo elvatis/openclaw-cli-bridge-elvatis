@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.5.0`
+**Current version:** `2.6.0`
 
 ---
 
@@ -378,13 +378,22 @@ Model fallback (v1.9.0):
 ```bash
 npm run lint        # eslint (TypeScript-aware)
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (217 tests)
+npm test            # vitest run (252 tests)
 npm run ci          # lint + typecheck + test
 ```
 
 ---
 
 ## Changelog
+
+### v2.6.0
+- **feat:** Provider session registry (`src/provider-sessions.ts`) — persistent sessions that survive across runs. When a CLI run times out, the session is preserved (not deleted) so follow-up runs can resume in the same context. Sessions are stored in `~/.openclaw/cli-bridge/sessions.json`.
+- **feat:** Centralized config module (`src/config.ts`) — all magic numbers, timeouts, paths, ports, and model defaults extracted into one file. No more scattered hardcoded values.
+- **feat:** Session-aware proxy — every CLI request gets a `provider_session_id` in the response. Pass it back via `providerSessionId` in subsequent requests to reuse the same session.
+- **feat:** New proxy endpoints: `GET /v1/provider-sessions` (list sessions + stats), `DELETE /v1/provider-sessions/:id` (remove a session)
+- **fix:** Version fallback changed from `"0.0.0"` to `"unknown"` with secondary lookup in `openclaw.plugin.json` — prevents Dashboard showing wrong version
+- **refactor:** `index.ts`, `cli-runner.ts`, `session-manager.ts`, `proxy-server.ts` now import all constants from `config.ts` instead of defining them locally
+- **test:** 35 new tests for provider sessions, config exports (252 total)
 
 ### v2.5.0
 - **feat:** Graceful timeout handling — replaces Node's `spawn({ timeout })` with manual SIGTERM→SIGKILL sequence (5s grace period). Exit 143 is now clearly annotated as "timeout by supervisor" in logs, not a cryptic model error.

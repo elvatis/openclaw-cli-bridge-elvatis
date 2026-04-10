@@ -16,6 +16,11 @@ import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { formatPrompt, type ChatMessage } from "./cli-runner.js";
 import { createIsolatedWorkdir, cleanupWorkdir, sweepOrphanedWorkdirs } from "./workdir.js";
+import {
+  SESSION_TTL_MS,
+  CLEANUP_INTERVAL_MS,
+  SESSION_KILL_GRACE_MS,
+} from "./config.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -92,11 +97,7 @@ function buildMinimalEnv(): Record<string, string> {
 // Session Manager
 // ──────────────────────────────────────────────────────────────────────────────
 
-/** Auto-cleanup interval: 30 minutes. */
-const SESSION_TTL_MS = 30 * 60 * 1000;
-const CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
-/** Grace period between SIGTERM and SIGKILL for session termination. */
-const KILL_GRACE_MS = 5_000;
+// SESSION_TTL_MS, CLEANUP_INTERVAL_MS, SESSION_KILL_GRACE_MS imported from config.ts
 
 export class SessionManager {
   private sessions = new Map<string, SessionEntry>();
@@ -227,7 +228,7 @@ export class SessionManager {
     // If the process doesn't exit within the grace period, force-kill it
     setTimeout(() => {
       try { if (!entry.proc.killed) entry.proc.kill("SIGKILL"); } catch { /* already dead */ }
-    }, KILL_GRACE_MS);
+    }, SESSION_KILL_GRACE_MS);
     return true;
   }
 
@@ -258,7 +259,7 @@ export class SessionManager {
           // Escalate to SIGKILL after grace period
           setTimeout(() => {
             try { if (!entry.proc.killed) entry.proc.kill("SIGKILL"); } catch { /* already dead */ }
-          }, KILL_GRACE_MS);
+          }, SESSION_KILL_GRACE_MS);
         }
         // Clean up isolated workdir if it wasn't cleaned on exit
         if (entry.isolatedWorkdir) {
@@ -284,7 +285,7 @@ export class SessionManager {
         entry.status = "killed";
         setTimeout(() => {
           try { if (!entry.proc.killed) entry.proc.kill("SIGKILL"); } catch { /* already dead */ }
-        }, KILL_GRACE_MS);
+        }, SESSION_KILL_GRACE_MS);
       }
       if (entry.isolatedWorkdir) {
         cleanupWorkdir(entry.isolatedWorkdir);
