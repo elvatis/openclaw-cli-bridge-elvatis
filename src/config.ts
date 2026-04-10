@@ -26,13 +26,13 @@ export const DEFAULT_PROXY_API_KEY = "cli-bridge";
 export const DEFAULT_PROXY_TIMEOUT_MS = 300_000; // 5 min
 
 /** Maximum effective timeout after dynamic scaling (ms). */
-export const MAX_EFFECTIVE_TIMEOUT_MS = 600_000; // 10 min
+export const MAX_EFFECTIVE_TIMEOUT_MS = 900_000; // 15 min
 
 /** Extra timeout per message beyond 10 in the conversation (ms). */
 export const TIMEOUT_PER_EXTRA_MSG_MS = 2_000;
 
 /** Extra timeout per tool definition in the request (ms). */
-export const TIMEOUT_PER_TOOL_MS = 5_000;
+export const TIMEOUT_PER_TOOL_MS = 7_000;
 
 /** SSE keepalive interval — prevents OpenClaw read-timeout during long CLI runs (ms). */
 export const SSE_KEEPALIVE_INTERVAL_MS = 15_000;
@@ -94,10 +94,10 @@ export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
   "cli-claude/claude-opus-4-6":        300_000,  // 5 min
   "cli-claude/claude-sonnet-4-6":      180_000,  // 3 min
   "cli-claude/claude-haiku-4-5":        90_000,  // 90s
-  "cli-gemini/gemini-2.5-pro":         180_000,
-  "cli-gemini/gemini-2.5-flash":        90_000,
-  "cli-gemini/gemini-3-pro-preview":   180_000,
-  "cli-gemini/gemini-3-flash-preview":  90_000,
+  "cli-gemini/gemini-2.5-pro":         300_000,  // 5 min — image generation needs more time
+  "cli-gemini/gemini-2.5-flash":       180_000,  // 3 min
+  "cli-gemini/gemini-3-pro-preview":   300_000,  // 5 min — image generation needs more time
+  "cli-gemini/gemini-3-flash-preview": 180_000,  // 3 min
   "openai-codex/gpt-5.4":             300_000,
   "openai-codex/gpt-5.3-codex":       180_000,
   "openai-codex/gpt-5.1-codex-mini":   90_000,
