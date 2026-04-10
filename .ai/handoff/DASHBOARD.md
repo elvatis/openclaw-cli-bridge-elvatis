@@ -7,7 +7,7 @@ _Last updated: 2026-04-10_
 
 | Component | Version | Build | Tests | Status |
 |-----------|---------|-------|-------|--------|
-| openclaw-cli-bridge-elvatis | 2.3.0 | ✅ | ✅ | ✅ Stable |
+| openclaw-cli-bridge-elvatis | 2.4.0 | ✅ | ✅ | ✅ Stable |
 <!-- /SECTION: plugin_status -->
 
 <!-- SECTION: release_state -->
@@ -15,9 +15,9 @@ _Last updated: 2026-04-10_
 
 | Platform | Published Version | Status |
 |----------|------------------|--------|
-| GitHub | v2.3.0 | ✅ Pushed to main |
-| npm | 2.3.0 | ✅ Published (via CI) |
-| ClawHub | 2.3.0 | ✅ Published (via CI) |
+| GitHub | v2.4.0 | ✅ Pushed to main |
+| npm | 2.4.0 | ⏳ Pending (via CI) |
+| ClawHub | 2.4.0 | ⏳ Pending (via CI) |
 <!-- /SECTION: release_state -->
 
 <!-- SECTION: open_tasks -->
@@ -31,6 +31,7 @@ _No open tasks._
 
 | Task | Title | Version |
 |------|-------|---------|
+| T-020 | Metrics & health dashboard: request volume, latency, errors, token usage | 2.4.0 |
 | T-019 | Full-featured CLI bridge: tool calls + multimodal + autonomous execution | 2.3.0 |
 | T-018 | Fix vllm apiKey corruption (401) + harden config-patcher | 2.2.1 |
 | T-017 | Fix log spam, restart loops, CLI blocking | 2.2.0 |
