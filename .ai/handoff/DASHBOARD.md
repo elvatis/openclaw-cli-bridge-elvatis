@@ -7,7 +7,7 @@ _Last updated: 2026-04-10_
 
 | Component | Version | Build | Tests | Status |
 |-----------|---------|-------|-------|--------|
-| openclaw-cli-bridge-elvatis | 2.2.1 | ✅ | ✅ | ✅ Stable |
+| openclaw-cli-bridge-elvatis | 2.2.2 | ✅ | ✅ | ✅ Stable |
 <!-- /SECTION: plugin_status -->
 
 <!-- SECTION: release_state -->
@@ -15,9 +15,9 @@ _Last updated: 2026-04-10_
 
 | Platform | Published Version | Status |
 |----------|------------------|--------|
-| GitHub | v2.2.1 | ✅ Pushed to main |
-| npm | 2.1.3 | ⏳ Pending publish |
-| ClawHub | 2.1.3 | ⏳ Pending publish |
+| GitHub | v2.2.2 | ✅ Pushed to main |
+| npm | 2.2.2 | ✅ Published (via CI) |
+| ClawHub | 2.2.2 | ✅ Published (via CI) |
 <!-- /SECTION: release_state -->
 
 <!-- SECTION: open_tasks -->
@@ -31,7 +31,7 @@ _No open tasks._
 
 | Task | Title | Version |
 |------|-------|---------|
-| T-018 | Fix vllm apiKey corruption (401) + harden config-patcher | 2.2.1 |
+| T-018 | Fix vllm apiKey corruption (401) + harden config-patcher | 2.2.2 |
 | T-017 | Fix log spam, restart loops, CLI blocking | 2.2.0 |
 | T-016 | Issue #2: Codex auth auto-import into agent auth store | 2.1.0 |
 | T-015 | Issue #4: Background session mgmt with workdir isolation | 2.1.0 |
