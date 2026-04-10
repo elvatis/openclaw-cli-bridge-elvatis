@@ -41,7 +41,13 @@ const PACKAGE_VERSION: string = (() => {
     const pkg = JSON.parse(readFileSync(join(__dirname_local, "package.json"), "utf-8")) as { version: string };
     return pkg.version;
   } catch {
-    return "0.0.0"; // fallback — should never happen in normal operation
+    // Second attempt: try openclaw.plugin.json (always co-located)
+    try {
+      const manifest = JSON.parse(readFileSync(join(__dirname_local, "openclaw.plugin.json"), "utf-8")) as { version: string };
+      return manifest.version;
+    } catch {
+      return "unknown"; // should never happen — both files are always present
+    }
   }
 })();
 import type {
@@ -62,6 +68,18 @@ import {
 import { importCodexAuth } from "./src/codex-auth-import.js";
 import { startProxyServer } from "./src/proxy-server.js";
 import { patchOpencllawConfig } from "./src/config-patcher.js";
+import {
+  DEFAULT_PROXY_PORT,
+  DEFAULT_PROXY_API_KEY,
+  DEFAULT_PROXY_TIMEOUT_MS,
+  DEFAULT_MODEL_TIMEOUTS,
+  DEFAULT_MODEL_FALLBACKS,
+  STATE_FILE as CONFIG_STATE_FILE,
+  PENDING_FILE as CONFIG_PENDING_FILE,
+  OPENCLAW_DIR,
+  CLI_TEST_DEFAULT_MODEL as CONFIG_CLI_TEST_DEFAULT_MODEL,
+  PROFILE_DIRS,
+} from "./src/config.js";
 import {
   loadSession,
   deleteSession,
@@ -109,11 +127,11 @@ interface CliPluginConfig {
 let grokBrowser: Browser | null = null;
 let grokContext: BrowserContext | null = null;
 
-// Persistent profile dirs — survive gateway restarts, keep cookies intact
-const GROK_PROFILE_DIR = join(homedir(), ".openclaw", "grok-profile");
-const GEMINI_PROFILE_DIR = join(homedir(), ".openclaw", "gemini-profile");
-const CLAUDE_PROFILE_DIR = join(homedir(), ".openclaw", "claude-profile");
-const CHATGPT_PROFILE_DIR = join(homedir(), ".openclaw", "chatgpt-profile");
+// Persistent profile dirs — imported from config.ts
+const GROK_PROFILE_DIR = PROFILE_DIRS.grok;
+const GEMINI_PROFILE_DIR = PROFILE_DIRS.gemini;
+const CLAUDE_PROFILE_DIR = PROFILE_DIRS.claude;
+const CHATGPT_PROFILE_DIR = PROFILE_DIRS.chatgpt;
 
 // Stealth launch options — prevent Cloudflare/bot detection from flagging the browser
 const STEALTH_ARGS = [
@@ -685,14 +703,13 @@ async function tryRestoreGrokSession(
   }
 }
 
-const DEFAULT_PROXY_PORT = 31337;
-const DEFAULT_PROXY_API_KEY = "cli-bridge";
+// DEFAULT_PROXY_PORT, DEFAULT_PROXY_API_KEY imported from config.ts
 
 // ──────────────────────────────────────────────────────────────────────────────
 // State file — persists the model that was active before the last /cli-* switch
 // Located at ~/.openclaw/cli-bridge-state.json (survives gateway restarts)
 // ──────────────────────────────────────────────────────────────────────────────
-const STATE_FILE = join(homedir(), ".openclaw", "cli-bridge-state.json");
+const STATE_FILE = CONFIG_STATE_FILE;
 
 interface CliBridgeState {
   previousModel: string;
@@ -708,7 +725,7 @@ function readState(): CliBridgeState | null {
 
 function writeState(state: CliBridgeState): void {
   try {
-    mkdirSync(join(homedir(), ".openclaw"), { recursive: true });
+    mkdirSync(OPENCLAW_DIR, { recursive: true });
     writeFileSync(STATE_FILE, JSON.stringify(state, null, 2) + "\n", "utf8");
   } catch {
     // non-fatal — /cli-back will just report no previous model
@@ -780,7 +797,7 @@ const CLI_MODEL_COMMANDS = [
 ] as const;
 
 /** Default model used by /cli-test when no arg is given */
-const CLI_TEST_DEFAULT_MODEL = "cli-claude/claude-sonnet-4-6";
+const CLI_TEST_DEFAULT_MODEL = CONFIG_CLI_TEST_DEFAULT_MODEL;
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Staged-switch state file
@@ -788,7 +805,7 @@ const CLI_TEST_DEFAULT_MODEL = "cli-claude/claude-sonnet-4-6";
 // Written by /cli-* (default), applied by /cli-apply or /cli-* --now.
 // Located at ~/.openclaw/cli-bridge-pending.json
 // ──────────────────────────────────────────────────────────────────────────────
-const PENDING_FILE = join(homedir(), ".openclaw", "cli-bridge-pending.json");
+const PENDING_FILE = CONFIG_PENDING_FILE;
 
 interface CliBridgePending {
   model: string;
@@ -806,7 +823,7 @@ function readPending(): CliBridgePending | null {
 
 function writePending(pending: CliBridgePending): void {
   try {
-    mkdirSync(join(homedir(), ".openclaw"), { recursive: true });
+    mkdirSync(OPENCLAW_DIR, { recursive: true });
     writeFileSync(PENDING_FILE, JSON.stringify(pending, null, 2) + "\n", "utf8");
   } catch {
     // non-fatal
@@ -988,22 +1005,9 @@ const plugin = {
     const enableProxy = cfg.enableProxy ?? true;
     const port = cfg.proxyPort ?? DEFAULT_PROXY_PORT;
     const apiKey = cfg.proxyApiKey ?? DEFAULT_PROXY_API_KEY;
-    const timeoutMs = cfg.proxyTimeoutMs ?? 300_000;
-    // Per-model timeout overrides — fall back to sensible defaults if not configured.
-    // Interactive/fast models get shorter timeouts, heavy models get more time.
-    const defaultModelTimeouts: Record<string, number> = {
-      "cli-claude/claude-opus-4-6":       300_000,  // 5 min — heavy, agentic tasks
-      "cli-claude/claude-sonnet-4-6":     180_000,  // 3 min — standard interactive chat
-      "cli-claude/claude-haiku-4-5":       90_000,  // 90s  — fast responses
-      "cli-gemini/gemini-2.5-pro":        180_000,
-      "cli-gemini/gemini-2.5-flash":       90_000,
-      "cli-gemini/gemini-3-pro-preview":  180_000,
-      "cli-gemini/gemini-3-flash-preview": 90_000,
-      "openai-codex/gpt-5.4":            300_000,
-      "openai-codex/gpt-5.3-codex":      180_000,
-      "openai-codex/gpt-5.1-codex-mini":  90_000,
-    };
-    const modelTimeouts = { ...defaultModelTimeouts, ...cfg.modelTimeouts };
+    const timeoutMs = cfg.proxyTimeoutMs ?? DEFAULT_PROXY_TIMEOUT_MS;
+    // Per-model timeout overrides — defaults from config.ts, can be extended via plugin config.
+    const modelTimeouts = { ...DEFAULT_MODEL_TIMEOUTS, ...cfg.modelTimeouts };
     const codexAuthPath = cfg.codexAuthPath ?? DEFAULT_CODEX_AUTH_PATH;
     const grokSessionPath = cfg.grokSessionPath ?? DEFAULT_SESSION_PATH;
 
@@ -1015,14 +1019,8 @@ const plugin = {
       modelCommands[modelId] = `/${entry.name}`;
     }
 
-    // ── Default model fallback chain ──────────────────────────────────────────
-    // When a primary model fails (timeout, error), retry once with a lighter variant.
-    const modelFallbacks: Record<string, string> = {
-      "cli-gemini/gemini-2.5-pro":       "cli-gemini/gemini-2.5-flash",
-      "cli-gemini/gemini-3-pro-preview":  "cli-gemini/gemini-3-flash-preview",
-      "cli-claude/claude-opus-4-6":       "cli-claude/claude-sonnet-4-6",
-      "cli-claude/claude-sonnet-4-6":     "cli-claude/claude-haiku-4-5",
-    };
+    // ── Default model fallback chain (from config.ts) ──────────────────────────
+    const modelFallbacks = { ...DEFAULT_MODEL_FALLBACKS };
 
     // ── Migrate legacy per-provider cookie expiry files to consolidated store ─
     const migration = migrateLegacyFiles();
