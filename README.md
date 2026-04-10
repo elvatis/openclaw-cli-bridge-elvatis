@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.6.1`
+**Current version:** `2.6.2`
 
 ---
 
@@ -405,6 +405,11 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.6.2
+- **fix:** Codex CLI `--quiet` flag removed in latest Codex version — replaced with `codex exec` subcommand for non-interactive execution. All `openai-codex/*` models were failing with "unexpected argument '--quiet'" error.
+- **fix:** Agent model routing — 10 agents referenced non-existent `google-gemini-cli` provider. Remapped to `vllm/cli-gemini/*` (OAuth-based, stable) for reliable Gemini access.
+- **fix:** Main agent fallback `openai-codex/gpt-5.1` routed via direct OpenAI API (broken OAuth scopes) — now routes through CLI bridge (`vllm/openai-codex/gpt-5.1`)
 
 ### v2.6.1
 - **fix:** Root cause of Exit 143 / 408 timeouts identified — OpenClaw's `agents.defaults.llm.idleTimeoutSeconds` defaults to 60s, which is too short for CLI subprocesses that need time before producing the first token

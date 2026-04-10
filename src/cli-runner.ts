@@ -592,7 +592,7 @@ export async function runCodex(
   opts?: { tools?: ToolDefinition[]; mediaFiles?: MediaFile[]; log?: (msg: string) => void }
 ): Promise<string> {
   const model = stripPrefix(modelId);
-  const args = ["--model", model, "--quiet", "--full-auto"];
+  const args = ["exec", "--model", model, "--full-auto"];
 
   // Codex supports native image input via -i flag
   if (opts?.mediaFiles?.length) {

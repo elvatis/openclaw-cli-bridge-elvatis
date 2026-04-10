@@ -332,7 +332,7 @@ export class SessionManager {
       }
       return {
         cmd: "codex",
-        args: ["--model", modelName, "--quiet", "--full-auto"],
+        args: ["exec", "--model", modelName, "--full-auto"],
         cwd,
         useStdin: true,
       };
