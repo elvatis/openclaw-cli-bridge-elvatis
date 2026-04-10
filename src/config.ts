@@ -92,7 +92,7 @@ export const PROVIDER_SESSION_SWEEP_MS = 10 * 60 * 1_000; // 10 min
  */
 export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
   "cli-claude/claude-opus-4-6":        300_000,  // 5 min
-  "cli-claude/claude-sonnet-4-6":      180_000,  // 3 min
+  "cli-claude/claude-sonnet-4-6":      300_000,  // 5 min — match idleTimeoutSeconds
   "cli-claude/claude-haiku-4-5":        90_000,  // 90s
   "cli-gemini/gemini-2.5-pro":         300_000,  // 5 min — image generation needs more time
   "cli-gemini/gemini-2.5-flash":       180_000,  // 3 min
