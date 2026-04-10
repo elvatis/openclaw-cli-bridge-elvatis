@@ -603,39 +603,16 @@ async function handleRequest(
     let result: CliToolResult;
     let usedModel = model;
     const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined };
-    try {
-      result = await routeToCliRunner(model, cleanMessages, opts.timeoutMs ?? 120_000, routeOpts);
-    } catch (err) {
-      const msg = (err as Error).message;
-      // ── Model fallback: retry once with a lighter model if configured ────
-      const fallbackModel = opts.modelFallbacks?.[model];
-      if (fallbackModel) {
-        opts.warn(`[cli-bridge] ${model} failed (${msg}), falling back to ${fallbackModel}`);
-        try {
-          result = await routeToCliRunner(fallbackModel, cleanMessages, opts.timeoutMs ?? 120_000, routeOpts);
-          usedModel = fallbackModel;
-          opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded`);
-        } catch (fallbackErr) {
-          const fallbackMsg = (fallbackErr as Error).message;
-          opts.warn(`[cli-bridge] fallback ${fallbackModel} also failed: ${fallbackMsg}`);
-          res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ error: { message: `${model}: ${msg} | fallback ${fallbackModel}: ${fallbackMsg}`, type: "cli_error" } }));
-          return;
-        }
-      } else {
-        opts.warn(`[cli-bridge] CLI error for ${model}: ${msg}`);
-        res.writeHead(500, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: { message: msg, type: "cli_error" } }));
-        return;
-      }
-    } finally {
-      // Clean up temp media files after response
-      cleanupMediaFiles(mediaFiles);
-    }
 
-    const hasToolCalls = !!(result.tool_calls?.length);
-    const finishReason = hasToolCalls ? "tool_calls" : "stop";
+    // ── Dynamic timeout: scale with conversation size ────────────────────────
+    const baseTimeout = opts.timeoutMs ?? 300_000; // 5 min default (was 120s)
+    const msgExtra = Math.max(0, cleanMessages.length - 10) * 2_000;
+    const toolExtra = (tools?.length ?? 0) * 5_000;
+    const effectiveTimeout = Math.min(baseTimeout + msgExtra + toolExtra, 600_000);
 
+    // ── SSE keepalive: send headers early so OpenClaw doesn't read-timeout ──
+    let sseHeadersSent = false;
+    let keepaliveInterval: ReturnType<typeof setInterval> | null = null;
     if (stream) {
       res.writeHead(200, {
         "Content-Type": "text/event-stream",
@@ -643,6 +620,58 @@ async function handleRequest(
         Connection: "keep-alive",
         ...corsHeaders(),
       });
+      sseHeadersSent = true;
+      res.write(": keepalive\n\n");
+      keepaliveInterval = setInterval(() => { res.write(": keepalive\n\n"); }, 15_000);
+    }
+
+    try {
+      result = await routeToCliRunner(model, cleanMessages, effectiveTimeout, routeOpts);
+    } catch (err) {
+      const msg = (err as Error).message;
+      // ── Model fallback: retry once with a lighter model if configured ────
+      const fallbackModel = opts.modelFallbacks?.[model];
+      if (fallbackModel) {
+        opts.warn(`[cli-bridge] ${model} failed (${msg}), falling back to ${fallbackModel}`);
+        try {
+          result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
+          usedModel = fallbackModel;
+          opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded`);
+        } catch (fallbackErr) {
+          const fallbackMsg = (fallbackErr as Error).message;
+          opts.warn(`[cli-bridge] fallback ${fallbackModel} also failed: ${fallbackMsg}`);
+          if (sseHeadersSent) {
+            res.write(`data: ${JSON.stringify({ error: { message: `${model}: ${msg} | fallback ${fallbackModel}: ${fallbackMsg}`, type: "cli_error" } })}\n\n`);
+            res.write("data: [DONE]\n\n");
+            res.end();
+          } else {
+            res.writeHead(500, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: { message: `${model}: ${msg} | fallback ${fallbackModel}: ${fallbackMsg}`, type: "cli_error" } }));
+          }
+          return;
+        }
+      } else {
+        opts.warn(`[cli-bridge] CLI error for ${model}: ${msg}`);
+        if (sseHeadersSent) {
+          res.write(`data: ${JSON.stringify({ error: { message: msg, type: "cli_error" } })}\n\n`);
+          res.write("data: [DONE]\n\n");
+          res.end();
+        } else {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ error: { message: msg, type: "cli_error" } }));
+        }
+        return;
+      }
+    } finally {
+      if (keepaliveInterval) clearInterval(keepaliveInterval);
+      cleanupMediaFiles(mediaFiles);
+    }
+
+    const hasToolCalls = !!(result.tool_calls?.length);
+    const finishReason = hasToolCalls ? "tool_calls" : "stop";
+
+    if (stream) {
+      // SSE headers already sent above — stream response chunks directly
 
       if (hasToolCalls) {
         // Stream tool_calls in OpenAI SSE format
