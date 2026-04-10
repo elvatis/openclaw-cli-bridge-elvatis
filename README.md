@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.6.3`
+**Current version:** `2.7.0`
 
 ---
 
@@ -398,13 +398,19 @@ Model fallback (v1.9.0):
 ```bash
 npm run lint        # eslint (TypeScript-aware)
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (252 tests)
+npm test            # vitest run (261 tests)
 npm run ci          # lint + typecheck + test
 ```
 
 ---
 
 ## Changelog
+
+### v2.7.0
+- **feat:** Persistent per-model metrics — request counts, error rates, latency, and token usage now survive gateway restarts. Stored in `~/.openclaw/cli-bridge/metrics.json`, debounced writes (5s).
+- **feat:** Token usage estimation for all models — CLI runners (claude, gemini, codex), web-session models (gemini, claude, chatgpt) now report estimated `prompt_tokens` and `completion_tokens` in the OpenAI-compatible `usage` response field (~4 chars/token heuristic). Grok models continue to use real token counts from the API.
+- **feat:** Dashboard and `/healthz` now show actual token stats per model instead of zeros
+- **test:** 9 new metrics tests — estimateTokens, MetricsCollector recording, sorting, reset (261 total)
 
 ### v2.6.3
 - **security:** Bump `vite` 8.0.2 → 8.0.5 — fixes 3 CVEs: `server.fs.deny` bypass via query strings, arbitrary file read via WebSocket, path traversal in optimized deps `.map` handling (merged Dependabot PR #18)

@@ -134,6 +134,9 @@ export const PENDING_FILE = join(OPENCLAW_DIR, "cli-bridge-pending.json");
 /** Provider session registry file. */
 export const PROVIDER_SESSIONS_FILE = join(OPENCLAW_DIR, "cli-bridge", "sessions.json");
 
+/** Persistent metrics file — survives gateway restarts. */
+export const METRICS_FILE = join(OPENCLAW_DIR, "cli-bridge", "metrics.json");
+
 /** Temporary directory for multimodal media files. */
 export const MEDIA_TMP_DIR = join(tmpdir(), "cli-bridge-media");
 

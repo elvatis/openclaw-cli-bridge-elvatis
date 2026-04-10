@@ -19,7 +19,7 @@ import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrow
 import type { BrowserContext } from "playwright";
 import { renderStatusPage, type StatusProvider } from "./status-template.js";
 import { sessionManager } from "./session-manager.js";
-import { metrics } from "./metrics.js";
+import { metrics, estimateTokens } from "./metrics.js";
 import { providerSessions } from "./provider-sessions.js";
 import {
   DEFAULT_PROXY_TIMEOUT_MS,
@@ -337,6 +337,10 @@ async function handleRequest(
     // Extract multimodal content (images, audio) from messages → temp files
     const { cleanMessages, mediaFiles } = extractMultimodalParts(messages);
 
+    // Estimate prompt tokens from message content (used when CLIs don't report usage)
+    const promptText = cleanMessages.map(m => typeof m.content === "string" ? m.content : "").join(" ");
+    const estPromptTokens = estimateTokens(promptText);
+
     opts.log(`[cli-bridge] ${model} · ${cleanMessages.length} msg(s) · stream=${stream}${hasTools ? ` · tools=${tools!.length}` : ""}${mediaFiles.length ? ` · media=${mediaFiles.length}` : ""}`);
 
     const id = `chatcmpl-cli-${randomBytes(6).toString("hex")}`;
@@ -385,7 +389,7 @@ async function handleRequest(
           }));
         }
       } catch (err) {
-        metrics.recordRequest(model, Date.now() - grokStart, false);
+        metrics.recordRequest(model, Date.now() - grokStart, false, estPromptTokens);
         const msg = (err as Error).message;
         opts.warn(`[cli-bridge] Grok error for ${model}: ${msg}`);
         if (!res.headersSent) {
@@ -423,22 +427,23 @@ async function handleRequest(
             (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }),
             opts.log
           );
-          metrics.recordRequest(model, Date.now() - geminiStart, true);
+          metrics.recordRequest(model, Date.now() - geminiStart, true, estPromptTokens, estimateTokens(result.content));
           sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
           res.write("data: [DONE]\n\n");
           res.end();
         } else {
           const result = await doGeminiComplete(geminiCtx, { messages: geminiMessages, model, timeoutMs }, opts.log);
-          metrics.recordRequest(model, Date.now() - geminiStart, true);
+          const estComp = estimateTokens(result.content);
+          metrics.recordRequest(model, Date.now() - geminiStart, true, estPromptTokens, estComp);
           res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
           res.end(JSON.stringify({
             id, object: "chat.completion", created, model,
             choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: result.finishReason }],
-            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            usage: { prompt_tokens: estPromptTokens, completion_tokens: estComp, total_tokens: estPromptTokens + estComp },
           }));
         }
       } catch (err) {
-        metrics.recordRequest(model, Date.now() - geminiStart, false);
+        metrics.recordRequest(model, Date.now() - geminiStart, false, estPromptTokens);
         const msg = (err as Error).message;
         opts.warn(`[cli-bridge] Gemini browser error for ${model}: ${msg}`);
         if (!res.headersSent) {
@@ -476,22 +481,23 @@ async function handleRequest(
             (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }),
             opts.log
           );
-          metrics.recordRequest(model, Date.now() - claudeStart, true);
+          metrics.recordRequest(model, Date.now() - claudeStart, true, estPromptTokens, estimateTokens(result.content));
           sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
           res.write("data: [DONE]\n\n");
           res.end();
         } else {
           const result = await doClaudeComplete(claudeCtx, { messages: claudeMessages, model, timeoutMs }, opts.log);
-          metrics.recordRequest(model, Date.now() - claudeStart, true);
+          const estComp = estimateTokens(result.content);
+          metrics.recordRequest(model, Date.now() - claudeStart, true, estPromptTokens, estComp);
           res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
           res.end(JSON.stringify({
             id, object: "chat.completion", created, model,
             choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: result.finishReason }],
-            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            usage: { prompt_tokens: estPromptTokens, completion_tokens: estComp, total_tokens: estPromptTokens + estComp },
           }));
         }
       } catch (err) {
-        metrics.recordRequest(model, Date.now() - claudeStart, false);
+        metrics.recordRequest(model, Date.now() - claudeStart, false, estPromptTokens);
         const msg = (err as Error).message;
         opts.warn(`[cli-bridge] Claude browser error for ${model}: ${msg}`);
         if (!res.headersSent) {
@@ -530,22 +536,23 @@ async function handleRequest(
             (token) => sendSseChunk(res, { id, created, model, delta: { content: token }, finish_reason: null }),
             opts.log
           );
-          metrics.recordRequest(model, Date.now() - chatgptStart, true);
+          metrics.recordRequest(model, Date.now() - chatgptStart, true, estPromptTokens, estimateTokens(result.content));
           sendSseChunk(res, { id, created, model, delta: {}, finish_reason: result.finishReason });
           res.write("data: [DONE]\n\n");
           res.end();
         } else {
           const result = await doChatGPTComplete(chatgptCtx, { messages: chatgptMessages, model: chatgptModel, timeoutMs }, opts.log);
-          metrics.recordRequest(model, Date.now() - chatgptStart, true);
+          const estComp = estimateTokens(result.content);
+          metrics.recordRequest(model, Date.now() - chatgptStart, true, estPromptTokens, estComp);
           res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
           res.end(JSON.stringify({
             id, object: "chat.completion", created, model,
             choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: result.finishReason }],
-            usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+            usage: { prompt_tokens: estPromptTokens, completion_tokens: estComp, total_tokens: estPromptTokens + estComp },
           }));
         }
       } catch (err) {
-        metrics.recordRequest(model, Date.now() - chatgptStart, false);
+        metrics.recordRequest(model, Date.now() - chatgptStart, false, estPromptTokens);
         const msg = (err as Error).message;
         opts.warn(`[cli-bridge] ChatGPT browser error for ${model}: ${msg}`);
         if (!res.headersSent) {
@@ -683,7 +690,8 @@ async function handleRequest(
     const cliStart = Date.now();
     try {
       result = await routeToCliRunner(model, cleanMessages, effectiveTimeout, routeOpts);
-      metrics.recordRequest(model, Date.now() - cliStart, true);
+      const estCompletionTokens = estimateTokens(result.content ?? "");
+      metrics.recordRequest(model, Date.now() - cliStart, true, estPromptTokens, estCompletionTokens);
       providerSessions.recordRun(session.id, false);
     } catch (err) {
       const primaryDuration = Date.now() - cliStart;
@@ -694,17 +702,18 @@ async function handleRequest(
       providerSessions.recordRun(session.id, isTimeout);
       const fallbackModel = opts.modelFallbacks?.[model];
       if (fallbackModel) {
-        metrics.recordRequest(model, primaryDuration, false);
+        metrics.recordRequest(model, primaryDuration, false, estPromptTokens);
         const reason = isTimeout ? `timeout by supervisor, session=${session.id} preserved` : msg;
         opts.warn(`[cli-bridge] ${model} failed (${reason}), falling back to ${fallbackModel}`);
         const fallbackStart = Date.now();
         try {
           result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
-          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true);
+          const fbCompTokens = estimateTokens(result.content ?? "");
+          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens);
           usedModel = fallbackModel;
           opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded`);
         } catch (fallbackErr) {
-          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, false);
+          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, false, estPromptTokens);
           const fallbackMsg = (fallbackErr as Error).message;
           opts.warn(`[cli-bridge] fallback ${fallbackModel} also failed: ${fallbackMsg}`);
           if (sseHeadersSent) {
@@ -718,7 +727,7 @@ async function handleRequest(
           return;
         }
       } else {
-        metrics.recordRequest(model, primaryDuration, false);
+        metrics.recordRequest(model, primaryDuration, false, estPromptTokens);
         opts.warn(`[cli-bridge] CLI error for ${model}: ${msg}`);
         if (sseHeadersSent) {
           res.write(`data: ${JSON.stringify({ error: { message: msg, type: "cli_error" } })}\n\n`);
@@ -806,7 +815,11 @@ async function handleRequest(
             finish_reason: finishReason,
           },
         ],
-        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        usage: {
+          prompt_tokens: estPromptTokens,
+          completion_tokens: estimateTokens(typeof message.content === "string" ? message.content : ""),
+          total_tokens: estPromptTokens + estimateTokens(typeof message.content === "string" ? message.content : ""),
+        },
         // Propagate session ID so callers can resume in the same session
         provider_session_id: session.id,
       };
