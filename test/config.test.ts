@@ -67,12 +67,15 @@ describe("config.ts exports", () => {
     expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-pro"]).toBe(300_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-flash"]).toBe(180_000);
     expect(DEFAULT_MODEL_TIMEOUTS["openai-codex/gpt-5.4"]).toBe(300_000);
+    expect(DEFAULT_MODEL_TIMEOUTS["gemini-api/gemini-2.5-pro"]).toBe(300_000);
+    expect(DEFAULT_MODEL_TIMEOUTS["gemini-api/gemini-2.5-flash"]).toBe(180_000);
   });
 
   it("exports model fallback chains", () => {
     expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-sonnet-4-6"]).toBe("cli-claude/claude-haiku-4-5");
     expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-opus-4-6"]).toBe("cli-claude/claude-sonnet-4-6");
     expect(DEFAULT_MODEL_FALLBACKS["cli-gemini/gemini-2.5-pro"]).toBe("cli-gemini/gemini-2.5-flash");
+    expect(DEFAULT_MODEL_FALLBACKS["gemini-api/gemini-2.5-pro"]).toBe("gemini-api/gemini-2.5-flash");
   });
 
   it("exports path constants rooted in ~/.openclaw", () => {

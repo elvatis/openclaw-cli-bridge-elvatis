@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.7.3`
+**Current version:** `2.8.0`
 
 ---
 
@@ -405,6 +405,14 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.8.0
+- **feat:** Gemini API provider (`gemini-api/gemini-2.5-flash`, `gemini-api/gemini-2.5-pro`) — direct Google Generative AI SDK integration with native **image generation** support via `responseModalities: ["TEXT", "IMAGE"]`. No CLI subprocess overhead, no browser needed.
+- **feat:** Images returned as base64 data URIs in OpenAI-compatible `content_parts` format — works with OpenClaw multimodal rendering
+- **feat:** Native Gemini tool calling — converts OpenAI tool format to Gemini `functionDeclarations`, parses `functionCall` responses back to `tool_calls`
+- **feat:** Real token usage from Gemini API (no estimation needed)
+- **config:** API key via `GOOGLE_API_KEY` env var or `~/.openclaw/.env`
+- **test:** 17 new tests — message conversion, tool conversion, proxy routing, streaming (278 total)
 
 ### v2.7.3
 - **fix:** Gemini image generation timeouts — Gemini Pro models bumped from 180s → 300s base timeout, Flash models from 90s → 180s. Image generation needs significantly more time than text completion.

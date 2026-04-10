@@ -101,6 +101,8 @@ export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
   "openai-codex/gpt-5.4":             300_000,
   "openai-codex/gpt-5.3-codex":       180_000,
   "openai-codex/gpt-5.1-codex-mini":   90_000,
+  "gemini-api/gemini-2.5-pro":        300_000,  // 5 min — image generation needs time
+  "gemini-api/gemini-2.5-flash":      180_000,  // 3 min
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -116,6 +118,7 @@ export const DEFAULT_MODEL_FALLBACKS: Record<string, string> = {
   "cli-gemini/gemini-3-pro-preview":  "cli-gemini/gemini-3-flash-preview",
   "cli-claude/claude-opus-4-6":       "cli-claude/claude-sonnet-4-6",
   "cli-claude/claude-sonnet-4-6":     "cli-claude/claude-haiku-4-5",
+  "gemini-api/gemini-2.5-pro":       "gemini-api/gemini-2.5-flash",
 };
 
 // ──────────────────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
   "id": "openclaw-cli-bridge-elvatis",
   "slug": "openclaw-cli-bridge-elvatis",
   "name": "OpenClaw CLI Bridge",
-  "version": "2.7.3",
+  "version": "2.8.0",
   "license": "MIT",
   "description": "Phase 1: openai-codex auth bridge. Phase 2: local HTTP proxy routing model calls through gemini/claude CLIs (vllm provider).",
   "providers": [
@@ -52,7 +52,9 @@
           "cli-gemini/gemini-3-flash-preview": 180000,
           "openai-codex/gpt-5.4": 300000,
           "openai-codex/gpt-5.3-codex": 180000,
-          "openai-codex/gpt-5.1-codex-mini": 90000
+          "openai-codex/gpt-5.1-codex-mini": 90000,
+          "gemini-api/gemini-2.5-pro": 300000,
+          "gemini-api/gemini-2.5-flash": 180000
         }
       }
     }
