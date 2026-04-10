@@ -16,6 +16,7 @@ import { grokComplete, grokCompleteStream, type ChatMessage as GrokChatMessage }
 import { geminiComplete, geminiCompleteStream, type ChatMessage as GeminiBrowserChatMessage } from "./gemini-browser.js";
 import { claudeComplete, claudeCompleteStream, type ChatMessage as ClaudeBrowserChatMessage } from "./claude-browser.js";
 import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrowserChatMessage } from "./chatgpt-browser.js";
+import { geminiApiComplete, geminiApiCompleteStream, type GeminiApiResult, type ContentPart } from "./gemini-api-runner.js";
 import type { BrowserContext } from "playwright";
 import { renderStatusPage, type StatusProvider } from "./status-template.js";
 import { sessionManager } from "./session-manager.js";
@@ -74,6 +75,10 @@ export interface ProxyServerOptions {
   _chatgptComplete?: typeof chatgptComplete;
   /** Override for testing — replaces chatgptCompleteStream */
   _chatgptCompleteStream?: typeof chatgptCompleteStream;
+  /** Override for testing — replaces geminiApiComplete */
+  _geminiApiComplete?: typeof geminiApiComplete;
+  /** Override for testing — replaces geminiApiCompleteStream */
+  _geminiApiCompleteStream?: typeof geminiApiCompleteStream;
   /** Returns human-readable expiry string for each web provider (null = no login yet) */
   getExpiryInfo?: () => {
     grok: string | null;
@@ -140,6 +145,9 @@ export const CLI_MODELS = [
   { id: "web-gemini/gemini-3-flash",   name: "Gemini 3 Flash (web session)",   contextWindow: 1_048_576, maxTokens: 65_536 },
   // Claude → use cli-claude/* instead (web-claude removed in v1.6.x)
   // ChatGPT → use openai-codex/* or copilot-proxy instead (web-chatgpt removed in v1.6.x)
+  // ── Gemini API (native SDK, supports image generation) ─────────────────
+  { id: "gemini-api/gemini-2.5-flash", name: "Gemini 2.5 Flash (API)", contextWindow: 1_048_576, maxTokens: 65_535 },
+  { id: "gemini-api/gemini-2.5-pro",   name: "Gemini 2.5 Pro (API)",   contextWindow: 1_048_576, maxTokens: 65_535 },
   // ── OpenCode CLI ──────────────────────────────────────────────────────────
   { id: "opencode/default",             name: "OpenCode (CLI)",             contextWindow: 128_000,   maxTokens: 16_384 },
   // ── Pi CLI ──────────────────────────────────────────────────────────────
@@ -558,6 +566,94 @@ async function handleRequest(
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ error: { message: msg, type: "chatgpt_browser_error" } }));
+        }
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Gemini API routing (native SDK — supports image generation) ─────────
+    // Strip vllm/ prefix if present — OpenClaw sends full provider path
+    const geminiApiModel = model.startsWith("vllm/") ? model.slice(5) : model;
+    if (geminiApiModel.startsWith("gemini-api/")) {
+      const doComplete = opts._geminiApiComplete ?? geminiApiComplete;
+      const doCompleteStream = opts._geminiApiCompleteStream ?? geminiApiCompleteStream;
+      const perModelTimeout = opts.modelTimeouts?.[geminiApiModel];
+      const timeoutMs = perModelTimeout ?? opts.timeoutMs ?? 180_000;
+      const apiStart = Date.now();
+      const apiOpts = { model: geminiApiModel, timeoutMs, tools: hasTools ? tools : undefined, log: opts.log };
+      try {
+        if (stream) {
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
+          sendSseChunk(res, { id, created, model: geminiApiModel, delta: { role: "assistant" }, finish_reason: null });
+          const result = await doCompleteStream(
+            cleanMessages,
+            apiOpts,
+            (token) => sendSseChunk(res, { id, created, model: geminiApiModel, delta: { content: token }, finish_reason: null })
+          );
+          const estComp = typeof result.content === "string" ? estimateTokens(result.content) : (result.completionTokens ?? 0);
+          metrics.recordRequest(geminiApiModel, Date.now() - apiStart, true, estPromptTokens, estComp);
+          // If images were generated during streaming, send the full multimodal content as a final chunk
+          if (Array.isArray(result.content)) {
+            sendSseChunk(res, { id, created, model: geminiApiModel, delta: { content: JSON.stringify(result.content) }, finish_reason: null });
+          }
+          if (result.tool_calls?.length) {
+            const toolCalls = result.tool_calls;
+            sendSseChunk(res, {
+              id, created, model: geminiApiModel,
+              delta: {
+                tool_calls: toolCalls.map((tc, idx) => ({
+                  index: idx, id: tc.id, type: "function",
+                  function: { name: tc.function.name, arguments: "" },
+                })),
+              },
+              finish_reason: null,
+            });
+            for (let idx = 0; idx < toolCalls.length; idx++) {
+              sendSseChunk(res, {
+                id, created, model: geminiApiModel,
+                delta: { tool_calls: [{ index: idx, function: { arguments: toolCalls[idx].function.arguments } }] },
+                finish_reason: null,
+              });
+            }
+            sendSseChunk(res, { id, created, model: geminiApiModel, delta: {}, finish_reason: "tool_calls" });
+          } else {
+            sendSseChunk(res, { id, created, model: geminiApiModel, delta: {}, finish_reason: result.finishReason });
+          }
+          res.write("data: [DONE]\n\n");
+          res.end();
+        } else {
+          const result = await doComplete(cleanMessages, apiOpts);
+          const estComp = typeof result.content === "string"
+            ? estimateTokens(result.content)
+            : (result.completionTokens ?? 0);
+          metrics.recordRequest(geminiApiModel, Date.now() - apiStart, true, estPromptTokens, estComp);
+          const message: Record<string, unknown> = { role: "assistant" };
+          if (result.tool_calls?.length) {
+            message.content = null;
+            message.tool_calls = result.tool_calls;
+          } else {
+            message.content = result.content;
+          }
+          const finishReason = result.tool_calls?.length ? "tool_calls" : result.finishReason;
+          res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({
+            id, object: "chat.completion", created, model: geminiApiModel,
+            choices: [{ index: 0, message, finish_reason: finishReason }],
+            usage: {
+              prompt_tokens: result.promptTokens ?? estPromptTokens,
+              completion_tokens: result.completionTokens ?? estComp,
+              total_tokens: (result.promptTokens ?? estPromptTokens) + (result.completionTokens ?? estComp),
+            },
+          }));
+        }
+      } catch (err) {
+        metrics.recordRequest(geminiApiModel, Date.now() - apiStart, false, estPromptTokens);
+        const msg = (err as Error).message;
+        opts.warn(`[cli-bridge] Gemini API error for ${geminiApiModel}: ${msg}`);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({ error: { message: msg, type: "gemini_api_error" } }));
         }
       }
       return;
