@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.2.0`
+**Current version:** `2.2.1`
 
 ---
 
@@ -375,6 +375,9 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.2.1
+- **fix:** Config-patcher now validates `apiKey` value — re-patches if `__OPENCLAW_KEEP__` or any wrong value is present (prevents vllm 401 Unauthorized after config migrations)
 
 ### v2.2.0
 - **fix:** Module-level guards prevent duplicate log spam — `register()` is called per-agent (~11×), now logs Chrome/provider/commands only once

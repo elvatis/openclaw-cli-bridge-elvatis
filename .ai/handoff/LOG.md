@@ -4,6 +4,38 @@ _Last 10 sessions. Older entries in LOG-ARCHIVE.md._
 
 ---
 
+## 2026-04-10 — Session 10 (Claude Opus 4.6)
+
+> **Agent:** claude-opus-4-6
+> **Phase:** fix
+> **Commit before:** v2.2.0
+> **Commit after:** v2.2.1
+
+**T-018: Fix vllm apiKey corruption causing 401 + harden config-patcher**
+
+### Problem
+The vllm provider in `~/.openclaw/openclaw.json` had `"apiKey": "__OPENCLAW_KEEP__"` instead of `"cli-bridge"`. The CLI bridge proxy on port 31337 expects `Authorization: Bearer cli-bridge` and rejects any other value with HTTP 401.
+
+This caused all `vllm/cli-claude/*` requests to fail silently, triggering the self-healing plugin's model fallback to `openai-codex/gpt-5.1`.
+
+**Root cause:** An OpenClaw config migration overwrote the apiKey with the marker value `__OPENCLAW_KEEP__`. The config-patcher only checked whether cli-bridge models existed (line 46–53) — if they did, it skipped re-patching even though the apiKey was wrong.
+
+### Fix (src/config-patcher.ts)
+- Added `existingApiKey` / `hasCorrectApiKey` check to the skip-guard (line 55)
+- Patcher now re-patches if `apiKey !== "cli-bridge"`, preventing recurrence after future config migrations
+
+### Also in this session
+- Fixed `~/.openclaw/openclaw.json` directly: `"apiKey": "__OPENCLAW_KEEP__"` → `"cli-bridge"`
+- Gateway restarted — no 401 errors, self-heal model order confirmed working
+
+### Build
+- `npm run build` — ✅ (pre-existing TS errors from missing openclaw/plugin-sdk, JS emitted via `--noEmitOnError false`)
+
+### Version
+2.2.0 → 2.2.1
+
+---
+
 ## 2026-04-09 — Session 9 (Claude Opus 4.6)
 
 > **Agent:** claude-opus-4-6
