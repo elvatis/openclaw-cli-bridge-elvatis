@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.7.0`
+**Current version:** `2.7.1`
 
 ---
 
@@ -405,6 +405,11 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.7.1
+- **fix:** Fallback model `openai-codex/gpt-5.1` → `openai-codex/gpt-5.2-codex` — the bare `gpt-5.1` model ID doesn't exist in the CLI bridge allowlist, causing fallback failures with "model not allowed" errors
+- **fix:** Broken aliases `gpt51`, `gpt52`, `gemini25`, `gemini25-flash` now point to working CLI bridge models instead of non-existent providers (`google-gemini-cli`, bare `openai-codex` IDs)
+- **docs:** Perplexity `sonar-pro` tool incompatibility documented — API rejects tool parameters with `400 Tool parameters must be a JSON object`, tracked upstream as [openclaw/openclaw#64175](https://github.com/openclaw/openclaw/issues/64175). Fallback chain handles this correctly.
 
 ### v2.7.0
 - **feat:** Persistent per-model metrics — request counts, error rates, latency, and token usage now survive gateway restarts. Stored in `~/.openclaw/cli-bridge/metrics.json`, debounced writes (5s).
