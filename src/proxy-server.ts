@@ -104,9 +104,9 @@ export interface ProxyServerOptions {
    *
    * Example:
    *   {
-   *     "cli-claude/claude-sonnet-4-6": 180_000,   // 3 min for interactive chat
-   *     "cli-claude/claude-opus-4-6":   300_000,    // 5 min for heavy tasks
-   *     "cli-claude/claude-haiku-4-5":  90_000,     // 90s for fast responses
+   *     "cli-claude/claude-sonnet-4-6": 420_000,   // 7 min for interactive chat
+   *     "cli-claude/claude-opus-4-6":   420_000,    // 7 min for heavy tasks
+   *     "cli-claude/claude-haiku-4-5":  120_000,    // 2 min for fast responses
    *   }
    *
    * When not set for a model, falls back to proxyTimeoutMs (default 300s base).
