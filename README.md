@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.8.1`
+**Current version:** `2.8.2`
 
 ---
 
@@ -405,6 +405,10 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.8.2
+- **fix:** increase Sonnet-4-6 and Opus-4-6 base timeout 300s→420s (7 min) to prevent premature timeout→Haiku fallback on large webchat sessions
+- **fix:** increase Haiku-4-5 base timeout 90s→120s for better reliability as fallback model
 
 ### v2.8.1
 - **fix:** increase Sonnet-4-6 base timeout from 180s to 300s to prevent premature SIGTERM kills causing FailoverError fallback to gpt-5.2-codex

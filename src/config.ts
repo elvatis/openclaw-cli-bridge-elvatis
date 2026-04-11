@@ -86,14 +86,14 @@ export const PROVIDER_SESSION_SWEEP_MS = 10 * 60 * 1_000; // 10 min
  * Override via `modelTimeouts` in plugin config.
  *
  * Strategy:
- *   - Heavy/agentic models (Opus, GPT-5.4): 5 min — need time for tool use
- *   - Standard interactive (Sonnet, Pro, GPT-5.3): 3 min
- *   - Fast/lightweight (Haiku, Flash, Mini): 90s
+ *   - Heavy/agentic models (Opus, GPT-5.4): 7 min — need time for tool use + large sessions
+ *   - Standard interactive (Sonnet, Pro, GPT-5.3): 7 min — prevents premature fallback to Haiku
+ *   - Fast/lightweight (Haiku, Flash, Mini): 120s
  */
 export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
-  "cli-claude/claude-opus-4-6":        300_000,  // 5 min
-  "cli-claude/claude-sonnet-4-6":      300_000,  // 5 min — match idleTimeoutSeconds
-  "cli-claude/claude-haiku-4-5":        90_000,  // 90s
+  "cli-claude/claude-opus-4-6":        420_000,  // 7 min
+  "cli-claude/claude-sonnet-4-6":      420_000,  // 7 min — prevent timeout→Haiku fallback on large sessions
+  "cli-claude/claude-haiku-4-5":       120_000,  // 2 min
   "cli-gemini/gemini-2.5-pro":         300_000,  // 5 min — image generation needs more time
   "cli-gemini/gemini-2.5-flash":       180_000,  // 3 min
   "cli-gemini/gemini-3-pro-preview":   300_000,  // 5 min — image generation needs more time
