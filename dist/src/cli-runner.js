@@ -397,9 +397,11 @@ export async function runGemini(prompt, modelId, timeoutMs, workdir, opts) {
     // --approval-mode yolo: auto-approve all tool executions, never ask questions
     const args = ["-m", model, "-p", "", "--approval-mode", "yolo"];
     const cwd = workdir ?? tmpdir();
-    // When tools are present, prepend tool instructions to prompt
+    // When tools are present, sandwich the conversation between tool instructions.
+    // The reminder at the end ensures models (especially Haiku) remember the JSON format
+    // after processing a long conversation history.
     const effectivePrompt = opts?.tools?.length
-        ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt
+        ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
         : prompt;
     const result = await runCli("gemini", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
     // Filter out [WARN] lines from stderr (Gemini emits noisy permission warnings)
@@ -435,11 +437,14 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
         "--dangerously-skip-permissions",
         "--model", model,
     ];
-    // When tools are present, prepend tool instructions to prompt
+    // When tools are present, sandwich the conversation between tool instructions.
+    // The reminder at the end ensures models (especially Haiku) remember the JSON format
+    // after processing a long conversation history.
     const effectivePrompt = opts?.tools?.length
-        ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt
+        ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
         : prompt;
     const cwd = workdir ?? homedir();
+    debugLog("CLAUDE", `spawn ${model}`, { promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024), cwd, timeoutMs: Math.round(timeoutMs / 1000) });
     const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
     // On 401: attempt one token refresh + retry before giving up.
     if (result.exitCode !== 0 && result.stdout.length === 0) {
@@ -497,9 +502,11 @@ export async function runCodex(prompt, modelId, timeoutMs, workdir, opts) {
     const cwd = workdir ?? homedir();
     // Codex requires a git repo in the working directory
     ensureGitRepo(cwd);
-    // When tools are present, prepend tool instructions to prompt
+    // When tools are present, sandwich the conversation between tool instructions.
+    // The reminder at the end ensures models (especially Haiku) remember the JSON format
+    // after processing a long conversation history.
     const effectivePrompt = opts?.tools?.length
-        ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt
+        ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
         : prompt;
     const result = await runCli("codex", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
     if (result.exitCode !== 0 && result.stdout.length === 0) {
