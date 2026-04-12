@@ -8,7 +8,7 @@
  * OpenClaw connects via the "vllm" provider with baseUrl pointing here.
  */
 import http from "node:http";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import { routeToCliRunner, extractMultimodalParts, cleanupMediaFiles } from "./cli-runner.js";
 import { scheduleTokenRefresh, setAuthLogger, stopTokenRefresh } from "./claude-auth.js";
 import { grokComplete, grokCompleteStream } from "./grok-client.js";
@@ -21,7 +21,109 @@ import { sessionManager } from "./session-manager.js";
 import { metrics, estimateTokens } from "./metrics.js";
 import { providerSessions } from "./provider-sessions.js";
 import { DEFAULT_PROXY_TIMEOUT_MS, MAX_EFFECTIVE_TIMEOUT_MS, TIMEOUT_PER_EXTRA_MSG_MS, TIMEOUT_PER_TOOL_MS, SSE_KEEPALIVE_INTERVAL_MS, DEFAULT_BITNET_SERVER_URL, BITNET_MAX_MESSAGES, BITNET_SYSTEM_PROMPT, DEFAULT_MODEL_TIMEOUTS, } from "./config.js";
-import { debugLog, DEBUG_LOG_PATH, getLogTail, watchLogFile } from "./debug-log.js";
+import { debugLog, DEBUG_LOG_PATH, getLogTail, watchLogFile, setDebugLogEnabled } from "./debug-log.js";
+// ── Skill delegation via openclaw agent ─────────────────────────────────────
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { spawn as spawnChild } from "node:child_process";
+const activeDelegations = new Set();
+function extractUserText(messages) {
+    return messages
+        .filter((m) => m.role === "user")
+        .map((m) => {
+        if (typeof m.content === "string")
+            return m.content;
+        if (Array.isArray(m.content)) {
+            return m.content
+                .filter((p) => p.type === "text" && p.text)
+                .map((p) => p.text)
+                .join(" ");
+        }
+        return "";
+    })
+        .join(" ");
+}
+let _skillNames = null;
+let _skillNamesAt = 0;
+function getSkillNames() {
+    const now = Date.now();
+    if (_skillNames && (now - _skillNamesAt) < 120_000)
+        return _skillNames;
+    _skillNames = [];
+    const dir = join(homedir(), ".openclaw", "skills");
+    try {
+        if (!existsSync(dir))
+            return _skillNames;
+        for (const name of readdirSync(dir)) {
+            try {
+                if (statSync(join(dir, name)).isDirectory() && existsSync(join(dir, name, "SKILL.md"))) {
+                    _skillNames.push(name);
+                }
+            }
+            catch { }
+        }
+    }
+    catch { }
+    _skillNamesAt = now;
+    return _skillNames;
+}
+function detectMatchedSkill(userText) {
+    for (const name of getSkillNames()) {
+        const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+        if (re.test(userText))
+            return name;
+    }
+    return null;
+}
+async function delegateToAgent(prompt, timeoutMs) {
+    const start = Date.now();
+    const timeoutSec = Math.min(Math.floor(timeoutMs / 1000), 300);
+    return new Promise((resolve, reject) => {
+        // Use the same Node + openclaw entry point as the systemd service to avoid version mismatches
+        const openclawEntry = join(homedir(), ".npm-global", "lib", "node_modules", "openclaw", "dist", "entry.js");
+        const useEntryJs = existsSync(openclawEntry);
+        const cmd = useEntryJs ? process.execPath : "openclaw"; // process.execPath = /usr/bin/node
+        const args = useEntryJs
+            ? [openclawEntry, "agent", "--agent", "main", "--message", prompt, "--json", "--timeout", String(timeoutSec)]
+            : ["agent", "--agent", "main", "--message", prompt, "--json", "--timeout", String(timeoutSec)];
+        const child = spawnChild(cmd, args, {
+            env: { ...process.env, PATH: `${join(homedir(), ".local", "bin")}:${process.env.PATH ?? ""}` },
+            stdio: ["pipe", "pipe", "pipe"],
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout?.on("data", (d) => { stdout += d.toString(); });
+        child.stderr?.on("data", (d) => { stderr += d.toString(); });
+        const timer = setTimeout(() => { child.kill("SIGTERM"); }, timeoutMs + 10_000);
+        child.on("close", (code) => {
+            clearTimeout(timer);
+            const durationMs = Date.now() - start;
+            // Only fail if no JSON output at all — stderr always has plugin log noise
+            const hasJsonOutput = stdout.includes('"status"') || stdout.includes('"result"');
+            if (code !== 0 && !hasJsonOutput) {
+                // Filter out plugin log lines from stderr to find real errors
+                const realErrors = stderr.split("\n").filter(l => !l.includes("[plugins]") && !l.includes("[memory-") && l.trim()).join("\n");
+                reject(new Error(`openclaw agent exited ${code}: ${realErrors.slice(0, 500) || stderr.slice(0, 500)}`));
+                return;
+            }
+            try {
+                const jsonStart = stdout.indexOf("{");
+                if (jsonStart === -1) {
+                    reject(new Error("No JSON in openclaw agent output"));
+                    return;
+                }
+                const result = JSON.parse(stdout.slice(jsonStart));
+                const text = result?.result?.payloads?.[0]?.text ?? result?.result?.text ?? "";
+                resolve({ text, durationMs });
+            }
+            catch (e) {
+                reject(new Error(`Failed to parse agent result: ${e.message}`));
+            }
+        });
+        child.on("error", (err) => { clearTimeout(timer); reject(err); });
+    });
+}
 const activeRequests = new Map();
 export function getActiveRequests() {
     return [...activeRequests.values()];
@@ -101,6 +203,9 @@ export function startProxyServer(opts) {
                 reject(err);
             }
         });
+        // Disable debug file logging for test instances (port 0) to avoid polluting production logs
+        if (opts.port === 0)
+            setDebugLogEnabled(false);
         server.listen(opts.port, "127.0.0.1", () => {
             opts.log(`[cli-bridge] proxy listening on :${opts.port}`);
             debugLog("STARTUP", `proxy listening on :${opts.port}`, { debugLog: DEBUG_LOG_PATH });
@@ -311,6 +416,9 @@ async function handleRequest(req, res, opts) {
         const lastUserMsg = [...cleanMessages].reverse().find(m => m.role === "user");
         const promptPreview = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.slice(0, 80) : "";
         debugLog("REQ", `${model} start`, { msgs: cleanMessages.length, tools: tools?.length ?? 0, stream, media: mediaFiles.length, promptPreview: promptPreview.slice(0, 60) });
+        if (hasTools && tools.length > 0) {
+            debugLog("TOOLS", `${tools.length} tools available`, { names: tools.map(t => t.function?.name ?? t.name ?? "?").join(", ") });
+        }
         // Track active request for dashboard
         activeRequests.set(id, { id, model, startedAt: Date.now(), messageCount: cleanMessages.length, toolCount: tools?.length ?? 0, promptPreview });
         // ── Grok web-session routing ──────────────────────────────────────────────
@@ -685,6 +793,85 @@ async function handleRequest(req, res, opts) {
             return;
         }
         // ─────────────────────────────────────────────────────────────────────────
+        // ── Skill delegation: delegate to openclaw agent for full workflow execution ──
+        const userText = extractUserText(cleanMessages);
+        const matchedSkill = detectMatchedSkill(userText);
+        const delegationKey = matchedSkill ? `${matchedSkill}:${createHash("md5").update(userText.slice(0, 500)).digest("hex").slice(0, 12)}` : null;
+        // TODO: delegation needs a multi-turn agent runner, not single-turn `openclaw agent`.
+        // `openclaw agent` returns after one turn (220ms) without executing the full workflow.
+        // Re-enable when OpenClaw supports multi-turn skill execution (e.g., `openclaw skill run blog-writer`).
+        if (false && matchedSkill && delegationKey && activeDelegations.size === 0) {
+            debugLog("DELEGATE", `skill "${matchedSkill}" detected, delegating to openclaw agent`, { msgs: cleanMessages.length });
+            activeDelegations.add(delegationKey);
+            // Send SSE headers early if streaming
+            if (stream) {
+                res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
+                res.write(": delegating to openclaw agent\n\n");
+                // Keepalive while agent runs
+                const ka = setInterval(() => { res.write(": agent working\n\n"); }, 15_000);
+                try {
+                    const lastUser = [...cleanMessages].reverse().find(m => m.role === "user");
+                    const delegatePrompt = typeof lastUser?.content === "string" ? lastUser.content
+                        : Array.isArray(lastUser?.content) ? lastUser.content.filter(p => p.type === "text").map(p => p.text).join(" ")
+                            : userText.slice(-2000);
+                    const agentResult = await delegateToAgent(delegatePrompt, MAX_EFFECTIVE_TIMEOUT_MS);
+                    debugLog("DELEGATE-OK", `skill "${matchedSkill}" completed in ${(agentResult.durationMs / 1000).toFixed(1)}s`, { contentLen: agentResult.text.length });
+                    metrics.recordRequest(model, agentResult.durationMs, true, estPromptTokens, estimateTokens(agentResult.text), promptPreview);
+                    const chunk = { id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: { role: "assistant", content: agentResult.text }, finish_reason: "stop" }] };
+                    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+                    res.write("data: [DONE]\n\n");
+                    res.end();
+                }
+                catch (err) {
+                    const msg = err.message;
+                    debugLog("DELEGATE-FAIL", `skill "${matchedSkill}" failed`, { error: msg.slice(0, 200) });
+                    opts.warn(`[cli-bridge] agent delegation failed: ${msg.slice(0, 100)}, falling through to CLI`);
+                    // Fall through to normal CLI routing below
+                    clearInterval(ka);
+                    activeDelegations.delete(delegationKey);
+                    // Can't fall through after sending SSE headers — send error
+                    res.write(`data: ${JSON.stringify({ error: { message: `Agent delegation failed: ${msg.slice(0, 200)}. Retrying via CLI.`, type: "cli_error" } })}\n\n`);
+                    res.write("data: [DONE]\n\n");
+                    res.end();
+                    activeRequests.delete(id);
+                    cleanupMediaFiles(mediaFiles);
+                    return;
+                }
+                finally {
+                    clearInterval(ka);
+                    activeDelegations.delete(delegationKey);
+                }
+                activeRequests.delete(id);
+                cleanupMediaFiles(mediaFiles);
+                return;
+            }
+            // Non-streaming delegation
+            try {
+                const lastUser = [...cleanMessages].reverse().find(m => m.role === "user");
+                const delegatePrompt = typeof lastUser?.content === "string" ? lastUser.content
+                    : Array.isArray(lastUser?.content) ? lastUser.content.filter(p => p.type === "text").map(p => p.text).join(" ")
+                        : userText.slice(-2000);
+                const agentResult = await delegateToAgent(delegatePrompt, MAX_EFFECTIVE_TIMEOUT_MS);
+                debugLog("DELEGATE-OK", `skill "${matchedSkill}" completed in ${(agentResult.durationMs / 1000).toFixed(1)}s`, { contentLen: agentResult.text.length });
+                res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+                res.end(JSON.stringify({
+                    id, object: "chat.completion", created, model,
+                    choices: [{ index: 0, message: { role: "assistant", content: agentResult.text }, finish_reason: "stop" }],
+                    usage: { prompt_tokens: estPromptTokens, completion_tokens: estimateTokens(agentResult.text), total_tokens: estPromptTokens + estimateTokens(agentResult.text) },
+                }));
+                activeRequests.delete(id);
+                cleanupMediaFiles(mediaFiles);
+                return;
+            }
+            catch (err) {
+                debugLog("DELEGATE-FAIL", `skill "${matchedSkill}" failed, falling through to CLI`, { error: err.message.slice(0, 200) });
+                activeDelegations.delete(delegationKey);
+                // Fall through to normal CLI routing
+            }
+            finally {
+                activeDelegations.delete(delegationKey);
+            }
+        }
         // ── CLI runner routing (Gemini / Claude Code / Codex) ──────────────────────
         let result;
         let usedModel = model;
@@ -743,6 +930,12 @@ async function handleRequest(req, res, opts) {
         try {
             result = await routeToCliRunner(usedModel, cleanMessages, effectiveTimeout, routeOpts);
             const latencyMs = Date.now() - cliStart;
+            const hasContent = !!(result.content?.trim()) || !!(result.tool_calls?.length);
+            // Empty response = model returned nothing useful. Treat as error to trigger fallback.
+            if (!hasContent) {
+                debugLog("EMPTY", `${usedModel} returned empty after ${(latencyMs / 1000).toFixed(1)}s`, {});
+                throw new Error(`empty response: ${usedModel} returned no content and no tool_calls`);
+            }
             const estCompletionTokens = estimateTokens(result.content ?? "");
             metrics.recordRequest(usedModel, latencyMs, true, estPromptTokens, estCompletionTokens, promptPreview);
             providerSessions.recordRun(session.id, false);
@@ -767,7 +960,14 @@ async function handleRequest(req, res, opts) {
                 const reason = isTimeout ? `timeout by supervisor, session=${session.id} preserved` : msg;
                 opts.warn(`[cli-bridge] ${model} failed (${reason}), trying fallback chain: ${fallbackChain.join(" → ")}`);
                 let chainSuccess = false;
+                const lastMsg = cleanMessages[cleanMessages.length - 1];
+                const inToolLoop = hasTools && (lastMsg?.role === "tool" || lastMsg?.role === "function");
                 for (const fallbackModel of fallbackChain) {
+                    // Skip Haiku in tool loops — it consistently returns text instead of tool_calls, wasting ~8-12s
+                    if (inToolLoop && fallbackModel.includes("haiku")) {
+                        debugLog("FALLBACK-SKIP", `skipping ${fallbackModel} in tool loop (unreliable for tool_calls)`, {});
+                        continue;
+                    }
                     debugLog("FALLBACK", `${model} → ${fallbackModel}`, { reason: isTimeout ? "timeout" : "error", primaryDuration: Math.round(primaryDuration / 1000), chain: fallbackChain });
                     if (sseHeadersSent) {
                         res.write(`: fallback — trying ${fallbackModel}\n\n`);
@@ -775,6 +975,17 @@ async function handleRequest(req, res, opts) {
                     const fallbackStart = Date.now();
                     try {
                         result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
+                        const fbHasContent = !!(result.content?.trim()) || !!(result.tool_calls?.length);
+                        if (!fbHasContent) {
+                            debugLog("FALLBACK-EMPTY", `${fallbackModel} returned empty`, {});
+                            throw new Error(`empty response from ${fallbackModel}`);
+                        }
+                        // If we're in a tool loop but the fallback returned text instead of tool_calls —
+                        // it ignored the JSON format. Try next model in chain.
+                        if (inToolLoop && !result.tool_calls?.length && result.content) {
+                            debugLog("FALLBACK-NO-TOOLS", `${fallbackModel} returned text instead of tool_calls in tool loop`, { contentLen: result.content.length, preview: result.content.slice(0, 80) });
+                            throw new Error(`${fallbackModel} returned text instead of tool_calls`);
+                        }
                         const fbCompTokens = estimateTokens(result.content ?? "");
                         metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens, promptPreview);
                         metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, true);
