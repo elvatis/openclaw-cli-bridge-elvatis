@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.10.1`
+**Current version:** `3.0.0`
 
 ---
 
@@ -405,6 +405,15 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v3.0.0
+- **feat:** dashboard v2 — sidebar navigation with 9 sections (Overview, Providers, Active, Requests, Fallbacks, Sessions, Live Logs, Timeouts, Models)
+- **feat:** live log viewer — SSE-powered real-time log streaming with color-coded categories, auto-scroll, pause/resume, 500-line client buffer
+- **feat:** AJAX polling — replaces full-page meta-refresh with incremental section updates every 10s (preserves scroll position and active section)
+- **feat:** `/api/dashboard-data` endpoint — returns pre-rendered HTML sections as JSON for client-side updates
+- **feat:** `/api/logs/stream` SSE endpoint — streams debug.log in real-time with initial tail of last 100 lines
+- **feat:** mobile-responsive sidebar with hamburger toggle
+- **feat:** CLAUDE.md added with full project documentation
 
 ### v2.10.1
 - **feat:** smart tool-routing — tool-heavy requests (>8 tools) auto-route to Haiku instead of Sonnet. Haiku handles tool calls in ~11s vs Sonnet's 80-120s (with intermittent hangs). Sonnet is preserved for reasoning/text responses.

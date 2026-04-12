@@ -8,7 +8,7 @@
  *   tail -f ~/.openclaw/cli-bridge/debug.log
  */
 
-import { appendFileSync, statSync, renameSync, mkdirSync } from "node:fs";
+import { appendFileSync, readFileSync, openSync, readSync, closeSync, statSync, renameSync, mkdirSync, watchFile, unwatchFile } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -53,3 +53,49 @@ export function debugLog(category: string, message: string, data?: Record<string
 
 /** Log path for display on status page / startup messages. */
 export const DEBUG_LOG_PATH = LOG_FILE;
+
+/**
+ * Read the last N lines from the log file.
+ * Returns null if the file doesn't exist.
+ */
+export function getLogTail(lines = 100): string | null {
+  try {
+    const content = readFileSync(LOG_FILE, "utf8");
+    const allLines = content.split("\n").filter(Boolean);
+    return allLines.slice(-lines).join("\n");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Watch the log file for new content and call the callback for each new line.
+ * Returns an unwatch function to stop watching.
+ */
+export function watchLogFile(onLine: (line: string) => void): () => void {
+  let lastSize = 0;
+  try { lastSize = statSync(LOG_FILE).size; } catch { /* file doesn't exist yet */ }
+
+  const listener = () => {
+    try {
+      const stat = statSync(LOG_FILE);
+      if (stat.size <= lastSize) {
+        // File was rotated or truncated — reset
+        lastSize = 0;
+      }
+      if (stat.size > lastSize) {
+        const buf = Buffer.alloc(stat.size - lastSize);
+        const fd = openSync(LOG_FILE, "r");
+        readSync(fd, buf, 0, buf.length, lastSize);
+        closeSync(fd);
+        const newContent = buf.toString("utf8");
+        const lines = newContent.split("\n").filter(Boolean);
+        for (const line of lines) onLine(line);
+        lastSize = stat.size;
+      }
+    } catch { /* best effort */ }
+  };
+
+  watchFile(LOG_FILE, { interval: 1000 }, listener);
+  return () => { unwatchFile(LOG_FILE, listener); };
+}

@@ -18,7 +18,7 @@ import { claudeComplete, claudeCompleteStream, type ChatMessage as ClaudeBrowser
 import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrowserChatMessage } from "./chatgpt-browser.js";
 import { geminiApiComplete, geminiApiCompleteStream, type GeminiApiResult, type ContentPart } from "./gemini-api-runner.js";
 import type { BrowserContext } from "playwright";
-import { renderStatusPage, type StatusProvider } from "./status-template.js";
+import { renderStatusPage, renderDashboardData, type StatusProvider } from "./status-template.js";
 import { sessionManager } from "./session-manager.js";
 import { metrics, estimateTokens } from "./metrics.js";
 import { providerSessions } from "./provider-sessions.js";
@@ -34,7 +34,7 @@ import {
   DEFAULT_MODEL_TIMEOUTS,
   TOOL_ROUTING_THRESHOLD,
 } from "./config.js";
-import { debugLog, DEBUG_LOG_PATH } from "./debug-log.js";
+import { debugLog, DEBUG_LOG_PATH, getLogTail, watchLogFile } from "./debug-log.js";
 
 // ── Active request tracking ─────────────────────────────────────────────────
 
@@ -313,6 +313,58 @@ async function handleRequest(
     });
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
+    return;
+  }
+
+  // Dashboard data API — returns pre-rendered HTML sections for AJAX polling
+  if (url === "/api/dashboard-data" && req.method === "GET") {
+    const expiry = opts.getExpiryInfo?.() ?? { grok: null, gemini: null, claude: null, chatgpt: null };
+    const version = opts.version ?? "?";
+    const providers: StatusProvider[] = [
+      { name: "Grok",     icon: "\uD835\uDD4F",  expiry: expiry.grok,    loginCmd: "/grok-login",    ctx: opts.getGrokContext?.() ?? null },
+      { name: "Gemini",   icon: "\u2726",  expiry: expiry.gemini,  loginCmd: "/gemini-login",  ctx: opts.getGeminiContext?.() ?? null },
+      { name: "Claude",   icon: "\u25C6",  expiry: expiry.claude,  loginCmd: "/claude-login",  ctx: opts.getClaudeContext?.() ?? null },
+      { name: "ChatGPT",  icon: "\u25C9",  expiry: expiry.chatgpt, loginCmd: "/chatgpt-login", ctx: opts.getChatGPTContext?.() ?? null },
+    ];
+    const sections = renderDashboardData({
+      version, port: opts.port, providers, models: CLI_MODELS,
+      modelCommands: opts.modelCommands,
+      metrics: metrics.getMetrics(),
+      activeRequests: getActiveRequests(),
+      providerSessionsList: providerSessions.listSessions(),
+      timeoutConfig: {
+        defaults: { ...DEFAULT_MODEL_TIMEOUTS, ...(opts.modelTimeouts ?? {}) },
+        baseDefault: opts.timeoutMs ?? DEFAULT_PROXY_TIMEOUT_MS,
+        maxEffective: MAX_EFFECTIVE_TIMEOUT_MS,
+        perExtraMsg: TIMEOUT_PER_EXTRA_MSG_MS,
+        perTool: TIMEOUT_PER_TOOL_MS,
+      },
+    });
+    res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+    res.end(JSON.stringify(sections));
+    return;
+  }
+
+  // Live log streaming via SSE
+  if (url === "/api/logs/stream" && req.method === "GET") {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+      ...corsHeaders(),
+    });
+    // Send initial tail
+    const tail = getLogTail(100);
+    if (tail) res.write(`data: ${tail.replace(/\n/g, "\ndata: ")}\n\n`);
+    // Watch for new lines
+    const unwatch = watchLogFile((line) => {
+      try { res.write(`data: ${line}\n\n`); } catch { /* client disconnected */ }
+    });
+    // Keepalive
+    const ka = setInterval(() => {
+      try { res.write(": keepalive\n\n"); } catch { /* client disconnected */ }
+    }, 15_000);
+    req.on("close", () => { unwatch(); clearInterval(ka); });
     return;
   }
 

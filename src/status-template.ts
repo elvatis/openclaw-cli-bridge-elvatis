@@ -2,7 +2,7 @@
  * status-template.ts
  *
  * Generates the HTML dashboard for the /status endpoint.
- * Extracted from proxy-server.ts for maintainability.
+ * v3.0: Sidebar navigation, section-based layout, JS polling, live log viewer.
  */
 
 import type { BrowserContext } from "playwright";
@@ -39,11 +39,11 @@ export interface StatusTemplateOptions {
 }
 
 function statusBadge(p: StatusProvider): { label: string; color: string; dot: string } {
-  if (p.ctx !== null) return { label: "Connected", color: "#22c55e", dot: "🟢" };
-  if (!p.expiry) return { label: "Never logged in", color: "#6b7280", dot: "⚪" };
-  if (p.expiry.startsWith("⚠️ EXPIRED")) return { label: "Expired", color: "#ef4444", dot: "🔴" };
-  if (p.expiry.startsWith("🚨")) return { label: "Expiring soon", color: "#f59e0b", dot: "🟡" };
-  return { label: "Logged in", color: "#3b82f6", dot: "🔵" };
+  if (p.ctx !== null) return { label: "Connected", color: "#22c55e", dot: "\u{1F7E2}" };
+  if (!p.expiry) return { label: "Never logged in", color: "#6b7280", dot: "\u26AA" };
+  if (p.expiry.startsWith("\u26A0\uFE0F EXPIRED")) return { label: "Expired", color: "#ef4444", dot: "\u{1F534}" };
+  if (p.expiry.startsWith("\u{1F6A8}")) return { label: "Expiring soon", color: "#f59e0b", dot: "\u{1F7E1}" };
+  return { label: "Logged in", color: "#3b82f6", dot: "\u{1F535}" };
 }
 
 // ── Formatting helpers ──────────────────────────────────────────────────────
@@ -91,9 +91,46 @@ function truncateId(id: string): string {
   return id.slice(0, 8) + "\u2026" + id.slice(-8);
 }
 
-// ── Active Requests ────────────────────────────────────────────────────────
+// ── Section renderers (each returns an HTML fragment) ──────────────────────
 
-function renderActiveRequests(active: ActiveRequest[]): string {
+export function renderProviders(providers: StatusProvider[]): string {
+  const rows = providers.map(p => {
+    const badge = statusBadge(p);
+    const expiryText = p.expiry
+      ? p.expiry.replace(/[\u26A0\uFE0F\u{1F6A8}\u2705\u{1F550}]/gu, "").trim()
+      : `Not logged in \u2014 run <code>${p.loginCmd}</code>`;
+    return `
+        <tr>
+          <td style="padding:12px 16px;font-weight:600;font-size:15px">${p.icon} ${p.name}</td>
+          <td style="padding:12px 16px">
+            <span style="background:${badge.color}22;color:${badge.color};border:1px solid ${badge.color}44;
+                         border-radius:6px;padding:3px 10px;font-size:13px;font-weight:600">
+              ${badge.dot} ${badge.label}
+            </span>
+          </td>
+          <td style="padding:12px 16px;color:#9ca3af;font-size:13px">${expiryText}</td>
+          <td style="padding:12px 16px;color:#6b7280;font-size:12px;font-family:monospace">${p.loginCmd}</td>
+        </tr>`;
+  }).join("");
+
+  return `
+  <div class="card">
+    <div class="card-header">Web Session Providers</div>
+    <table>
+      <thead>
+        <tr class="table-head">
+          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Provider</th>
+          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Status</th>
+          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Session</th>
+          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Login</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+export function renderActiveRequests(active: ActiveRequest[]): string {
   if (active.length === 0) {
     return `
     <div class="card">
@@ -135,9 +172,7 @@ function renderActiveRequests(active: ActiveRequest[]): string {
   </div>`;
 }
 
-// ── Recent Request Log ────────────────────────────────────────────────────���
-
-function renderRecentRequestLog(entries: RequestLogEntry[]): string {
+export function renderRecentRequestLog(entries: RequestLogEntry[]): string {
   if (entries.length === 0) {
     return `
     <div class="card">
@@ -180,9 +215,7 @@ function renderRecentRequestLog(entries: RequestLogEntry[]): string {
   </div>`;
 }
 
-// ── Fallback History ───────────────────────────────────────────────────────
-
-function renderFallbackHistory(events: FallbackEvent[]): string {
+export function renderFallbackHistory(events: FallbackEvent[]): string {
   if (events.length === 0) {
     return `
     <div class="card">
@@ -228,9 +261,7 @@ function renderFallbackHistory(events: FallbackEvent[]): string {
   </div>`;
 }
 
-// ── Provider Sessions ──────────────────────────────────────────────────────
-
-function renderProviderSessions(sessions: ProviderSession[]): string {
+export function renderProviderSessions(sessions: ProviderSession[]): string {
   if (sessions.length === 0) {
     return `
     <div class="card">
@@ -272,9 +303,7 @@ function renderProviderSessions(sessions: ProviderSession[]): string {
   </div>`;
 }
 
-// ── Timeout Configuration ──────────────────────────────────────────────────
-
-function renderTimeoutConfig(config: TimeoutConfigInfo): string {
+export function renderTimeoutConfig(config: TimeoutConfigInfo): string {
   const entries = Object.entries(config.defaults).sort(([a], [b]) => a.localeCompare(b));
   const rows = entries.map(([model, ms]) => {
     return `
@@ -303,13 +332,10 @@ function renderTimeoutConfig(config: TimeoutConfigInfo): string {
   </div>`;
 }
 
-// ── Metrics sections ────────────────────────────────────────────────────────
-
-function renderMetricsSection(m: MetricsSnapshot): string {
+export function renderMetricsSection(m: MetricsSnapshot): string {
   const errorRate = m.totalRequests > 0 ? ((m.totalErrors / m.totalRequests) * 100).toFixed(1) : "0.0";
   const totalTokens = m.models.reduce((sum, mod) => sum + mod.promptTokens + mod.completionTokens, 0);
 
-  // Summary cards
   const summaryCards = `
   <div class="summary-grid">
     <div class="summary-card">
@@ -330,7 +356,6 @@ function renderMetricsSection(m: MetricsSnapshot): string {
     </div>
   </div>`;
 
-  // Per-model stats table
   let modelRows: string;
   if (m.models.length === 0) {
     modelRows = `<tr><td colspan="6" style="padding:16px;color:#6b7280;text-align:center;font-style:italic">No requests recorded yet.</td></tr>`;
@@ -371,33 +396,15 @@ function renderMetricsSection(m: MetricsSnapshot): string {
   return summaryCards + modelTable;
 }
 
-export function renderStatusPage(opts: StatusTemplateOptions): string {
-  const { version, port, providers, models } = opts;
-
-  const rows = providers.map(p => {
-    const badge = statusBadge(p);
-    const expiryText = p.expiry
-      ? p.expiry.replace(/[⚠️🚨✅🕐]/gu, "").trim()
-      : `Not logged in \u2014 run <code>${p.loginCmd}</code>`;
-    return `
-        <tr>
-          <td style="padding:12px 16px;font-weight:600;font-size:15px">${p.icon} ${p.name}</td>
-          <td style="padding:12px 16px">
-            <span style="background:${badge.color}22;color:${badge.color};border:1px solid ${badge.color}44;
-                         border-radius:6px;padding:3px 10px;font-size:13px;font-weight:600">
-              ${badge.dot} ${badge.label}
-            </span>
-          </td>
-          <td style="padding:12px 16px;color:#9ca3af;font-size:13px">${expiryText}</td>
-          <td style="padding:12px 16px;color:#6b7280;font-size:12px;font-family:monospace">${p.loginCmd}</td>
-        </tr>`;
-  }).join("");
-
+function renderModels(
+  models: StatusTemplateOptions["models"],
+  modelCommands?: Record<string, string>,
+): string {
   const cliModels = models.filter(m => m.id.startsWith("cli-"));
   const codexModels = models.filter(m => m.id.startsWith("openai-codex/"));
   const webModels = models.filter(m => m.id.startsWith("web-"));
   const localModels = models.filter(m => m.id.startsWith("local-"));
-  const cmds = opts.modelCommands ?? {};
+  const cmds = modelCommands ?? {};
   const modelList = (items: typeof models) =>
     items.map(m => {
       const cmd = cmds[m.id];
@@ -405,27 +412,114 @@ export function renderStatusPage(opts: StatusTemplateOptions): string {
       return `<li style="margin:2px 0;font-size:13px;color:#d1d5db"><code class="model-id">${m.id}</code>${cmdBadge}</li>`;
     }).join("");
 
-  const metricsHtml = opts.metrics ? renderMetricsSection(opts.metrics) : "";
-  const activeHtml = opts.activeRequests ? renderActiveRequests(opts.activeRequests) : "";
-  const recentHtml = opts.metrics ? renderRecentRequestLog(opts.metrics.recentRequests) : "";
-  const fallbackHtml = opts.metrics ? renderFallbackHistory(opts.metrics.fallbackHistory) : "";
-  const sessionsHtml = opts.providerSessionsList ? renderProviderSessions(opts.providerSessionsList) : "";
-  const timeoutHtml = opts.timeoutConfig ? renderTimeoutConfig(opts.timeoutConfig) : "";
+  return `
+  <div class="models">
+    <div class="card">
+      <div class="card-header">CLI Models (${cliModels.length})</div>
+      <ul>${modelList(cliModels)}</ul>
+      <div class="card-header">Codex Models (${codexModels.length})</div>
+      <ul>${modelList(codexModels)}</ul>
+    </div>
+    <div class="card">
+      <div class="card-header">Web Session Models (${webModels.length})</div>
+      <ul>${modelList(webModels)}</ul>
+    </div>
+    <div class="card">
+      <div class="card-header">Local Models (${localModels.length})</div>
+      <ul>${modelList(localModels)}</ul>
+    </div>
+  </div>`;
+}
+
+function renderLogsSection(): string {
+  return `
+  <div class="card" style="height:calc(100vh - 160px);display:flex;flex-direction:column">
+    <div class="card-header" style="flex-shrink:0;display:flex;justify-content:space-between;align-items:center">
+      <span>Live Logs <span id="log-status" class="badge badge-ok" style="margin-left:8px">connecting...</span></span>
+      <span>
+        <button onclick="toggleLogPause()" id="log-pause-btn" style="background:#1e2130;color:#9ca3af;border:1px solid #2d3148;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;margin-right:4px">Pause</button>
+        <button onclick="clearLogs()" style="background:#1e2130;color:#9ca3af;border:1px solid #2d3148;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer">Clear</button>
+      </span>
+    </div>
+    <pre id="log-output" style="flex:1;overflow-y:auto;padding:12px 16px;font-size:12px;line-height:1.6;color:#9ca3af;margin:0;white-space:pre-wrap;word-break:break-all"></pre>
+  </div>`;
+}
+
+// ── Dashboard data (for AJAX polling) ──────────────────────────────────────
+
+export interface DashboardSections {
+  providers: string;
+  metrics: string;
+  active: string;
+  recent: string;
+  fallbacks: string;
+  sessions: string;
+  timeouts: string;
+  models: string;
+}
+
+export function renderDashboardData(opts: StatusTemplateOptions): DashboardSections {
+  return {
+    providers: renderProviders(opts.providers),
+    metrics: opts.metrics ? renderMetricsSection(opts.metrics) : "",
+    active: opts.activeRequests ? renderActiveRequests(opts.activeRequests) : "",
+    recent: opts.metrics ? renderRecentRequestLog(opts.metrics.recentRequests) : "",
+    fallbacks: opts.metrics ? renderFallbackHistory(opts.metrics.fallbackHistory) : "",
+    sessions: opts.providerSessionsList ? renderProviderSessions(opts.providerSessionsList) : "",
+    timeouts: opts.timeoutConfig ? renderTimeoutConfig(opts.timeoutConfig) : "",
+    models: renderModels(opts.models, opts.modelCommands),
+  };
+}
+
+// ── Navigation definitions ────────────────────────────────────────────────
+
+const NAV_ITEMS = [
+  { id: "overview", label: "Overview", icon: "\u25C9" },
+  { id: "providers", label: "Providers", icon: "\u26A1" },
+  { id: "active", label: "Active", icon: "\u25CF" },
+  { id: "recent", label: "Requests", icon: "\u2630" },
+  { id: "fallbacks", label: "Fallbacks", icon: "\u21C4" },
+  { id: "sessions", label: "Sessions", icon: "\u29BF" },
+  { id: "logs", label: "Live Logs", icon: "\u276F" },
+  { id: "timeouts", label: "Timeouts", icon: "\u23F1" },
+  { id: "models", label: "Models", icon: "\u2726" },
+] as const;
+
+// ── Full page render ──────────────────────────────────────────────────────
+
+export function renderStatusPage(opts: StatusTemplateOptions): string {
+  const { version, port } = opts;
+  const sections = renderDashboardData(opts);
+
+  const navHtml = NAV_ITEMS.map(n =>
+    `<a href="#${n.id}" class="nav-item" data-nav="${n.id}" onclick="showSection('${n.id}')">${n.icon} ${n.label}</a>`
+  ).join("\n      ");
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CLI Bridge Status</title>
-  <meta http-equiv="refresh" content="10">
+  <title>CLI Bridge Dashboard</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0f1117; color: #e5e7eb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; padding: 32px 24px; }
-    h1 { font-size: 22px; font-weight: 700; color: #f9fafb; margin-bottom: 4px; }
-    .subtitle { color: #6b7280; font-size: 13px; margin-bottom: 28px; }
-    .subtitle a { color: #3b82f6; text-decoration: none; }
-    .subtitle a:hover { text-decoration: underline; }
+    body { background: #0f1117; color: #e5e7eb; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; display: grid; grid-template-columns: 200px 1fr; }
+
+    /* ── Sidebar ── */
+    .sidebar { background: #13151f; border-right: 1px solid #2d3148; padding: 20px 0; position: fixed; top: 0; left: 0; bottom: 0; width: 200px; overflow-y: auto; z-index: 10; }
+    .sidebar-title { padding: 0 16px 16px; font-size: 16px; font-weight: 700; color: #f9fafb; border-bottom: 1px solid #2d3148; margin-bottom: 8px; }
+    .sidebar-version { display: block; font-size: 11px; color: #6b7280; font-weight: 400; margin-top: 2px; }
+    .nav-item { display: flex; align-items: center; gap: 8px; padding: 8px 16px; color: #9ca3af; text-decoration: none; font-size: 13px; transition: all 0.15s; border-left: 3px solid transparent; }
+    .nav-item:hover { color: #e5e7eb; background: #1a1d27; }
+    .nav-item.active { color: #3b82f6; background: #1e2130; border-left-color: #3b82f6; font-weight: 600; }
+
+    /* ── Main content ── */
+    .main { grid-column: 2; padding: 24px; min-height: 100vh; }
+    .section { display: none; }
+    .section.active { display: block; }
+    .section-title { font-size: 18px; font-weight: 700; color: #f9fafb; margin-bottom: 16px; }
+
+    /* ── Cards & tables ── */
     .card { background: #1a1d27; border: 1px solid #2d3148; border-radius: 12px; overflow: hidden; margin-bottom: 24px; }
     .card-header { padding: 14px 16px; border-bottom: 1px solid #2d3148; font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
     table { width: 100%; border-collapse: collapse; }
@@ -433,7 +527,6 @@ export function renderStatusPage(opts: StatusTemplateOptions): string {
     .table-head { background: #13151f; }
     .models { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     ul { list-style: none; padding: 12px 16px; }
-    .footer { color: #374151; font-size: 12px; text-align: center; margin-top: 16px; }
     code { background: #1e2130; padding: 1px 5px; border-radius: 4px; }
     .model-id { color: #93c5fd; }
     .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
@@ -453,62 +546,209 @@ export function renderStatusPage(opts: StatusTemplateOptions): string {
     .pulse-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 1.5s ease-in-out infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .footer { color: #374151; font-size: 12px; text-align: center; margin-top: 16px; }
+
+    /* ── Log colors ── */
+    .log-fail { color: #ef4444; }
+    .log-ok { color: #22c55e; }
+    .log-warn { color: #f59e0b; }
+    .log-kill { color: #f97316; }
+    .log-route { color: #8b5cf6; }
+    .log-dim { color: #6b7280; }
+
+    /* ── Mobile ── */
+    .mobile-toggle { display: none; position: fixed; top: 8px; left: 8px; z-index: 20; background: #1a1d27; border: 1px solid #2d3148; border-radius: 8px; padding: 6px 10px; color: #e5e7eb; font-size: 18px; cursor: pointer; }
     @media (max-width: 768px) {
+      body { grid-template-columns: 1fr; }
+      .sidebar { transform: translateX(-100%); transition: transform 0.2s; }
+      .sidebar.open { transform: translateX(0); }
+      .main { grid-column: 1; }
+      .mobile-toggle { display: block; }
       .summary-grid { grid-template-columns: repeat(2, 1fr); }
       .models, .two-col { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <h1>CLI Bridge</h1>
-  <p class="subtitle">v${version} &middot; Port ${port} &middot; Auto-refreshes every 10s &middot; <a href="/status">\u21bb Refresh</a></p>
+  <button class="mobile-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">\u2630</button>
 
-  <div class="card">
-    <div class="card-header">Web Session Providers</div>
-    <table>
-      <thead>
-        <tr class="table-head">
-          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Provider</th>
-          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Status</th>
-          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Session</th>
-          <th style="padding:10px 16px;text-align:left;font-size:12px;color:#4b5563;font-weight:600">Login</th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>
-
-  ${metricsHtml}
-
-  ${activeHtml}
-
-  ${recentHtml}
-
-  <div class="two-col">
-    <div>${fallbackHtml}</div>
-    <div>${sessionsHtml}</div>
-  </div>
-
-  ${timeoutHtml}
-
-  <div class="models">
-    <div class="card">
-      <div class="card-header">CLI Models (${cliModels.length})</div>
-      <ul>${modelList(cliModels)}</ul>
-      <div class="card-header">Codex Models (${codexModels.length})</div>
-      <ul>${modelList(codexModels)}</ul>
+  <nav class="sidebar">
+    <div class="sidebar-title">CLI Bridge<span class="sidebar-version">v${version} \u00b7 :${port}</span></div>
+    ${navHtml}
+    <div style="padding:16px;margin-top:auto">
+      <div style="font-size:11px;color:#374151">
+        <a href="/v1/models" style="color:#4b5563;text-decoration:none">/v1/models</a> \u00b7
+        <a href="/healthz" style="color:#4b5563;text-decoration:none">/healthz</a>
+      </div>
     </div>
-    <div class="card">
-      <div class="card-header">Web Session Models (${webModels.length})</div>
-      <ul>${modelList(webModels)}</ul>
-    </div>
-    <div class="card">
-      <div class="card-header">Local Models (${localModels.length})</div>
-      <ul>${modelList(localModels)}</ul>
-    </div>
-  </div>
+  </nav>
 
-  <p class="footer">openclaw-cli-bridge-elvatis v${version} &middot; <a href="/v1/models" style="color:#4b5563">/v1/models</a> &middot; <a href="/health" style="color:#4b5563">/health</a> &middot; <a href="/healthz" style="color:#4b5563">/healthz</a></p>
+  <main class="main">
+    <section data-section="overview" class="section active">
+      <h2 class="section-title">Overview</h2>
+      <div id="s-metrics">${sections.metrics}</div>
+      <div id="s-active">${sections.active}</div>
+    </section>
+
+    <section data-section="providers" class="section">
+      <h2 class="section-title">Providers</h2>
+      <div id="s-providers">${sections.providers}</div>
+    </section>
+
+    <section data-section="active" class="section">
+      <h2 class="section-title">Active Requests</h2>
+      <div id="s-active2">${sections.active}</div>
+    </section>
+
+    <section data-section="recent" class="section">
+      <h2 class="section-title">Recent Requests</h2>
+      <div id="s-recent">${sections.recent}</div>
+    </section>
+
+    <section data-section="fallbacks" class="section">
+      <h2 class="section-title">Fallbacks &amp; Sessions</h2>
+      <div class="two-col">
+        <div id="s-fallbacks">${sections.fallbacks}</div>
+        <div id="s-sessions">${sections.sessions}</div>
+      </div>
+    </section>
+
+    <section data-section="sessions" class="section">
+      <h2 class="section-title">Provider Sessions</h2>
+      <div id="s-sessions2">${sections.sessions}</div>
+    </section>
+
+    <section data-section="logs" class="section">
+      <h2 class="section-title">Live Logs</h2>
+      ${renderLogsSection()}
+    </section>
+
+    <section data-section="timeouts" class="section">
+      <h2 class="section-title">Timeout Configuration</h2>
+      <div id="s-timeouts">${sections.timeouts}</div>
+    </section>
+
+    <section data-section="models" class="section">
+      <h2 class="section-title">Models</h2>
+      <div id="s-models">${sections.models}</div>
+    </section>
+
+    <p class="footer">openclaw-cli-bridge-elvatis v${version}</p>
+  </main>
+
+  <script>
+    // ── Section switching ──
+    function showSection(id) {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      const sec = document.querySelector('[data-section="' + id + '"]');
+      const nav = document.querySelector('[data-nav="' + id + '"]');
+      if (sec) sec.classList.add('active');
+      if (nav) nav.classList.add('active');
+      location.hash = id;
+      // Close mobile sidebar
+      document.querySelector('.sidebar').classList.remove('open');
+    }
+
+    // Init from hash
+    (function() {
+      var hash = location.hash.slice(1) || 'overview';
+      showSection(hash);
+    })();
+
+    // ── AJAX polling (replaces meta-refresh) ──
+    setInterval(function() {
+      fetch('/api/dashboard-data').then(function(r) { return r.json(); }).then(function(data) {
+        var map = {
+          's-metrics': 'metrics', 's-active': 'active', 's-active2': 'active',
+          's-providers': 'providers', 's-recent': 'recent',
+          's-fallbacks': 'fallbacks', 's-sessions': 'sessions', 's-sessions2': 'sessions',
+          's-timeouts': 'timeouts', 's-models': 'models'
+        };
+        for (var elId in map) {
+          var el = document.getElementById(elId);
+          if (el && data[map[elId]]) el.innerHTML = data[map[elId]];
+        }
+      }).catch(function() { /* silent fail on poll */ });
+    }, 10000);
+
+    // ── Live log viewer ──
+    var logOutput = document.getElementById('log-output');
+    var logStatus = document.getElementById('log-status');
+    var logPaused = false;
+    var logSource = null;
+    var logLineCount = 0;
+    var MAX_LOG_LINES = 500;
+    var autoScroll = true;
+
+    function colorLogLine(line) {
+      if (line.indexOf('[FAIL]') !== -1 || line.indexOf('[ERROR]') !== -1) return '<span class="log-fail">' + line + '</span>';
+      if (line.indexOf('[OK]') !== -1) return '<span class="log-ok">' + line + '</span>';
+      if (line.indexOf('[FALLBACK]') !== -1 || line.indexOf('[WARN]') !== -1) return '<span class="log-warn">' + line + '</span>';
+      if (line.indexOf('[KILL]') !== -1) return '<span class="log-kill">' + line + '</span>';
+      if (line.indexOf('[TOOL-ROUTE]') !== -1 || line.indexOf('[TASK-ROUTE]') !== -1) return '<span class="log-route">' + line + '</span>';
+      if (line.indexOf('[TIMEOUT]') !== -1 || line.indexOf('[CLAUDE]') !== -1) return '<span class="log-dim">' + line + '</span>';
+      return line;
+    }
+
+    function appendLog(text) {
+      if (!logOutput) return;
+      var lines = text.split('\\n').filter(function(l) { return l.trim(); });
+      lines.forEach(function(line) {
+        logOutput.innerHTML += colorLogLine(line.replace(/</g, '&lt;').replace(/>/g, '&gt;')) + '\\n';
+        logLineCount++;
+      });
+      // Trim old lines
+      while (logLineCount > MAX_LOG_LINES) {
+        var idx = logOutput.innerHTML.indexOf('\\n');
+        if (idx === -1) break;
+        logOutput.innerHTML = logOutput.innerHTML.slice(idx + 1);
+        logLineCount--;
+      }
+      if (autoScroll) logOutput.scrollTop = logOutput.scrollHeight;
+    }
+
+    function connectLog() {
+      if (logSource) logSource.close();
+      logSource = new EventSource('/api/logs/stream');
+      logSource.onopen = function() {
+        if (logStatus) { logStatus.textContent = 'connected'; logStatus.className = 'badge badge-ok'; }
+      };
+      logSource.onmessage = function(e) { appendLog(e.data); };
+      logSource.onerror = function() {
+        if (logStatus) { logStatus.textContent = 'disconnected'; logStatus.className = 'badge badge-error'; }
+        // Reconnect after 3s
+        setTimeout(function() { if (!logPaused) connectLog(); }, 3000);
+      };
+    }
+
+    function toggleLogPause() {
+      logPaused = !logPaused;
+      var btn = document.getElementById('log-pause-btn');
+      if (logPaused) {
+        if (logSource) logSource.close();
+        if (btn) btn.textContent = 'Resume';
+        if (logStatus) { logStatus.textContent = 'paused'; logStatus.className = 'badge badge-warn'; }
+      } else {
+        connectLog();
+        if (btn) btn.textContent = 'Pause';
+      }
+    }
+
+    function clearLogs() {
+      if (logOutput) { logOutput.innerHTML = ''; logLineCount = 0; }
+    }
+
+    // Auto-scroll detection
+    if (logOutput) {
+      logOutput.addEventListener('scroll', function() {
+        autoScroll = (logOutput.scrollTop + logOutput.clientHeight >= logOutput.scrollHeight - 50);
+      });
+    }
+
+    // Start log connection
+    connectLog();
+  </script>
 </body>
 </html>`;
 }
