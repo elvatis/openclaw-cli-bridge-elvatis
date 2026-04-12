@@ -162,6 +162,9 @@ export const DEFAULT_MODEL_FALLBACKS: Record<string, string[]> = {
 /** Base directory for all CLI bridge state files. */
 export const OPENCLAW_DIR = join(homedir(), ".openclaw");
 
+/** Workspace directory containing all projects. */
+export const WORKSPACE_DIR = join(OPENCLAW_DIR, "workspace");
+
 /** State file — persists the model active before the last /cli-* switch. */
 export const STATE_FILE = join(OPENCLAW_DIR, "cli-bridge-state.json");
 

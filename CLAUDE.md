@@ -30,6 +30,8 @@ OpenClaw Gateway ──(HTTP)──> proxy-server.ts ──(spawn)──> claude
 - **Smart fallback** — Sonnet tries first (better tool selection), 30s stale timeout kills it fast, Haiku takes over (~10s, reliable but picks wrong tools sometimes)
 - **Compact tool schema** — when >8 tools, only send name+params (skip descriptions/full JSON schema), cuts prompt ~60%
 - **Exit 143 = our SIGTERM** — not OOM, not crash. The bridge's timeout/stale-output detector sends SIGTERM, Claude CLI exits 143
+- **Consecutive timeout rotation** — after 3 timeouts in a row on the same session, auto-expire it and create a fresh one. Prevents poisoned sessions from blocking all requests
+- **Workspace project auto-detection** — scans `~/.openclaw/workspace/` for project directories; when the prompt contains an exact match of a project name, auto-sets `workdir` and injects `[Context: Working directory is ...]` into the prompt
 
 ## Build & Test
 
@@ -69,6 +71,8 @@ All magic numbers live here. Key values:
 | `TOOL_HEAVY_THRESHOLD` | 10 | Reduce MAX_MESSAGES from 20 to 12 when tools exceed this |
 | `COMPACT_TOOL_THRESHOLD` | 8 | Switch to compact tool schema (name+params only) |
 | `TOOL_ROUTING_THRESHOLD` | 8 | (in proxy-server) Was used for Haiku routing, now Sonnet-first with fast fallback |
+| `CONSECUTIVE_TIMEOUT_LIMIT` | 3 | (in cli-runner) Auto-expire session after N consecutive timeouts |
+| `WORKSPACE_DIR` | `~/.openclaw/workspace` | Project directory scanned for auto-detection |
 
 ## Tool Protocol (src/tool-protocol.ts)
 
