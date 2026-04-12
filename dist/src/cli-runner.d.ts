@@ -68,6 +68,8 @@ export interface CliRunResult {
     stdout: string;
     stderr: string;
     exitCode: number;
+    /** True when the process was killed due to a timeout (exit 143 = SIGTERM). */
+    timedOut: boolean;
 }
 export interface RunCliOptions {
     /**
@@ -76,9 +78,17 @@ export interface RunCliOptions {
      */
     cwd?: string;
     timeoutMs?: number;
+    /** Optional logger for timeout events. */
+    log?: (msg: string) => void;
 }
 /**
  * Spawn a CLI and deliver the prompt via stdin.
+ *
+ * Timeout handling (replaces Node's spawn({ timeout }) for better control):
+ *   1. After `timeoutMs`, send SIGTERM and log a clear message.
+ *   2. If the process doesn't exit within TIMEOUT_GRACE_MS (5s), send SIGKILL.
+ *   3. The result's `timedOut` flag is set so callers can distinguish
+ *      supervisor timeouts from real CLI errors.
  *
  * cwd defaults to homedir() so CLIs that scan the working directory for
  * project context (like Gemini) don't accidentally enter agentic mode.
@@ -87,8 +97,14 @@ export declare function runCli(cmd: string, args: string[], prompt: string, time
 /**
  * Spawn a CLI with the prompt delivered as a CLI argument (not stdin).
  * Used by OpenCode which expects `opencode run "prompt"`.
+ * Uses the same graceful SIGTERM→SIGKILL timeout sequence as runCli.
  */
 export declare function runCliWithArg(cmd: string, args: string[], timeoutMs?: number, opts?: RunCliOptions): Promise<CliRunResult>;
+/**
+ * Annotate an error message when exit code 143 (SIGTERM) is detected.
+ * Makes it clear in logs that this was a supervisor timeout, not a model error.
+ */
+export declare function annotateExitError(exitCode: number, stderr: string, timedOut: boolean, model: string): string;
 /**
  * Run Gemini CLI in headless mode with prompt delivered via stdin.
  *
@@ -107,6 +123,7 @@ export declare function runCliWithArg(cmd: string, args: string[], timeoutMs?: n
  */
 export declare function runGemini(prompt: string, modelId: string, timeoutMs: number, workdir?: string, opts?: {
     tools?: ToolDefinition[];
+    log?: (msg: string) => void;
 }): Promise<string>;
 /**
  * Run Claude Code CLI in headless mode with prompt delivered via stdin.
@@ -115,6 +132,7 @@ export declare function runGemini(prompt: string, modelId: string, timeoutMs: nu
  */
 export declare function runClaude(prompt: string, modelId: string, timeoutMs: number, workdir?: string, opts?: {
     tools?: ToolDefinition[];
+    log?: (msg: string) => void;
 }): Promise<string>;
 /**
  * Run Codex CLI in non-interactive mode with prompt via stdin.
@@ -124,17 +142,22 @@ export declare function runClaude(prompt: string, modelId: string, timeoutMs: nu
 export declare function runCodex(prompt: string, modelId: string, timeoutMs: number, workdir?: string, opts?: {
     tools?: ToolDefinition[];
     mediaFiles?: MediaFile[];
+    log?: (msg: string) => void;
 }): Promise<string>;
 /**
  * Run OpenCode CLI. Prompt is passed as a CLI argument: `opencode run "prompt"`.
  * cwd = homedir() by default. Override with explicit workdir.
  */
-export declare function runOpenCode(prompt: string, _modelId: string, timeoutMs: number, workdir?: string): Promise<string>;
+export declare function runOpenCode(prompt: string, _modelId: string, timeoutMs: number, workdir?: string, opts?: {
+    log?: (msg: string) => void;
+}): Promise<string>;
 /**
  * Run Pi CLI in non-interactive mode: `pi -p "prompt"`.
  * cwd = homedir() by default. Override with explicit workdir.
  */
-export declare function runPi(prompt: string, _modelId: string, timeoutMs: number, workdir?: string): Promise<string>;
+export declare function runPi(prompt: string, _modelId: string, timeoutMs: number, workdir?: string, opts?: {
+    log?: (msg: string) => void;
+}): Promise<string>;
 /**
  * Default set of permitted models for the CLI bridge.
  * Matches the models registered as slash commands in index.ts.
@@ -166,6 +189,8 @@ export interface RouteOptions {
      * Passed to CLIs that support native media input (e.g. codex -i).
      */
     mediaFiles?: MediaFile[];
+    /** Logger for timeout and lifecycle events. */
+    log?: (msg: string) => void;
 }
 /**
  * Route a chat completion to the correct CLI based on model prefix.
