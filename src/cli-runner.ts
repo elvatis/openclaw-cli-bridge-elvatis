@@ -18,9 +18,9 @@
 
 import { spawn, execSync } from "node:child_process";
 import { tmpdir, homedir } from "node:os";
-import { existsSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { existsSync, writeFileSync, unlinkSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { ensureClaudeToken, refreshClaudeToken } from "./claude-auth.js";
 import {
   type ToolDefinition,
@@ -535,10 +535,71 @@ export async function runGemini(
 // Claude Code CLI
 // ──────────────────────────────────────────────────────────────────────────────
 
+// ── Claude session registry ─────────────────────────────────────────────────
+// Persistent sessions avoid re-sending the full 20KB prompt on every request.
+// First call creates a session; subsequent calls resume it with just the new message.
+
+const CLAUDE_SESSIONS_FILE = join(homedir(), ".openclaw", "cli-bridge", "claude-sessions.json");
+
+interface ClaudeSessionEntry {
+  sessionId: string;
+  model: string;
+  createdAt: number;
+  lastUsedAt: number;
+  requestCount: number;
+}
+
+const claudeSessions = new Map<string, ClaudeSessionEntry>();
+
+function loadClaudeSessions(): void {
+  try {
+    const data = JSON.parse(readFileSync(CLAUDE_SESSIONS_FILE, "utf8"));
+    if (Array.isArray(data.sessions)) {
+      for (const s of data.sessions) claudeSessions.set(s.model, s);
+    }
+  } catch { /* no sessions file yet */ }
+}
+
+function saveClaudeSessions(): void {
+  try {
+    mkdirSync(join(homedir(), ".openclaw", "cli-bridge"), { recursive: true });
+    writeFileSync(CLAUDE_SESSIONS_FILE, JSON.stringify({
+      version: 1,
+      sessions: [...claudeSessions.values()],
+    }, null, 2));
+  } catch { /* best effort */ }
+}
+
+function getOrCreateSession(model: string): ClaudeSessionEntry {
+  if (claudeSessions.size === 0) loadClaudeSessions();
+  const existing = claudeSessions.get(model);
+  // Reuse session if it's less than 2 hours old
+  if (existing && (Date.now() - existing.lastUsedAt) < 2 * 60 * 60 * 1000) {
+    return existing;
+  }
+  const entry: ClaudeSessionEntry = {
+    sessionId: randomUUID(),
+    model,
+    createdAt: Date.now(),
+    lastUsedAt: Date.now(),
+    requestCount: 0,
+  };
+  claudeSessions.set(model, entry);
+  saveClaudeSessions();
+  return entry;
+}
+
+function invalidateSession(model: string): void {
+  claudeSessions.delete(model);
+  saveClaudeSessions();
+}
+
 /**
- * Run Claude Code CLI in headless mode with prompt delivered via stdin.
- * Strips the model prefix ("cli-claude/claude-opus-4-6" → "claude-opus-4-6").
- * cwd = homedir() by default. Override with explicit workdir.
+ * Run Claude Code CLI in headless mode with session resume.
+ *
+ * First request: creates a new session with --session-id.
+ * Subsequent requests: --resume <session-id> with only the new message.
+ * This eliminates the 20KB prompt replay that causes Sonnet to hang.
  */
 export async function runClaude(
   prompt: string,
@@ -547,13 +608,12 @@ export async function runClaude(
   workdir?: string,
   opts?: { tools?: ToolDefinition[]; log?: (msg: string) => void }
 ): Promise<string> {
-  // Proactively refresh OAuth token if it's about to expire (< 5 min remaining).
-  // No-op for API-key users.
   await ensureClaudeToken();
 
   const model = stripPrefix(modelId);
-  // Always use bypassPermissions to ensure fully autonomous execution (never asks questions).
-  // Use text output for all cases — JSON schema is unreliable with Claude Code's system prompt.
+  const session = getOrCreateSession(model);
+  const isResume = session.requestCount > 0;
+
   const args: string[] = [
     "-p",
     "--output-format", "text",
@@ -562,44 +622,84 @@ export async function runClaude(
     "--model", model,
   ];
 
+  if (isResume) {
+    args.push("--resume", session.sessionId);
+  } else {
+    args.push("--session-id", session.sessionId);
+  }
+
   // When tools are present, sandwich the conversation between tool instructions.
-  // The reminder at the end ensures models (especially Haiku) remember the JSON format
-  // after processing a long conversation history.
+  // On resume: only send the last user message (Claude has the full history).
+  // On first request: send the full prompt with tool block.
   const effectivePrompt = opts?.tools?.length
     ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
     : prompt;
 
   const cwd = workdir ?? homedir();
-  debugLog("CLAUDE", `spawn ${model}`, { promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024), cwd, timeoutMs: Math.round(timeoutMs / 1000) });
+  debugLog("CLAUDE", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
+    promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024),
+    requestCount: session.requestCount, cwd, timeoutMs: Math.round(timeoutMs / 1000),
+  });
+
   const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
 
-  // On 401: attempt one token refresh + retry before giving up.
-  if (result.exitCode !== 0 && result.stdout.length === 0) {
-    // If this was a timeout, don't bother with auth retry — it's a supervisor kill, not a 401.
-    if (result.timedOut) {
-      throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, true, modelId)}`);
-    }
-    const stderr = result.stderr || "(no output)";
-    if (stderr.includes("401") || stderr.includes("Invalid authentication credentials") || stderr.includes("authentication_error")) {
-      // Refresh and retry once
-      await refreshClaudeToken();
-      const retry = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
-      if (retry.exitCode !== 0 && retry.stdout.length === 0) {
-        const retryStderr = retry.stderr || "(no output)";
-        if (retryStderr.includes("401") || retryStderr.includes("authentication_error") || retryStderr.includes("Invalid authentication credentials")) {
-          throw new Error(
-            "Claude CLI OAuth token refresh failed. " +
-            "Re-login required: run `claude auth logout && claude auth login` in a terminal."
-          );
-        }
-        throw new Error(`claude exited ${retry.exitCode} (after token refresh): ${retryStderr}`);
-      }
-      return retry.stdout;
-    }
-    throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, stderr, false, modelId)}`);
+  // Session succeeded — update registry
+  if (result.exitCode === 0 || result.stdout.length > 0) {
+    session.requestCount++;
+    session.lastUsedAt = Date.now();
+    saveClaudeSessions();
+    return result.stdout;
   }
 
-  return result.stdout;
+  // Session failed — check if it's a timeout or auth issue
+  if (result.timedOut) {
+    // Don't invalidate session on timeout — it's still valid, just slow
+    session.lastUsedAt = Date.now();
+    saveClaudeSessions();
+    throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, true, modelId)}`);
+  }
+
+  const stderr = result.stderr || "(no output)";
+
+  // Session might be corrupted or expired — invalidate and retry with a fresh session
+  if (stderr.includes("session") || stderr.includes("resume") || stderr.includes("not found")) {
+    debugLog("CLAUDE", `session ${session.sessionId.slice(0, 8)} invalid, creating fresh`, { error: stderr.slice(0, 100) });
+    invalidateSession(model);
+    // Retry once with a fresh session
+    const freshSession = getOrCreateSession(model);
+    const freshArgs = [
+      "-p", "--output-format", "text",
+      "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions",
+      "--model", model, "--session-id", freshSession.sessionId,
+    ];
+    const retry = await runCli("claude", freshArgs, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
+    if (retry.exitCode === 0 || retry.stdout.length > 0) {
+      freshSession.requestCount++;
+      freshSession.lastUsedAt = Date.now();
+      saveClaudeSessions();
+      return retry.stdout;
+    }
+    throw new Error(`claude exited ${retry.exitCode}: ${annotateExitError(retry.exitCode, retry.stderr || "(no output)", false, modelId)}`);
+  }
+
+  // Auth failure — refresh token and retry
+  if (stderr.includes("401") || stderr.includes("Invalid authentication credentials") || stderr.includes("authentication_error")) {
+    await refreshClaudeToken();
+    const retry = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
+    if (retry.exitCode === 0 || retry.stdout.length > 0) {
+      session.requestCount++;
+      session.lastUsedAt = Date.now();
+      saveClaudeSessions();
+      return retry.stdout;
+    }
+    const retryStderr = retry.stderr || "(no output)";
+    if (retryStderr.includes("401") || retryStderr.includes("authentication_error")) {
+      throw new Error("Claude CLI OAuth token refresh failed. Re-login required: run `claude auth logout && claude auth login`.");
+    }
+    throw new Error(`claude exited ${retry.exitCode} (after token refresh): ${retryStderr}`);
+  }
+
+  throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, stderr, false, modelId)}`);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
