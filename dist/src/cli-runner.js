@@ -22,7 +22,8 @@ import { join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { ensureClaudeToken, refreshClaudeToken } from "./claude-auth.js";
 import { buildToolPromptBlock, parseToolCallResponse, } from "./tool-protocol.js";
-import { MAX_MESSAGES, MAX_MSG_CHARS, DEFAULT_CLI_TIMEOUT_MS, TIMEOUT_GRACE_MS, MEDIA_TMP_DIR, } from "./config.js";
+import { MAX_MESSAGES, MAX_MESSAGES_HEAVY_TOOLS, TOOL_HEAVY_THRESHOLD, MAX_MSG_CHARS, DEFAULT_CLI_TIMEOUT_MS, TIMEOUT_GRACE_MS, MEDIA_TMP_DIR, STALE_OUTPUT_TIMEOUT_MS, } from "./config.js";
+import { debugLog } from "./debug-log.js";
 /**
  * Convert OpenAI messages to a single flat prompt string.
  * Truncates to MAX_MESSAGES (keeping the most recent) and MAX_MSG_CHARS per
@@ -32,13 +33,15 @@ import { MAX_MESSAGES, MAX_MSG_CHARS, DEFAULT_CLI_TIMEOUT_MS, TIMEOUT_GRACE_MS, 
  *   - role "tool": formatted as [Tool Result: name]
  *   - role "assistant" with tool_calls: formatted as [Assistant Tool Call: name(args)]
  */
-export function formatPrompt(messages) {
+export function formatPrompt(messages, toolCount = 0) {
     if (messages.length === 0)
         return "";
+    // Reduce history when tool schemas dominate the prompt
+    const maxMsgs = toolCount > TOOL_HEAVY_THRESHOLD ? MAX_MESSAGES_HEAVY_TOOLS : MAX_MESSAGES;
     // Keep system message (if any) + last N non-system messages
     const system = messages.find((m) => m.role === "system");
     const nonSystem = messages.filter((m) => m.role !== "system");
-    const recent = nonSystem.slice(-MAX_MESSAGES);
+    const recent = nonSystem.slice(-maxMsgs);
     const truncated = system ? [system, ...recent] : recent;
     // Single short user message — send bare (no wrapping needed)
     if (truncated.length === 1 && truncated[0].role === "user") {
@@ -241,6 +244,8 @@ export function runCli(cmd, args, prompt, timeoutMs = DEFAULT_CLI_TIMEOUT_MS, op
         let timedOut = false;
         let killTimer = null;
         let timeoutTimer = null;
+        let staleTimer = null;
+        let lastOutputAt = Date.now();
         const clearTimers = () => {
             if (timeoutTimer) {
                 clearTimeout(timeoutTimer);
@@ -250,12 +255,17 @@ export function runCli(cmd, args, prompt, timeoutMs = DEFAULT_CLI_TIMEOUT_MS, op
                 clearTimeout(killTimer);
                 killTimer = null;
             }
+            if (staleTimer) {
+                clearInterval(staleTimer);
+                staleTimer = null;
+            }
         };
-        // ── Timeout sequence: SIGTERM → grace → SIGKILL ──────────────────────
-        timeoutTimer = setTimeout(() => {
+        const doKill = (reason) => {
+            if (timedOut)
+                return; // already killing
             timedOut = true;
-            const elapsed = Math.round(timeoutMs / 1000);
-            log(`[cli-bridge] timeout after ${elapsed}s for ${cmd}, sending SIGTERM`);
+            log(`[cli-bridge] ${reason} for ${cmd}, sending SIGTERM`);
+            debugLog("KILL", `${cmd} ${reason}`, { stdoutLen: stdout.length, stderrLen: stderr.length });
             proc.kill("SIGTERM");
             killTimer = setTimeout(() => {
                 if (!proc.killed) {
@@ -263,12 +273,32 @@ export function runCli(cmd, args, prompt, timeoutMs = DEFAULT_CLI_TIMEOUT_MS, op
                     proc.kill("SIGKILL");
                 }
             }, TIMEOUT_GRACE_MS);
+        };
+        // ── Hard timeout: SIGTERM → grace → SIGKILL ──────────────────────────
+        timeoutTimer = setTimeout(() => {
+            doKill(`timeout after ${Math.round(timeoutMs / 1000)}s`);
         }, timeoutMs);
+        // ── Stale-output detection: kill if no stdout for STALE_OUTPUT_TIMEOUT_MS
+        if (STALE_OUTPUT_TIMEOUT_MS > 0) {
+            const checkInterval = 15_000; // check every 15s
+            staleTimer = setInterval(() => {
+                const silent = Date.now() - lastOutputAt;
+                if (silent >= STALE_OUTPUT_TIMEOUT_MS) {
+                    doKill(`stale output — no stdout for ${Math.round(silent / 1000)}s`);
+                }
+            }, checkInterval);
+        }
         proc.stdin.write(prompt, "utf8", () => {
             proc.stdin.end();
         });
-        proc.stdout.on("data", (d) => { stdout += d.toString(); });
-        proc.stderr.on("data", (d) => { stderr += d.toString(); });
+        proc.stdout.on("data", (d) => {
+            stdout += d.toString();
+            lastOutputAt = Date.now();
+        });
+        proc.stderr.on("data", (d) => {
+            stderr += d.toString();
+            lastOutputAt = Date.now(); // stderr also counts as activity
+        });
         proc.on("close", (code) => {
             clearTimers();
             resolve({ stdout: stdout.trim(), stderr: stderr.trim(), exitCode: code ?? 0, timedOut });
@@ -567,8 +597,9 @@ function normalizeModelAlias(normalized) {
  * Pass `allowedModels: null` to skip the allowlist check.
  */
 export async function routeToCliRunner(model, messages, timeoutMs, opts = {}) {
-    const prompt = formatPrompt(messages);
-    const hasTools = !!(opts.tools?.length);
+    const toolCount = opts.tools?.length ?? 0;
+    const prompt = formatPrompt(messages, toolCount);
+    const hasTools = toolCount > 0;
     // Strip "vllm/" prefix if present — OpenClaw sends the full provider path
     // (e.g. "vllm/cli-claude/claude-sonnet-4-6") but the router only needs the
     // "cli-<type>/<model>" portion.

@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.9.0`
+**Current version:** `2.10.0`
 
 ---
 
@@ -405,6 +405,18 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.10.0
+- **fix:** cap effective timeout at 580s (under gateway's 600s `idleTimeoutSeconds`) so bridge fallback fires BEFORE gateway kills the request — eliminates the race condition where both compete to handle the timeout
+- **fix:** reduce Sonnet base timeout 420s→300s, Opus 420s→360s — ensures fallback triggers faster for stuck CLI sessions
+- **feat:** compact tool schema mode — when >8 tools, compress definitions to name+params only, cutting prompt size ~60%
+- **feat:** stale-output detection — if CLI produces no stdout for 120s, SIGTERM early instead of waiting full timeout
+- **feat:** adaptive message limits — reduce history from 20→12 messages when >10 tools to keep prompts smaller
+- **feat:** file-based debug log at `~/.openclaw/cli-bridge/debug.log` — `tail -f` for real-time request lifecycle visibility
+- **feat:** SSE progress comments every 30s so the webchat connection stays informed during long CLI runs
+- **feat:** SSE fallback notification — visible comment when a model times out and the bridge retries with fallback
+- **fix:** rescue tool_calls embedded inside content strings — handles models that wrap `{"tool_calls":[...]}` inside a `{"content":"..."}` wrapper
+- **fix:** parse robustness — debug logging on all parse paths to diagnose raw-JSON-instead-of-tool-calls issues
 
 ### v2.9.0
 - **feat:** enhanced `/status` dashboard with 5 new panels:

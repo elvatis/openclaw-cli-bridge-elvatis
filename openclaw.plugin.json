@@ -2,7 +2,7 @@
   "id": "openclaw-cli-bridge-elvatis",
   "slug": "openclaw-cli-bridge-elvatis",
   "name": "OpenClaw CLI Bridge",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "license": "MIT",
   "description": "Phase 1: openai-codex auth bridge. Phase 2: local HTTP proxy routing model calls through gemini/claude CLIs (vllm provider).",
   "providers": [
@@ -43,8 +43,8 @@
           "type": "number"
         },
         "default": {
-          "cli-claude/claude-opus-4-6": 420000,
-          "cli-claude/claude-sonnet-4-6": 420000,
+          "cli-claude/claude-opus-4-6": 360000,
+          "cli-claude/claude-sonnet-4-6": 300000,
           "cli-claude/claude-haiku-4-5": 120000,
           "cli-gemini/gemini-2.5-pro": 300000,
           "cli-gemini/gemini-2.5-flash": 180000,

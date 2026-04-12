@@ -28,10 +28,6 @@ export interface CliToolResult {
     content: string | null;
     tool_calls?: ToolCall[];
 }
-/**
- * Build a text block describing available tools and response format instructions.
- * This block is prepended to the system message (or added as a new system message).
- */
 export declare function buildToolPromptBlock(tools: ToolDefinition[]): string;
 /**
  * Returns a JSON schema that constrains Claude's output to either:

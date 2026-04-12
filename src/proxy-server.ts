@@ -33,6 +33,7 @@ import {
   BITNET_SYSTEM_PROMPT,
   DEFAULT_MODEL_TIMEOUTS,
 } from "./config.js";
+import { debugLog, DEBUG_LOG_PATH } from "./debug-log.js";
 
 // ── Active request tracking ─────────────────────────────────────────────────
 
@@ -214,6 +215,7 @@ export function startProxyServer(opts: ProxyServerOptions): Promise<http.Server>
       opts.log(
         `[cli-bridge] proxy listening on :${opts.port}`
       );
+      debugLog("STARTUP", `proxy listening on :${opts.port}`, { debugLog: DEBUG_LOG_PATH });
       // unref() so the proxy server does not keep the Node.js event loop alive
       // when openclaw doctor or other short-lived CLI commands load plugins.
       // The gateway's own main loop keeps the process alive during normal operation.
@@ -388,6 +390,8 @@ async function handleRequest(
     // Extract prompt preview from last user message for dashboard
     const lastUserMsg = [...cleanMessages].reverse().find(m => m.role === "user");
     const promptPreview = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.slice(0, 80) : "";
+
+    debugLog("REQ", `${model} start`, { msgs: cleanMessages.length, tools: tools?.length ?? 0, stream, media: mediaFiles.length, promptPreview: promptPreview.slice(0, 60) });
 
     // Track active request for dashboard
     activeRequests.set(id, { id, model, startedAt: Date.now(), messageCount: cleanMessages.length, toolCount: tools?.length ?? 0, promptPreview });
@@ -805,6 +809,7 @@ async function handleRequest(
     const toolExtra = (tools?.length ?? 0) * TIMEOUT_PER_TOOL_MS;
     const effectiveTimeout = Math.min(baseTimeout + msgExtra + toolExtra, MAX_EFFECTIVE_TIMEOUT_MS);
     opts.log(`[cli-bridge] ${model} session=${session.id} timeout: ${Math.round(effectiveTimeout / 1000)}s (base=${Math.round(baseTimeout / 1000)}s${perModelTimeout ? " per-model" : ""}, +${Math.round(msgExtra / 1000)}s msgs, +${Math.round(toolExtra / 1000)}s tools)`);
+    debugLog("TIMEOUT", `${model} effective=${Math.round(effectiveTimeout / 1000)}s`, { base: Math.round(baseTimeout / 1000), msgExtra: Math.round(msgExtra / 1000), toolExtra: Math.round(toolExtra / 1000), cap: Math.round(MAX_EFFECTIVE_TIMEOUT_MS / 1000) });
 
     // ── SSE keepalive: send headers early so OpenClaw doesn't read-timeout ──
     let sseHeadersSent = false;
@@ -821,17 +826,35 @@ async function handleRequest(
       keepaliveInterval = setInterval(() => { res.write(": keepalive\n\n"); }, SSE_KEEPALIVE_INTERVAL_MS);
     }
 
+    // ── Progress notifications: send visible status updates to the webchat ──
+    // Users shouldn't stare at a blank screen for minutes without feedback.
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
+    const PROGRESS_INTERVAL_MS = 30_000; // 30s between updates
+    if (stream && sseHeadersSent) {
+      const progressStart = Date.now();
+      progressInterval = setInterval(() => {
+        const elapsed = Math.round((Date.now() - progressStart) / 1000);
+        const timeoutSec = Math.round(effectiveTimeout / 1000);
+        // Send an SSE comment with progress info — visible in raw SSE but won't render as content
+        // Also send a small content delta that OpenClaw can show as typing indicator
+        res.write(`: progress ${elapsed}s/${timeoutSec}s — ${model} processing\n\n`);
+      }, PROGRESS_INTERVAL_MS);
+    }
+
     const cliStart = Date.now();
     try {
       result = await routeToCliRunner(model, cleanMessages, effectiveTimeout, routeOpts);
+      const latencyMs = Date.now() - cliStart;
       const estCompletionTokens = estimateTokens(result.content ?? "");
-      metrics.recordRequest(model, Date.now() - cliStart, true, estPromptTokens, estCompletionTokens, promptPreview);
+      metrics.recordRequest(model, latencyMs, true, estPromptTokens, estCompletionTokens, promptPreview);
       providerSessions.recordRun(session.id, false);
+      debugLog("OK", `${model} completed in ${(latencyMs / 1000).toFixed(1)}s`, { toolCalls: result.tool_calls?.length ?? 0, contentLen: result.content?.length ?? 0 });
     } catch (err) {
       const primaryDuration = Date.now() - cliStart;
       const msg = (err as Error).message;
       // ── Model fallback: retry once with a lighter model if configured ────
       const isTimeout = msg.includes("timeout:") || msg.includes("exit 143") || msg.includes("exited 143");
+      debugLog("FAIL", `${model} failed after ${(primaryDuration / 1000).toFixed(1)}s`, { isTimeout, error: msg.slice(0, 200) });
       // Record the run (with timeout flag) — session is preserved, not deleted
       providerSessions.recordRun(session.id, isTimeout);
       const fallbackModel = opts.modelFallbacks?.[model];
@@ -839,6 +862,11 @@ async function handleRequest(
         metrics.recordRequest(model, primaryDuration, false, estPromptTokens, undefined, promptPreview);
         const reason = isTimeout ? `timeout by supervisor, session=${session.id} preserved` : msg;
         opts.warn(`[cli-bridge] ${model} failed (${reason}), falling back to ${fallbackModel}`);
+        debugLog("FALLBACK", `${model} → ${fallbackModel}`, { reason: isTimeout ? "timeout" : "error", primaryDuration: Math.round(primaryDuration / 1000) });
+        // Notify the user via SSE that we're retrying with a different model
+        if (sseHeadersSent) {
+          res.write(`: fallback — ${model} ${isTimeout ? "timed out" : "failed"} after ${Math.round(primaryDuration / 1000)}s, retrying with ${fallbackModel}\n\n`);
+        }
         const fallbackStart = Date.now();
         try {
           result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
@@ -877,6 +905,7 @@ async function handleRequest(
       }
     } finally {
       if (keepaliveInterval) clearInterval(keepaliveInterval);
+      if (progressInterval) clearInterval(progressInterval);
       cleanupMediaFiles(mediaFiles);
       activeRequests.delete(id);
     }
