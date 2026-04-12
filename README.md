@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.1.2`
+**Current version:** `3.2.0`
 
 ---
 
@@ -405,6 +405,11 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v3.2.0
+- **feat:** Claude session resume — persistent sessions eliminate the 20KB prompt replay that caused Sonnet to hang. First request creates a session (`--session-id`), subsequent requests resume it (`--resume`). Claude keeps the conversation context; the bridge only sends the new message.
+- **feat:** session registry persisted to `~/.openclaw/cli-bridge/claude-sessions.json` — survives gateway restarts, auto-expires after 2 hours of inactivity
+- **feat:** auto-recovery: corrupted/expired sessions are detected and recreated transparently
 
 ### v3.1.2
 - **fix:** fallback models returning text instead of tool_calls in a tool loop now trigger the next model in the chain. Previously Haiku would say "Lass mich das starten:" as text but never call a tool — conversation died.
