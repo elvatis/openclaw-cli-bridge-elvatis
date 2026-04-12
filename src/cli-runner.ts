@@ -508,9 +508,11 @@ export async function runGemini(
   const args = ["-m", model, "-p", "", "--approval-mode", "yolo"];
   const cwd = workdir ?? tmpdir();
 
-  // When tools are present, prepend tool instructions to prompt
+  // When tools are present, sandwich the conversation between tool instructions.
+  // The reminder at the end ensures models (especially Haiku) remember the JSON format
+  // after processing a long conversation history.
   const effectivePrompt = opts?.tools?.length
-    ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt
+    ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
     : prompt;
 
   const result = await runCli("gemini", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
@@ -560,9 +562,11 @@ export async function runClaude(
     "--model", model,
   ];
 
-  // When tools are present, prepend tool instructions to prompt
+  // When tools are present, sandwich the conversation between tool instructions.
+  // The reminder at the end ensures models (especially Haiku) remember the JSON format
+  // after processing a long conversation history.
   const effectivePrompt = opts?.tools?.length
-    ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt
+    ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
     : prompt;
 
   const cwd = workdir ?? homedir();
@@ -641,9 +645,11 @@ export async function runCodex(
   // Codex requires a git repo in the working directory
   ensureGitRepo(cwd);
 
-  // When tools are present, prepend tool instructions to prompt
+  // When tools are present, sandwich the conversation between tool instructions.
+  // The reminder at the end ensures models (especially Haiku) remember the JSON format
+  // after processing a long conversation history.
   const effectivePrompt = opts?.tools?.length
-    ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt
+    ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
     : prompt;
 
   const result = await runCli("codex", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
