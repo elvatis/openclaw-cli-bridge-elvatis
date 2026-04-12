@@ -807,7 +807,7 @@ async function handleRequest(
           const fbCompTokens = estimateTokens(result.content ?? "");
           metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens);
           usedModel = fallbackModel;
-          opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded`);
+          opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded (response will report original model: ${model})`);
         } catch (fallbackErr) {
           metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, false, estPromptTokens);
           const fallbackMsg = (fallbackErr as Error).message;
@@ -851,7 +851,7 @@ async function handleRequest(
         const toolCalls = result.tool_calls!;
         // Role chunk with all tool_calls (name + empty arguments)
         sendSseChunk(res, {
-          id, created, model: usedModel,
+          id, created, model,
           delta: {
             role: "assistant",
             tool_calls: toolCalls.map((tc, idx) => ({
@@ -864,7 +864,7 @@ async function handleRequest(
         // Arguments chunks (one per tool call)
         for (let idx = 0; idx < toolCalls.length; idx++) {
           sendSseChunk(res, {
-            id, created, model: usedModel,
+            id, created, model,
             delta: {
               tool_calls: [{ index: idx, function: { arguments: toolCalls[idx].function.arguments } }],
             },
@@ -872,20 +872,20 @@ async function handleRequest(
           });
         }
         // Stop chunk
-        sendSseChunk(res, { id, created, model: usedModel, delta: {}, finish_reason: "tool_calls" });
+        sendSseChunk(res, { id, created, model, delta: {}, finish_reason: "tool_calls" });
       } else {
         // Standard text streaming
-        sendSseChunk(res, { id, created, model: usedModel, delta: { role: "assistant" }, finish_reason: null });
+        sendSseChunk(res, { id, created, model, delta: { role: "assistant" }, finish_reason: null });
         const content = result.content ?? "";
         const chunkSize = 50;
         for (let i = 0; i < content.length; i += chunkSize) {
           sendSseChunk(res, {
-            id, created, model: usedModel,
+            id, created, model,
             delta: { content: content.slice(i, i + chunkSize) },
             finish_reason: null,
           });
         }
-        sendSseChunk(res, { id, created, model: usedModel, delta: {}, finish_reason: "stop" });
+        sendSseChunk(res, { id, created, model, delta: {}, finish_reason: "stop" });
       }
 
       res.write("data: [DONE]\n\n");
@@ -903,7 +903,7 @@ async function handleRequest(
         id,
         object: "chat.completion",
         created,
-        model: usedModel,
+        model,
         choices: [
           {
             index: 0,
