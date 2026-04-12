@@ -63,8 +63,10 @@ vi.mock("../src/workdir.js", () => ({
 }));
 
 // Mock config module — provide all constants needed by session-manager.ts and cli-runner.ts
-vi.mock("../src/config.js", async () => {
+vi.mock("../src/config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/config.js")>();
   return {
+    ...actual,
     SESSION_TTL_MS: 30 * 60 * 1000,
     CLEANUP_INTERVAL_MS: 5 * 60 * 1000,
     SESSION_KILL_GRACE_MS: 5_000,

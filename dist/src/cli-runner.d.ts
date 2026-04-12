@@ -48,7 +48,7 @@ export type { ToolDefinition, CliToolResult } from "./tool-protocol.js";
  *   - role "tool": formatted as [Tool Result: name]
  *   - role "assistant" with tool_calls: formatted as [Assistant Tool Call: name(args)]
  */
-export declare function formatPrompt(messages: ChatMessage[]): string;
+export declare function formatPrompt(messages: ChatMessage[], toolCount?: number): string;
 export interface MediaFile {
     path: string;
     mimeType: string;

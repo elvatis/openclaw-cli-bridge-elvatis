@@ -14,8 +14,13 @@ export declare const DEFAULT_PROXY_PORT = 31337;
 export declare const DEFAULT_PROXY_API_KEY = "cli-bridge";
 /** Default base timeout for CLI subprocess responses (ms). Scales dynamically. */
 export declare const DEFAULT_PROXY_TIMEOUT_MS = 300000;
-/** Maximum effective timeout after dynamic scaling (ms). */
-export declare const MAX_EFFECTIVE_TIMEOUT_MS = 900000;
+/**
+ * Maximum effective timeout after dynamic scaling (ms).
+ * MUST be lower than the OpenClaw gateway's idleTimeoutSeconds (600s)
+ * so the bridge's own fallback fires BEFORE the gateway kills the request.
+ * 580s gives a 20s safety margin under the gateway's 600s hard limit.
+ */
+export declare const MAX_EFFECTIVE_TIMEOUT_MS = 580000;
 /** Extra timeout per message beyond 10 in the conversation (ms). */
 export declare const TIMEOUT_PER_EXTRA_MSG_MS = 2000;
 /** Extra timeout per tool definition in the request (ms). */
@@ -26,8 +31,21 @@ export declare const SSE_KEEPALIVE_INTERVAL_MS = 15000;
 export declare const DEFAULT_CLI_TIMEOUT_MS = 120000;
 /** Grace period between SIGTERM and SIGKILL when a timeout fires (ms). */
 export declare const TIMEOUT_GRACE_MS = 5000;
+/**
+ * Stale output timeout — if a CLI subprocess produces no stdout for this long,
+ * assume it's stuck and SIGTERM early. 0 = disabled.
+ * Prevents waiting the full timeout when Claude CLI hangs silently.
+ */
+export declare const STALE_OUTPUT_TIMEOUT_MS = 120000;
 /** Max messages to include in the prompt sent to CLI subprocesses. */
 export declare const MAX_MESSAGES = 20;
+/**
+ * Reduced message limit when tools are heavy (> TOOL_HEAVY_THRESHOLD).
+ * Fewer history messages = smaller prompt = faster CLI response.
+ */
+export declare const MAX_MESSAGES_HEAVY_TOOLS = 12;
+/** Tool count threshold that triggers reduced message limit. */
+export declare const TOOL_HEAVY_THRESHOLD = 10;
 /** Max characters per message content before truncation. */
 export declare const MAX_MSG_CHARS = 4000;
 /** Auto-cleanup threshold: sessions older than this are killed and removed (ms). */

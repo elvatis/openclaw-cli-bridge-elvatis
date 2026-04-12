@@ -10,6 +10,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { debugLog } from "./debug-log.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Types
@@ -46,13 +47,34 @@ export interface CliToolResult {
  * Build a text block describing available tools and response format instructions.
  * This block is prepended to the system message (or added as a new system message).
  */
+/** Threshold: when tool count exceeds this, use compact schema to reduce prompt size. */
+const COMPACT_TOOL_THRESHOLD = 8;
+
+/**
+ * Build a compact tool description: name + required param names only.
+ * Cuts prompt size by ~60-70% for large tool sets.
+ */
+function compactToolDescription(t: ToolDefinition): string {
+  const fn = t.function;
+  const params = fn.parameters as { properties?: Record<string, unknown>; required?: string[] };
+  const required = params?.required ?? Object.keys(params?.properties ?? {});
+  const paramList = required.length > 0 ? `(${required.join(", ")})` : "()";
+  return `- ${fn.name}${paramList}: ${fn.description}`;
+}
+
+/**
+ * Build a full tool description: name, description, and full JSON schema.
+ */
+function fullToolDescription(t: ToolDefinition): string {
+  const fn = t.function;
+  const params = JSON.stringify(fn.parameters);
+  return `- name: ${fn.name}\n  description: ${fn.description}\n  parameters: ${params}`;
+}
+
 export function buildToolPromptBlock(tools: ToolDefinition[]): string {
+  const useCompact = tools.length > COMPACT_TOOL_THRESHOLD;
   const toolDescriptions = tools
-    .map((t) => {
-      const fn = t.function;
-      const params = JSON.stringify(fn.parameters);
-      return `- name: ${fn.name}\n  description: ${fn.description}\n  parameters: ${params}`;
-    })
+    .map(useCompact ? compactToolDescription : fullToolDescription)
     .join("\n");
 
   return [
@@ -67,6 +89,7 @@ export function buildToolPromptBlock(tools: ToolDefinition[]): string {
     '{"content":"<your text response>"}',
     "",
     "Do NOT include any text outside the JSON. Do NOT wrap in markdown code blocks.",
+    useCompact ? "Call ONE tool at a time. Do NOT batch multiple tool calls." : "",
     "",
     "Available tools:",
     toolDescriptions,
@@ -117,6 +140,7 @@ export function buildToolCallJsonSchema(): object {
  */
 export function parseToolCallResponse(text: string): CliToolResult {
   const trimmed = text.trim();
+  const preview = trimmed.slice(0, 120);
 
   // Check for Claude's --output-format json wrapper FIRST.
   // Claude returns: { "type": "result", "result": "..." }
@@ -124,30 +148,48 @@ export function parseToolCallResponse(text: string): CliToolResult {
   const claudeResult = tryExtractClaudeJsonResult(trimmed);
   if (claudeResult) {
     const inner = tryParseJson(claudeResult);
-    if (inner) return normalizeResult(inner);
+    if (inner) {
+      const result = normalizeResult(inner);
+      debugLog("PARSE", `claude-json → ${result.tool_calls ? "tool_calls" : "content"}`, { toolCalls: result.tool_calls?.length ?? 0 });
+      return result;
+    }
     // Claude result is plain text
+    debugLog("PARSE", "claude-json → plain text", { len: claudeResult.length });
     return { content: claudeResult };
   }
 
   // Try direct JSON parse (for non-Claude outputs)
   const parsed = tryParseJson(trimmed);
-  if (parsed) return normalizeResult(parsed);
+  if (parsed) {
+    const result = normalizeResult(parsed);
+    debugLog("PARSE", `direct-json → ${result.tool_calls ? "tool_calls" : "content"}`, { toolCalls: result.tool_calls?.length ?? 0 });
+    return result;
+  }
 
   // Try extracting JSON from markdown code blocks: ```json ... ```
   const codeBlock = tryExtractCodeBlock(trimmed);
   if (codeBlock) {
     const inner = tryParseJson(codeBlock);
-    if (inner) return normalizeResult(inner);
+    if (inner) {
+      const result = normalizeResult(inner);
+      debugLog("PARSE", `code-block → ${result.tool_calls ? "tool_calls" : "content"}`, { toolCalls: result.tool_calls?.length ?? 0 });
+      return result;
+    }
   }
 
   // Try finding a JSON object anywhere in the text
   const embedded = tryExtractEmbeddedJson(trimmed);
   if (embedded) {
     const inner = tryParseJson(embedded);
-    if (inner) return normalizeResult(inner);
+    if (inner) {
+      const result = normalizeResult(inner);
+      debugLog("PARSE", `embedded-json → ${result.tool_calls ? "tool_calls" : "content"}`, { toolCalls: result.tool_calls?.length ?? 0 });
+      return result;
+    }
   }
 
   // Fallback: treat entire text as content
+  debugLog("PARSE", "no JSON found → raw content", { len: trimmed.length, preview });
   return { content: trimmed || null };
 }
 
@@ -167,16 +209,57 @@ function normalizeResult(obj: Record<string, unknown>): CliToolResult {
           : JSON.stringify(tc.arguments ?? {}),
       },
     }));
-    return { content: null, tool_calls: toolCalls };
+    // If the model also returned a content string alongside tool_calls, include it
+    const content = typeof obj.content === "string" ? obj.content : null;
+    return { content, tool_calls: toolCalls };
   }
 
-  // Check for content field
+  // Check for content field — but rescue embedded tool_calls JSON from inside content strings.
+  // Models sometimes wrap tool calls inside a content string:
+  //   {"content":"I'll write that file.\n{\"tool_calls\":[...]}"}
   if (typeof obj.content === "string") {
+    const rescued = tryRescueToolCallsFromContent(obj.content);
+    if (rescued) return rescued;
     return { content: obj.content };
   }
 
   // Unknown structure — serialize as content
   return { content: JSON.stringify(obj) };
+}
+
+/**
+ * Rescue tool_calls embedded inside a content string.
+ * Handles cases where the model wraps tool calls in a content field:
+ *   {"content":"Some text\n{\"tool_calls\":[...]}"}
+ *   {"content":"{\"tool_calls\":[{\"name\":\"write\",...}]}"}
+ */
+function tryRescueToolCallsFromContent(content: string): CliToolResult | null {
+  // Only attempt rescue if content contains the tool_calls signature
+  if (!content.includes('"tool_calls"') && !content.includes("tool_calls")) return null;
+
+  // Try to find embedded JSON with tool_calls
+  const embedded = tryExtractEmbeddedJson(content);
+  if (!embedded) return null;
+
+  const parsed = tryParseJson(embedded);
+  if (!parsed || !Array.isArray(parsed.tool_calls) || parsed.tool_calls.length === 0) return null;
+
+  // Extract the text content before the JSON (if any)
+  const jsonStart = content.indexOf(embedded);
+  const textBefore = jsonStart > 0 ? content.slice(0, jsonStart).trim() : null;
+
+  const toolCalls: ToolCall[] = parsed.tool_calls.map((tc: Record<string, unknown>) => ({
+    id: generateCallId(),
+    type: "function" as const,
+    function: {
+      name: String(tc.name ?? ""),
+      arguments: typeof tc.arguments === "string"
+        ? tc.arguments
+        : JSON.stringify(tc.arguments ?? {}),
+    },
+  }));
+
+  return { content: textBefore || null, tool_calls: toolCalls };
 }
 
 function tryParseJson(text: string): Record<string, unknown> | null {

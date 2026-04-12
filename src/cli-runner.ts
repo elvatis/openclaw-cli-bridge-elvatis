@@ -30,11 +30,15 @@ import {
 } from "./tool-protocol.js";
 import {
   MAX_MESSAGES,
+  MAX_MESSAGES_HEAVY_TOOLS,
+  TOOL_HEAVY_THRESHOLD,
   MAX_MSG_CHARS,
   DEFAULT_CLI_TIMEOUT_MS,
   TIMEOUT_GRACE_MS,
   MEDIA_TMP_DIR,
+  STALE_OUTPUT_TIMEOUT_MS,
 } from "./config.js";
+import { debugLog } from "./debug-log.js";
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Message formatting
@@ -69,13 +73,16 @@ export type { ToolDefinition, CliToolResult } from "./tool-protocol.js";
  *   - role "tool": formatted as [Tool Result: name]
  *   - role "assistant" with tool_calls: formatted as [Assistant Tool Call: name(args)]
  */
-export function formatPrompt(messages: ChatMessage[]): string {
+export function formatPrompt(messages: ChatMessage[], toolCount = 0): string {
   if (messages.length === 0) return "";
+
+  // Reduce history when tool schemas dominate the prompt
+  const maxMsgs = toolCount > TOOL_HEAVY_THRESHOLD ? MAX_MESSAGES_HEAVY_TOOLS : MAX_MESSAGES;
 
   // Keep system message (if any) + last N non-system messages
   const system = messages.find((m) => m.role === "system");
   const nonSystem = messages.filter((m) => m.role !== "system");
-  const recent = nonSystem.slice(-MAX_MESSAGES);
+  const recent = nonSystem.slice(-maxMsgs);
   const truncated = system ? [system, ...recent] : recent;
 
   // Single short user message — send bare (no wrapping needed)
@@ -331,17 +338,20 @@ export function runCli(
     let timedOut = false;
     let killTimer: ReturnType<typeof setTimeout> | null = null;
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    let staleTimer: ReturnType<typeof setInterval> | null = null;
+    let lastOutputAt = Date.now();
 
     const clearTimers = () => {
       if (timeoutTimer) { clearTimeout(timeoutTimer); timeoutTimer = null; }
       if (killTimer) { clearTimeout(killTimer); killTimer = null; }
+      if (staleTimer) { clearInterval(staleTimer); staleTimer = null; }
     };
 
-    // ── Timeout sequence: SIGTERM → grace → SIGKILL ──────────────────────
-    timeoutTimer = setTimeout(() => {
+    const doKill = (reason: string) => {
+      if (timedOut) return; // already killing
       timedOut = true;
-      const elapsed = Math.round(timeoutMs / 1000);
-      log(`[cli-bridge] timeout after ${elapsed}s for ${cmd}, sending SIGTERM`);
+      log(`[cli-bridge] ${reason} for ${cmd}, sending SIGTERM`);
+      debugLog("KILL", `${cmd} ${reason}`, { stdoutLen: stdout.length, stderrLen: stderr.length });
       proc.kill("SIGTERM");
 
       killTimer = setTimeout(() => {
@@ -350,14 +360,36 @@ export function runCli(
           proc.kill("SIGKILL");
         }
       }, TIMEOUT_GRACE_MS);
+    };
+
+    // ── Hard timeout: SIGTERM → grace → SIGKILL ──────────────────────────
+    timeoutTimer = setTimeout(() => {
+      doKill(`timeout after ${Math.round(timeoutMs / 1000)}s`);
     }, timeoutMs);
+
+    // ── Stale-output detection: kill if no stdout for STALE_OUTPUT_TIMEOUT_MS
+    if (STALE_OUTPUT_TIMEOUT_MS > 0) {
+      const checkInterval = 15_000; // check every 15s
+      staleTimer = setInterval(() => {
+        const silent = Date.now() - lastOutputAt;
+        if (silent >= STALE_OUTPUT_TIMEOUT_MS) {
+          doKill(`stale output — no stdout for ${Math.round(silent / 1000)}s`);
+        }
+      }, checkInterval);
+    }
 
     proc.stdin.write(prompt, "utf8", () => {
       proc.stdin.end();
     });
 
-    proc.stdout.on("data", (d: Buffer) => { stdout += d.toString(); });
-    proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+    proc.stdout.on("data", (d: Buffer) => {
+      stdout += d.toString();
+      lastOutputAt = Date.now();
+    });
+    proc.stderr.on("data", (d: Buffer) => {
+      stderr += d.toString();
+      lastOutputAt = Date.now(); // stderr also counts as activity
+    });
 
     proc.on("close", (code) => {
       clearTimers();
@@ -770,8 +802,9 @@ export async function routeToCliRunner(
   timeoutMs: number,
   opts: RouteOptions = {}
 ): Promise<CliToolResult> {
-  const prompt = formatPrompt(messages);
-  const hasTools = !!(opts.tools?.length);
+  const toolCount = opts.tools?.length ?? 0;
+  const prompt = formatPrompt(messages, toolCount);
+  const hasTools = toolCount > 0;
 
   // Strip "vllm/" prefix if present — OpenClaw sends the full provider path
   // (e.g. "vllm/cli-claude/claude-sonnet-4-6") but the router only needs the

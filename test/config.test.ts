@@ -38,7 +38,7 @@ describe("config.ts exports", () => {
     expect(DEFAULT_PROXY_TIMEOUT_MS).toBe(300_000);
     expect(DEFAULT_CLI_TIMEOUT_MS).toBe(120_000);
     expect(TIMEOUT_GRACE_MS).toBe(5_000);
-    expect(MAX_EFFECTIVE_TIMEOUT_MS).toBe(900_000);
+    expect(MAX_EFFECTIVE_TIMEOUT_MS).toBe(580_000); // under gateway's 600s
     expect(SESSION_TTL_MS).toBe(30 * 60 * 1000);
     expect(CLEANUP_INTERVAL_MS).toBe(5 * 60 * 1000);
     expect(SESSION_KILL_GRACE_MS).toBe(5_000);
@@ -61,8 +61,8 @@ describe("config.ts exports", () => {
   });
 
   it("exports per-model timeouts for all major models", () => {
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-opus-4-6"]).toBe(420_000);
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-sonnet-4-6"]).toBe(420_000);
+    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-opus-4-6"]).toBe(360_000);
+    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-sonnet-4-6"]).toBe(300_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-haiku-4-5"]).toBe(120_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-pro"]).toBe(300_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-flash"]).toBe(180_000);

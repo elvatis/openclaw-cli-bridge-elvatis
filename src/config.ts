@@ -25,8 +25,13 @@ export const DEFAULT_PROXY_API_KEY = "cli-bridge";
 /** Default base timeout for CLI subprocess responses (ms). Scales dynamically. */
 export const DEFAULT_PROXY_TIMEOUT_MS = 300_000; // 5 min
 
-/** Maximum effective timeout after dynamic scaling (ms). */
-export const MAX_EFFECTIVE_TIMEOUT_MS = 900_000; // 15 min
+/**
+ * Maximum effective timeout after dynamic scaling (ms).
+ * MUST be lower than the OpenClaw gateway's idleTimeoutSeconds (600s)
+ * so the bridge's own fallback fires BEFORE the gateway kills the request.
+ * 580s gives a 20s safety margin under the gateway's 600s hard limit.
+ */
+export const MAX_EFFECTIVE_TIMEOUT_MS = 580_000; // 9m 40s — under gateway's 600s
 
 /** Extra timeout per message beyond 10 in the conversation (ms). */
 export const TIMEOUT_PER_EXTRA_MSG_MS = 2_000;
@@ -47,8 +52,24 @@ export const DEFAULT_CLI_TIMEOUT_MS = 120_000; // 2 min
 /** Grace period between SIGTERM and SIGKILL when a timeout fires (ms). */
 export const TIMEOUT_GRACE_MS = 5_000;
 
+/**
+ * Stale output timeout — if a CLI subprocess produces no stdout for this long,
+ * assume it's stuck and SIGTERM early. 0 = disabled.
+ * Prevents waiting the full timeout when Claude CLI hangs silently.
+ */
+export const STALE_OUTPUT_TIMEOUT_MS = 120_000; // 2 min of silence → kill
+
 /** Max messages to include in the prompt sent to CLI subprocesses. */
 export const MAX_MESSAGES = 20;
+
+/**
+ * Reduced message limit when tools are heavy (> TOOL_HEAVY_THRESHOLD).
+ * Fewer history messages = smaller prompt = faster CLI response.
+ */
+export const MAX_MESSAGES_HEAVY_TOOLS = 12;
+
+/** Tool count threshold that triggers reduced message limit. */
+export const TOOL_HEAVY_THRESHOLD = 10;
 
 /** Max characters per message content before truncation. */
 export const MAX_MSG_CHARS = 4_000;
@@ -91,8 +112,8 @@ export const PROVIDER_SESSION_SWEEP_MS = 10 * 60 * 1_000; // 10 min
  *   - Fast/lightweight (Haiku, Flash, Mini): 120s
  */
 export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
-  "cli-claude/claude-opus-4-6":        420_000,  // 7 min
-  "cli-claude/claude-sonnet-4-6":      420_000,  // 7 min — prevent timeout→Haiku fallback on large sessions
+  "cli-claude/claude-opus-4-6":        360_000,  // 6 min — leaves room for dynamic scaling up to 580s cap
+  "cli-claude/claude-sonnet-4-6":      300_000,  // 5 min — was 7 min, reduced so fallback fires before gateway's 600s
   "cli-claude/claude-haiku-4-5":       120_000,  // 2 min
   "cli-gemini/gemini-2.5-pro":         300_000,  // 5 min — image generation needs more time
   "cli-gemini/gemini-2.5-flash":       180_000,  // 3 min
