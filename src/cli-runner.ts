@@ -1003,6 +1003,108 @@ function detectProjectFromPrompt(prompt: string): { name: string; path: string }
   return null;
 }
 
+// ── Skill hint injection ─────────────────────────────────────────────────────
+// Scans ~/.openclaw/skills/ for skill directories with SKILL.md files.
+// When user prompt mentions a skill name (from the directory name or the SKILL.md
+// description), injects a pointer so the model knows where to find it.
+
+interface SkillEntry {
+  name: string;
+  path: string;
+  description: string;
+  keywords: string[];
+  scripts: string[];
+}
+
+let _skillRegistry: SkillEntry[] | null = null;
+let _skillRegistryRefreshedAt = 0;
+const SKILL_REGISTRY_CACHE_TTL = 120_000; // refresh every 2 min
+
+function getSkillRegistry(): SkillEntry[] {
+  const now = Date.now();
+  if (_skillRegistry && (now - _skillRegistryRefreshedAt) < SKILL_REGISTRY_CACHE_TTL) {
+    return _skillRegistry;
+  }
+  _skillRegistry = [];
+  const skillsDir = join(homedir(), ".openclaw", "skills");
+  try {
+    if (!existsSync(skillsDir)) return _skillRegistry;
+    const entries = readdirSync(skillsDir);
+    for (const name of entries) {
+      const skillDir = join(skillsDir, name);
+      const skillMd = join(skillDir, "SKILL.md");
+      try {
+        if (!statSync(skillDir).isDirectory()) continue;
+        if (!existsSync(skillMd)) continue;
+        // Read first 500 chars of SKILL.md to extract description and keywords
+        const content = readFileSync(skillMd, "utf8").slice(0, 500);
+        const descMatch = content.match(/description:\s*"([^"]+)"/);
+        const description = descMatch?.[1] ?? "";
+        // Build keywords from: skill name, words in description, hyphen-split name parts
+        const keywords = [
+          name,
+          ...name.split("-"),
+          ...description.toLowerCase().split(/[\s,.:;]+/).filter(w => w.length > 3),
+        ];
+        // Find scripts
+        const scriptsDir = join(skillDir, "scripts");
+        let scripts: string[] = [];
+        try {
+          if (existsSync(scriptsDir) && statSync(scriptsDir).isDirectory()) {
+            scripts = readdirSync(scriptsDir).filter(f => f.endsWith(".py") || f.endsWith(".sh"));
+          }
+        } catch { /* no scripts dir */ }
+        _skillRegistry.push({ name, path: skillDir, description, keywords, scripts });
+      } catch { /* skip unreadable skill */ }
+    }
+  } catch { /* no skills dir */ }
+  _skillRegistryRefreshedAt = now;
+  return _skillRegistry;
+}
+
+function detectSkillHints(userText: string): string | null {
+  const skills = getSkillRegistry();
+  if (!skills.length) return null;
+
+  const lower = userText.toLowerCase();
+  const matched: SkillEntry[] = [];
+
+  for (const skill of skills) {
+    // Match by exact skill name in prompt
+    const nameRegex = new RegExp(`\\b${skill.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (nameRegex.test(userText)) {
+      matched.push(skill);
+      continue;
+    }
+    // Match by description keywords (need at least 2 keyword hits)
+    const uniqueKeywords = [...new Set(skill.keywords)];
+    const hits = uniqueKeywords.filter(kw => lower.includes(kw.toLowerCase()));
+    if (hits.length >= 2) {
+      matched.push(skill);
+    }
+  }
+
+  if (!matched.length) return null;
+
+  const hints = matched.map(skill => {
+    const lines = [
+      `[Skill: ${skill.name}]`,
+      `Read the skill instructions with the read tool: ${skill.path}/SKILL.md`,
+      `Then follow the workflow step by step using the available tools (read, exec, web_fetch, etc.).`,
+    ];
+    if (skill.scripts.length > 0) {
+      lines.push(`Available scripts (use exec tool to run them):`);
+      for (const s of skill.scripts) {
+        lines.push(`  - python3 ${skill.path}/scripts/${s}`);
+      }
+      lines.push(`Always use exec to run scripts. Do NOT output results as plain text when a script can do it.`);
+    }
+    return lines.join("\n");
+  });
+
+  return hints.join("\n\n");
+}
+
 /**
  * Route a chat completion to the correct CLI based on model prefix.
  *   cli-gemini/<id>      → gemini CLI
@@ -1028,17 +1130,25 @@ export async function routeToCliRunner(
   const hasTools = toolCount > 0;
 
   // Auto-detect project from user messages only (not tool results which mention other projects)
+  const userText = messages
+    .filter((m) => m.role === "user")
+    .map((m) => typeof m.content === "string" ? m.content : "")
+    .join(" ");
+
   if (!opts.workdir) {
-    const userText = messages
-      .filter((m) => m.role === "user")
-      .map((m) => typeof m.content === "string" ? m.content : "")
-      .join(" ");
     const detected = detectProjectFromPrompt(userText);
     if (detected) {
       opts = { ...opts, workdir: detected.path };
       prompt = `[Context: Working directory is ${detected.path}]\n\n${prompt}`;
       debugLog("WORKSPACE", `auto-detected project "${detected.name}"`, { path: detected.path });
     }
+  }
+
+  // Skill hints: inject pointers to local skill files when user prompt matches known patterns
+  const skillHints = detectSkillHints(userText);
+  if (skillHints) {
+    prompt = `${skillHints}\n\n${prompt}`;
+    debugLog("SKILL-HINT", "injected skill hints", { len: skillHints.length });
   }
 
   // Strip "vllm/" prefix if present — OpenClaw sends the full provider path
