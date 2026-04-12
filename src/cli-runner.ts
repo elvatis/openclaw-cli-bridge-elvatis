@@ -566,6 +566,7 @@ export async function runClaude(
     : prompt;
 
   const cwd = workdir ?? homedir();
+  debugLog("CLAUDE", `spawn ${model}`, { promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024), cwd, timeoutMs: Math.round(timeoutMs / 1000) });
   const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
 
   // On 401: attempt one token refresh + retry before giving up.

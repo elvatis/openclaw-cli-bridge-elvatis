@@ -57,7 +57,7 @@ export const TIMEOUT_GRACE_MS = 5_000;
  * assume it's stuck and SIGTERM early. 0 = disabled.
  * Prevents waiting the full timeout when Claude CLI hangs silently.
  */
-export const STALE_OUTPUT_TIMEOUT_MS = 120_000; // 2 min of silence → kill
+export const STALE_OUTPUT_TIMEOUT_MS = 60_000; // 1 min of silence → kill (Sonnet goes silent when rate-limited)
 
 /** Max messages to include in the prompt sent to CLI subprocesses. */
 export const MAX_MESSAGES = 20;
@@ -70,6 +70,13 @@ export const MAX_MESSAGES_HEAVY_TOOLS = 12;
 
 /** Tool count threshold that triggers reduced message limit. */
 export const TOOL_HEAVY_THRESHOLD = 10;
+
+/**
+ * Tool count threshold that triggers smart routing to a faster model.
+ * When Sonnet receives a request with this many tools, route to Haiku instead.
+ * Haiku handles tool calls in ~11s vs Sonnet's 80-120s (and Sonnet hangs intermittently).
+ */
+export const TOOL_ROUTING_THRESHOLD = 8;
 
 /** Max characters per message content before truncation. */
 export const MAX_MSG_CHARS = 4_000;

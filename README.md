@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.10.0`
+**Current version:** `2.10.1`
 
 ---
 
@@ -405,6 +405,11 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.10.1
+- **feat:** smart tool-routing — tool-heavy requests (>8 tools) auto-route to Haiku instead of Sonnet. Haiku handles tool calls in ~11s vs Sonnet's 80-120s (with intermittent hangs). Sonnet is preserved for reasoning/text responses.
+- **fix:** reduce stale-output timeout 120s→60s — faster fallback when Sonnet goes silent
+- **feat:** per-model spawn logging with prompt size for debugging
 
 ### v2.10.0
 - **fix:** cap effective timeout at 580s (under gateway's 600s `idleTimeoutSeconds`) so bridge fallback fires BEFORE gateway kills the request — eliminates the race condition where both compete to handle the timeout
