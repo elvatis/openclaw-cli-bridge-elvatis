@@ -9,7 +9,8 @@
  */
 
 import http from "node:http";
-import { randomBytes } from "node:crypto";
+import { execSync } from "node:child_process";
+import { randomBytes, createHash } from "node:crypto";
 import { type ChatMessage, type CliToolResult, type ToolDefinition, routeToCliRunner, extractMultimodalParts, cleanupMediaFiles } from "./cli-runner.js";
 import { scheduleTokenRefresh, setAuthLogger, stopTokenRefresh } from "./claude-auth.js";
 import { grokComplete, grokCompleteStream, type ChatMessage as GrokChatMessage } from "./grok-client.js";
@@ -35,6 +36,114 @@ import {
   TOOL_ROUTING_THRESHOLD,
 } from "./config.js";
 import { debugLog, DEBUG_LOG_PATH, getLogTail, watchLogFile, setDebugLogEnabled } from "./debug-log.js";
+
+// ── Skill delegation via openclaw agent ─────────────────────────────────────
+
+import { existsSync, readdirSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
+import { spawn as spawnChild } from "node:child_process";
+
+const activeDelegations = new Set<string>();
+
+function extractUserText(messages: ChatMessage[]): string {
+  return messages
+    .filter((m) => m.role === "user")
+    .map((m) => {
+      if (typeof m.content === "string") return m.content;
+      if (Array.isArray(m.content)) {
+        return (m.content as Array<{ type: string; text?: string }>)
+          .filter((p) => p.type === "text" && p.text)
+          .map((p) => p.text!)
+          .join(" ");
+      }
+      return "";
+    })
+    .join(" ");
+}
+
+let _skillNames: string[] | null = null;
+let _skillNamesAt = 0;
+
+function getSkillNames(): string[] {
+  const now = Date.now();
+  if (_skillNames && (now - _skillNamesAt) < 120_000) return _skillNames;
+  _skillNames = [];
+  const dir = join(homedir(), ".openclaw", "skills");
+  try {
+    if (!existsSync(dir)) return _skillNames;
+    for (const name of readdirSync(dir)) {
+      try {
+        if (statSync(join(dir, name)).isDirectory() && existsSync(join(dir, name, "SKILL.md"))) {
+          _skillNames.push(name);
+        }
+      } catch {}
+    }
+  } catch {}
+  _skillNamesAt = now;
+  return _skillNames;
+}
+
+function detectMatchedSkill(userText: string): string | null {
+  for (const name of getSkillNames()) {
+    const re = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (re.test(userText)) return name;
+  }
+  return null;
+}
+
+async function delegateToAgent(prompt: string, timeoutMs: number): Promise<{ text: string; durationMs: number }> {
+  const start = Date.now();
+  const timeoutSec = Math.min(Math.floor(timeoutMs / 1000), 300);
+
+  return new Promise((resolve, reject) => {
+    // Use the same Node + openclaw entry point as the systemd service to avoid version mismatches
+    const openclawEntry = join(homedir(), ".npm-global", "lib", "node_modules", "openclaw", "dist", "entry.js");
+    const useEntryJs = existsSync(openclawEntry);
+    const cmd = useEntryJs ? process.execPath : "openclaw"; // process.execPath = /usr/bin/node
+    const args = useEntryJs
+      ? [openclawEntry, "agent", "--agent", "main", "--message", prompt, "--json", "--timeout", String(timeoutSec)]
+      : ["agent", "--agent", "main", "--message", prompt, "--json", "--timeout", String(timeoutSec)];
+    const child = spawnChild(cmd, args, {
+      env: { ...process.env, PATH: `${join(homedir(), ".local", "bin")}:${process.env.PATH ?? ""}` },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+    child.stderr?.on("data", (d: Buffer) => { stderr += d.toString(); });
+
+    const timer = setTimeout(() => { child.kill("SIGTERM"); }, timeoutMs + 10_000);
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      const durationMs = Date.now() - start;
+      // Only fail if no JSON output at all — stderr always has plugin log noise
+      const hasJsonOutput = stdout.includes('"status"') || stdout.includes('"result"');
+      if (code !== 0 && !hasJsonOutput) {
+        // Filter out plugin log lines from stderr to find real errors
+        const realErrors = stderr.split("\n").filter(l => !l.includes("[plugins]") && !l.includes("[memory-") && l.trim()).join("\n");
+        reject(new Error(`openclaw agent exited ${code}: ${realErrors.slice(0, 500) || stderr.slice(0, 500)}`));
+        return;
+      }
+      try {
+        const jsonStart = stdout.indexOf("{");
+        if (jsonStart === -1) {
+          reject(new Error("No JSON in openclaw agent output"));
+          return;
+        }
+        const result = JSON.parse(stdout.slice(jsonStart));
+        const text = result?.result?.payloads?.[0]?.text ?? result?.result?.text ?? "";
+        resolve({ text, durationMs });
+      } catch (e) {
+        reject(new Error(`Failed to parse agent result: ${(e as Error).message}`));
+      }
+    });
+
+    child.on("error", (err) => { clearTimeout(timer); reject(err); });
+  });
+}
 
 // ── Active request tracking ─────────────────────────────────────────────────
 
@@ -845,6 +954,89 @@ async function handleRequest(
       return;
     }
     // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Skill delegation: delegate to openclaw agent for full workflow execution ──
+    const userText = extractUserText(cleanMessages);
+    const matchedSkill = detectMatchedSkill(userText);
+    const delegationKey = matchedSkill ? `${matchedSkill}:${createHash("md5").update(userText.slice(0, 500)).digest("hex").slice(0, 12)}` : null;
+
+    // TODO: delegation needs a multi-turn agent runner, not single-turn `openclaw agent`.
+    // `openclaw agent` returns after one turn (220ms) without executing the full workflow.
+    // Re-enable when OpenClaw supports multi-turn skill execution (e.g., `openclaw skill run blog-writer`).
+    if (false && matchedSkill && delegationKey && activeDelegations.size === 0) {
+      debugLog("DELEGATE", `skill "${matchedSkill}" detected, delegating to openclaw agent`, { msgs: cleanMessages.length });
+      activeDelegations.add(delegationKey);
+
+      // Send SSE headers early if streaming
+      if (stream) {
+        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
+        res.write(": delegating to openclaw agent\n\n");
+        // Keepalive while agent runs
+        const ka = setInterval(() => { res.write(": agent working\n\n"); }, 15_000);
+        try {
+          const lastUser = [...cleanMessages].reverse().find(m => m.role === "user");
+          const delegatePrompt = typeof lastUser?.content === "string" ? lastUser.content
+            : Array.isArray(lastUser?.content) ? (lastUser!.content as Array<{ type: string; text?: string }>).filter(p => p.type === "text").map(p => p.text).join(" ")
+            : userText.slice(-2000);
+
+          const agentResult = await delegateToAgent(delegatePrompt, MAX_EFFECTIVE_TIMEOUT_MS);
+          debugLog("DELEGATE-OK", `skill "${matchedSkill}" completed in ${(agentResult.durationMs / 1000).toFixed(1)}s`, { contentLen: agentResult.text.length });
+          metrics.recordRequest(model, agentResult.durationMs, true, estPromptTokens, estimateTokens(agentResult.text), promptPreview);
+
+          const chunk = { id, object: "chat.completion.chunk", created, model, choices: [{ index: 0, delta: { role: "assistant", content: agentResult.text }, finish_reason: "stop" }] };
+          res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+          res.write("data: [DONE]\n\n");
+          res.end();
+        } catch (err) {
+          const msg = (err as Error).message;
+          debugLog("DELEGATE-FAIL", `skill "${matchedSkill}" failed`, { error: msg.slice(0, 200) });
+          opts.warn(`[cli-bridge] agent delegation failed: ${msg.slice(0, 100)}, falling through to CLI`);
+          // Fall through to normal CLI routing below
+          clearInterval(ka);
+          activeDelegations.delete(delegationKey);
+          // Can't fall through after sending SSE headers — send error
+          res.write(`data: ${JSON.stringify({ error: { message: `Agent delegation failed: ${msg.slice(0, 200)}. Retrying via CLI.`, type: "cli_error" } })}\n\n`);
+          res.write("data: [DONE]\n\n");
+          res.end();
+          activeRequests.delete(id);
+          cleanupMediaFiles(mediaFiles);
+          return;
+        } finally {
+          clearInterval(ka);
+          activeDelegations.delete(delegationKey);
+        }
+        activeRequests.delete(id);
+        cleanupMediaFiles(mediaFiles);
+        return;
+      }
+
+      // Non-streaming delegation
+      try {
+        const lastUser = [...cleanMessages].reverse().find(m => m.role === "user");
+        const delegatePrompt = typeof lastUser?.content === "string" ? lastUser.content
+          : Array.isArray(lastUser?.content) ? (lastUser!.content as Array<{ type: string; text?: string }>).filter(p => p.type === "text").map(p => p.text).join(" ")
+          : userText.slice(-2000);
+
+        const agentResult = await delegateToAgent(delegatePrompt, MAX_EFFECTIVE_TIMEOUT_MS);
+        debugLog("DELEGATE-OK", `skill "${matchedSkill}" completed in ${(agentResult.durationMs / 1000).toFixed(1)}s`, { contentLen: agentResult.text.length });
+
+        res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+        res.end(JSON.stringify({
+          id, object: "chat.completion", created, model,
+          choices: [{ index: 0, message: { role: "assistant", content: agentResult.text }, finish_reason: "stop" }],
+          usage: { prompt_tokens: estPromptTokens, completion_tokens: estimateTokens(agentResult.text), total_tokens: estPromptTokens + estimateTokens(agentResult.text) },
+        }));
+        activeRequests.delete(id);
+        cleanupMediaFiles(mediaFiles);
+        return;
+      } catch (err) {
+        debugLog("DELEGATE-FAIL", `skill "${matchedSkill}" failed, falling through to CLI`, { error: (err as Error).message.slice(0, 200) });
+        activeDelegations.delete(delegationKey);
+        // Fall through to normal CLI routing
+      } finally {
+        activeDelegations.delete(delegationKey);
+      }
+    }
 
     // ── CLI runner routing (Gemini / Claude Code / Codex) ──────────────────────
     let result: CliToolResult;

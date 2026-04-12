@@ -38,11 +38,16 @@ export function formatPrompt(messages, toolCount = 0) {
         return "";
     // Reduce history when tool schemas dominate the prompt
     const maxMsgs = toolCount > TOOL_HEAVY_THRESHOLD ? MAX_MESSAGES_HEAVY_TOOLS : MAX_MESSAGES;
-    // Keep system message (if any) + last N non-system messages
+    // Keep system message (if any) + first user message (original request) + last N non-system messages
     const system = messages.find((m) => m.role === "system");
     const nonSystem = messages.filter((m) => m.role !== "system");
+    const firstUser = nonSystem.find((m) => m.role === "user");
     const recent = nonSystem.slice(-maxMsgs);
-    const truncated = system ? [system, ...recent] : recent;
+    // Pin the first user message so the model never loses the original request
+    const pinned = firstUser && !recent.includes(firstUser)
+        ? [firstUser, ...recent]
+        : recent;
+    const truncated = system ? [system, ...pinned] : pinned;
     // Single short user message — send bare (no wrapping needed)
     if (truncated.length === 1 && truncated[0].role === "user") {
         return truncateContent(truncated[0].content);
@@ -562,8 +567,8 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
         throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, true, modelId)}`);
     }
     const stderr = result.stderr || "(no output)";
-    // Session might be corrupted or expired — invalidate and retry with a fresh session
-    if (stderr.includes("session") || stderr.includes("resume") || stderr.includes("not found")) {
+    // Session might be corrupted, expired, or locked by a zombie process — invalidate and retry
+    if (stderr.includes("session") || stderr.includes("resume") || stderr.includes("not found") || stderr.includes("already in use")) {
         debugLog("CLAUDE", `session ${session.sessionId.slice(0, 8)} invalid, creating fresh`, { error: stderr.slice(0, 100) });
         invalidateSession(model);
         // Retry once with a fresh session
@@ -578,6 +583,8 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
             recordSessionSuccess(model);
             return retry.stdout;
         }
+        // Retry also failed — invalidate the fresh session so the next request doesn't reuse it
+        invalidateSession(model);
         throw new Error(`claude exited ${retry.exitCode}: ${annotateExitError(retry.exitCode, retry.stderr || "(no output)", false, modelId)}`);
     }
     // Auth failure — refresh token and retry
@@ -776,6 +783,79 @@ function detectProjectFromPrompt(prompt) {
     }
     return null;
 }
+let _skillRegistry = null;
+let _skillRegistryRefreshedAt = 0;
+const SKILL_REGISTRY_CACHE_TTL = 120_000; // refresh every 2 min
+function getSkillRegistry() {
+    const now = Date.now();
+    if (_skillRegistry && (now - _skillRegistryRefreshedAt) < SKILL_REGISTRY_CACHE_TTL) {
+        return _skillRegistry;
+    }
+    _skillRegistry = [];
+    const skillsDir = join(homedir(), ".openclaw", "skills");
+    try {
+        if (!existsSync(skillsDir))
+            return _skillRegistry;
+        const entries = readdirSync(skillsDir);
+        for (const name of entries) {
+            const skillDir = join(skillsDir, name);
+            const skillMd = join(skillDir, "SKILL.md");
+            try {
+                if (!statSync(skillDir).isDirectory())
+                    continue;
+                if (!existsSync(skillMd))
+                    continue;
+                // Read first 500 chars of SKILL.md to extract description and keywords
+                const content = readFileSync(skillMd, "utf8").slice(0, 500);
+                const descMatch = content.match(/description:\s*"([^"]+)"/);
+                const description = descMatch?.[1] ?? "";
+                // Build keywords from: skill name, words in description, hyphen-split name parts
+                const keywords = [
+                    name,
+                    ...name.split("-"),
+                    ...description.toLowerCase().split(/[\s,.:;]+/).filter(w => w.length > 3),
+                ];
+                // Find scripts
+                const scriptsDir = join(skillDir, "scripts");
+                let scripts = [];
+                try {
+                    if (existsSync(scriptsDir) && statSync(scriptsDir).isDirectory()) {
+                        scripts = readdirSync(scriptsDir).filter(f => f.endsWith(".py") || f.endsWith(".sh"));
+                    }
+                }
+                catch { /* no scripts dir */ }
+                _skillRegistry.push({ name, path: skillDir, description, keywords, scripts });
+            }
+            catch { /* skip unreadable skill */ }
+        }
+    }
+    catch { /* no skills dir */ }
+    _skillRegistryRefreshedAt = now;
+    return _skillRegistry;
+}
+function detectSkillHints(userText) {
+    const skills = getSkillRegistry();
+    if (!skills.length)
+        return null;
+    const matched = [];
+    for (const skill of skills) {
+        // Match by exact skill name in prompt only
+        const nameRegex = new RegExp(`\\b${skill.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+        if (nameRegex.test(userText)) {
+            matched.push(skill);
+        }
+    }
+    if (!matched.length)
+        return null;
+    // Keep hints compact — every byte counts at high message counts
+    const hints = matched.map(skill => {
+        const scripts = skill.scripts.length > 0
+            ? ` Scripts: ${skill.scripts.map(s => `${skill.path}/scripts/${s}`).join(", ")}`
+            : "";
+        return `[Skill: ${skill.name}] Read: ${skill.path}/SKILL.md — follow workflow with read/exec tools.${scripts}`;
+    });
+    return hints.join("\n");
+}
 /**
  * Route a chat completion to the correct CLI based on model prefix.
  *   cli-gemini/<id>      → gemini CLI
@@ -794,14 +874,24 @@ export async function routeToCliRunner(model, messages, timeoutMs, opts = {}) {
     const toolCount = opts.tools?.length ?? 0;
     let prompt = formatPrompt(messages, toolCount);
     const hasTools = toolCount > 0;
-    // Auto-detect project from prompt and set workdir + inject context
+    // Auto-detect project from user messages only (not tool results which mention other projects)
+    const userText = messages
+        .filter((m) => m.role === "user")
+        .map((m) => contentToString(m.content))
+        .join(" ");
     if (!opts.workdir) {
-        const detected = detectProjectFromPrompt(prompt);
+        const detected = detectProjectFromPrompt(userText);
         if (detected) {
             opts = { ...opts, workdir: detected.path };
             prompt = `[Context: Working directory is ${detected.path}]\n\n${prompt}`;
             debugLog("WORKSPACE", `auto-detected project "${detected.name}"`, { path: detected.path });
         }
+    }
+    // Skill hints: inject pointers to local skill files when user prompt matches known patterns
+    const skillHints = detectSkillHints(userText);
+    if (skillHints) {
+        prompt = `${skillHints}\n\n${prompt}`;
+        debugLog("SKILL-HINT", "injected skill hints", { len: skillHints.length });
     }
     // Strip "vllm/" prefix if present — OpenClaw sends the full provider path
     // (e.g. "vllm/cli-claude/claude-sonnet-4-6") but the router only needs the
