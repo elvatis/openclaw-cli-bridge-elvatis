@@ -756,38 +756,54 @@ async function handleRequest(req, res, opts) {
             debugLog("FAIL", `${model} failed after ${(primaryDuration / 1000).toFixed(1)}s`, { isTimeout, error: msg.slice(0, 200) });
             // Record the run (with timeout flag) — session is preserved, not deleted
             providerSessions.recordRun(session.id, isTimeout);
-            const fallbackModel = opts.modelFallbacks?.[model];
-            if (fallbackModel) {
+            // ── Multi-model fallback chain: try each fallback in order ──────────
+            // Chains cross providers: Sonnet → Haiku → Gemini Flash → Codex
+            const rawFallbacks = opts.modelFallbacks?.[model];
+            const fallbackChain = Array.isArray(rawFallbacks) ? rawFallbacks
+                : typeof rawFallbacks === "string" ? [rawFallbacks]
+                    : [];
+            if (fallbackChain.length > 0) {
                 metrics.recordRequest(model, primaryDuration, false, estPromptTokens, undefined, promptPreview);
                 const reason = isTimeout ? `timeout by supervisor, session=${session.id} preserved` : msg;
-                opts.warn(`[cli-bridge] ${model} failed (${reason}), falling back to ${fallbackModel}`);
-                debugLog("FALLBACK", `${model} → ${fallbackModel}`, { reason: isTimeout ? "timeout" : "error", primaryDuration: Math.round(primaryDuration / 1000) });
-                // Notify the user via SSE that we're retrying with a different model
-                if (sseHeadersSent) {
-                    res.write(`: fallback — ${model} ${isTimeout ? "timed out" : "failed"} after ${Math.round(primaryDuration / 1000)}s, retrying with ${fallbackModel}\n\n`);
-                }
-                const fallbackStart = Date.now();
-                try {
-                    result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
-                    const fbCompTokens = estimateTokens(result.content ?? "");
-                    metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens, promptPreview);
-                    metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, true);
-                    usedModel = fallbackModel;
-                    opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded (response will report original model: ${model})`);
-                }
-                catch (fallbackErr) {
-                    metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, false, estPromptTokens, undefined, promptPreview);
-                    metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, false);
-                    const fallbackMsg = fallbackErr.message;
-                    opts.warn(`[cli-bridge] fallback ${fallbackModel} also failed: ${fallbackMsg}`);
+                opts.warn(`[cli-bridge] ${model} failed (${reason}), trying fallback chain: ${fallbackChain.join(" → ")}`);
+                let chainSuccess = false;
+                for (const fallbackModel of fallbackChain) {
+                    debugLog("FALLBACK", `${model} → ${fallbackModel}`, { reason: isTimeout ? "timeout" : "error", primaryDuration: Math.round(primaryDuration / 1000), chain: fallbackChain });
                     if (sseHeadersSent) {
-                        res.write(`data: ${JSON.stringify({ error: { message: `${model}: ${msg} | fallback ${fallbackModel}: ${fallbackMsg}`, type: "cli_error" } })}\n\n`);
+                        res.write(`: fallback — trying ${fallbackModel}\n\n`);
+                    }
+                    const fallbackStart = Date.now();
+                    try {
+                        result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
+                        const fbCompTokens = estimateTokens(result.content ?? "");
+                        metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens, promptPreview);
+                        metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, true);
+                        usedModel = fallbackModel;
+                        debugLog("FALLBACK-OK", `${fallbackModel} succeeded in ${((Date.now() - fallbackStart) / 1000).toFixed(1)}s`, { toolCalls: result.tool_calls?.length ?? 0 });
+                        opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded`);
+                        chainSuccess = true;
+                        break;
+                    }
+                    catch (fallbackErr) {
+                        const fbDuration = Date.now() - fallbackStart;
+                        metrics.recordRequest(fallbackModel, fbDuration, false, estPromptTokens, undefined, promptPreview);
+                        metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, false);
+                        const fallbackMsg = fallbackErr.message;
+                        debugLog("FALLBACK-FAIL", `${fallbackModel} failed after ${(fbDuration / 1000).toFixed(1)}s`, { error: fallbackMsg.slice(0, 150) });
+                        opts.warn(`[cli-bridge] fallback ${fallbackModel} failed: ${fallbackMsg.slice(0, 100)}`);
+                        // Continue to next fallback in chain
+                    }
+                }
+                if (!chainSuccess) {
+                    const chainStr = fallbackChain.join(", ");
+                    if (sseHeadersSent) {
+                        res.write(`data: ${JSON.stringify({ error: { message: `${model} and all fallbacks (${chainStr}) failed`, type: "cli_error" } })}\n\n`);
                         res.write("data: [DONE]\n\n");
                         res.end();
                     }
                     else {
                         res.writeHead(500, { "Content-Type": "application/json" });
-                        res.end(JSON.stringify({ error: { message: `${model}: ${msg} | fallback ${fallbackModel}: ${fallbackMsg}`, type: "cli_error" } }));
+                        res.end(JSON.stringify({ error: { message: `${model} and all fallbacks (${chainStr}) failed`, type: "cli_error" } }));
                     }
                     return;
                 }

@@ -76,10 +76,13 @@ export declare const PROVIDER_SESSION_SWEEP_MS: number;
  */
 export declare const DEFAULT_MODEL_TIMEOUTS: Record<string, number>;
 /**
- * Default fallback chain: when a primary model fails (timeout, error),
- * retry once with the lighter variant.
+ * Default fallback chains: when a primary model fails (timeout, stale, error),
+ * try each fallback in order. Cross-provider chains ensure we use all available
+ * models instead of just falling back within one provider.
+ *
+ * Strategy: same-provider fast model first, then cross-provider alternatives.
  */
-export declare const DEFAULT_MODEL_FALLBACKS: Record<string, string>;
+export declare const DEFAULT_MODEL_FALLBACKS: Record<string, string[]>;
 /** Base directory for all CLI bridge state files. */
 export declare const OPENCLAW_DIR: string;
 /** State file — persists the model active before the last /cli-* switch. */

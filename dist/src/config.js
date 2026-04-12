@@ -109,15 +109,21 @@ export const DEFAULT_MODEL_TIMEOUTS = {
 // Model fallback chain
 // ──────────────────────────────────────────────────────────────────────────────
 /**
- * Default fallback chain: when a primary model fails (timeout, error),
- * retry once with the lighter variant.
+ * Default fallback chains: when a primary model fails (timeout, stale, error),
+ * try each fallback in order. Cross-provider chains ensure we use all available
+ * models instead of just falling back within one provider.
+ *
+ * Strategy: same-provider fast model first, then cross-provider alternatives.
  */
 export const DEFAULT_MODEL_FALLBACKS = {
-    "cli-gemini/gemini-2.5-pro": "cli-gemini/gemini-2.5-flash",
-    "cli-gemini/gemini-3-pro-preview": "cli-gemini/gemini-3-flash-preview",
-    "cli-claude/claude-opus-4-6": "cli-claude/claude-sonnet-4-6",
-    "cli-claude/claude-sonnet-4-6": "cli-claude/claude-haiku-4-5",
-    "gemini-api/gemini-2.5-pro": "gemini-api/gemini-2.5-flash",
+    "cli-claude/claude-opus-4-6": ["cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-2.5-pro", "cli-claude/claude-haiku-4-5"],
+    "cli-claude/claude-sonnet-4-6": ["cli-claude/claude-haiku-4-5", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
+    "cli-claude/claude-haiku-4-5": ["cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.1-codex-mini"],
+    "cli-gemini/gemini-2.5-pro": ["cli-gemini/gemini-2.5-flash", "cli-claude/claude-haiku-4-5"],
+    "cli-gemini/gemini-3-pro-preview": ["cli-gemini/gemini-3-flash-preview", "cli-gemini/gemini-2.5-flash"],
+    "openai-codex/gpt-5.4": ["openai-codex/gpt-5.3-codex", "cli-claude/claude-haiku-4-5"],
+    "openai-codex/gpt-5.3-codex": ["openai-codex/gpt-5.1-codex-mini", "cli-gemini/gemini-2.5-flash"],
+    "gemini-api/gemini-2.5-pro": ["gemini-api/gemini-2.5-flash"],
 };
 // ──────────────────────────────────────────────────────────────────────────────
 // Paths

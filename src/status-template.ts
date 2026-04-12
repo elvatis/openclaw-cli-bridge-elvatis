@@ -694,18 +694,20 @@ export function renderStatusPage(opts: StatusTemplateOptions): string {
     function appendLog(text) {
       if (!logOutput) return;
       var lines = text.split('\\n').filter(function(l) { return l.trim(); });
+      // Newest on top — prepend lines in reverse order
+      var html = '';
       lines.forEach(function(line) {
-        logOutput.innerHTML += colorLogLine(line.replace(/</g, '&lt;').replace(/>/g, '&gt;')) + '\\n';
+        html = colorLogLine(line.replace(/</g, '&lt;').replace(/>/g, '&gt;')) + '\\n' + html;
         logLineCount++;
       });
-      // Trim old lines
+      logOutput.innerHTML = html + logOutput.innerHTML;
+      // Trim old lines from bottom
       while (logLineCount > MAX_LOG_LINES) {
-        var idx = logOutput.innerHTML.indexOf('\\n');
+        var idx = logOutput.innerHTML.lastIndexOf('\\n');
         if (idx === -1) break;
-        logOutput.innerHTML = logOutput.innerHTML.slice(idx + 1);
+        logOutput.innerHTML = logOutput.innerHTML.slice(0, idx);
         logLineCount--;
       }
-      if (autoScroll) logOutput.scrollTop = logOutput.scrollHeight;
     }
 
     function connectLog() {

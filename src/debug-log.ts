@@ -62,7 +62,7 @@ export function getLogTail(lines = 100): string | null {
   try {
     const content = readFileSync(LOG_FILE, "utf8");
     const allLines = content.split("\n").filter(Boolean);
-    return allLines.slice(-lines).join("\n");
+    return allLines.slice(-lines).reverse().join("\n");
   } catch {
     return null;
   }

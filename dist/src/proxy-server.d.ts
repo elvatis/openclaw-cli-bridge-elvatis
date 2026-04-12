@@ -86,7 +86,7 @@ export interface ProxyServerOptions {
      * When a CLI model fails (timeout, error), the request is retried once
      * with the fallback model. Example: "cli-gemini/gemini-2.5-pro" → "cli-gemini/gemini-2.5-flash"
      */
-    modelFallbacks?: Record<string, string>;
+    modelFallbacks?: Record<string, string | string[]>;
     /**
      * Per-model timeout overrides (ms). Keys are model IDs (without "vllm/" prefix).
      * Use this to give heavy models more time or limit fast models.
