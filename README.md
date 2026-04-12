@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.3.0`
+**Current version:** `3.3.1`
 
 ---
 
@@ -405,6 +405,10 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v3.3.1
+- **fix:** test requests no longer pollute `debug.log` — test instances (port 0) now skip file logging
+- **fix:** Codex test updated for session resume args
 
 ### v3.3.0
 - **feat:** session resume for ALL CLI providers — Claude, Gemini, and Codex all now use persistent sessions with `--resume`. Unified session registry at `~/.openclaw/cli-bridge/cli-sessions.json`.

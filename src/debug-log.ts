@@ -39,10 +39,18 @@ function ts(): string {
 }
 
 /**
+ * Suppress logging in test mode (vitest sets NODE_ENV or uses port 0).
+ * Without this, every test run pollutes the production debug log with 43+ fake requests.
+ */
+let _enabled = true;
+export function setDebugLogEnabled(enabled: boolean): void { _enabled = enabled; }
+
+/**
  * Append a debug line to the log file.
  * Non-blocking, never throws — logging must not crash the bridge.
  */
 export function debugLog(category: string, message: string, data?: Record<string, unknown>): void {
+  if (!_enabled) return;
   try {
     ensureDir();
     rotate();

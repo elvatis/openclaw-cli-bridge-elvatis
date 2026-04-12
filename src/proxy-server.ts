@@ -34,7 +34,7 @@ import {
   DEFAULT_MODEL_TIMEOUTS,
   TOOL_ROUTING_THRESHOLD,
 } from "./config.js";
-import { debugLog, DEBUG_LOG_PATH, getLogTail, watchLogFile } from "./debug-log.js";
+import { debugLog, DEBUG_LOG_PATH, getLogTail, watchLogFile, setDebugLogEnabled } from "./debug-log.js";
 
 // ── Active request tracking ─────────────────────────────────────────────────
 
@@ -212,6 +212,9 @@ export function startProxyServer(opts: ProxyServerOptions): Promise<http.Server>
         reject(err);
       }
     });
+    // Disable debug file logging for test instances (port 0) to avoid polluting production logs
+    if (opts.port === 0) setDebugLogEnabled(false);
+
     server.listen(opts.port, "127.0.0.1", () => {
       opts.log(
         `[cli-bridge] proxy listening on :${opts.port}`
