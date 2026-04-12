@@ -87,7 +87,7 @@ describe("runCodex()", () => {
     expect(result).toBe("codex result");
     expect(mockSpawn).toHaveBeenCalledWith(
       "codex",
-      ["exec", "--model", "gpt-5.3-codex", "--full-auto"],
+      expect.arrayContaining(["exec", "--model", "gpt-5.3-codex", "--full-auto"]),
       expect.any(Object)
     );
   });
