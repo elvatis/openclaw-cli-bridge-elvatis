@@ -71,11 +71,15 @@ describe("config.ts exports", () => {
     expect(DEFAULT_MODEL_TIMEOUTS["gemini-api/gemini-2.5-flash"]).toBe(180_000);
   });
 
-  it("exports model fallback chains", () => {
-    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-sonnet-4-6"]).toBe("cli-claude/claude-haiku-4-5");
-    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-opus-4-6"]).toBe("cli-claude/claude-sonnet-4-6");
-    expect(DEFAULT_MODEL_FALLBACKS["cli-gemini/gemini-2.5-pro"]).toBe("cli-gemini/gemini-2.5-flash");
-    expect(DEFAULT_MODEL_FALLBACKS["gemini-api/gemini-2.5-pro"]).toBe("gemini-api/gemini-2.5-flash");
+  it("exports model fallback chains as arrays", () => {
+    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-sonnet-4-6"]).toEqual(["cli-claude/claude-haiku-4-5", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"]);
+    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-opus-4-6"]).toContain("cli-claude/claude-sonnet-4-6");
+    expect(DEFAULT_MODEL_FALLBACKS["cli-gemini/gemini-2.5-pro"]).toContain("cli-gemini/gemini-2.5-flash");
+    expect(DEFAULT_MODEL_FALLBACKS["gemini-api/gemini-2.5-pro"]).toContain("gemini-api/gemini-2.5-flash");
+    // All values must be arrays
+    for (const chain of Object.values(DEFAULT_MODEL_FALLBACKS)) {
+      expect(Array.isArray(chain)).toBe(true);
+    }
   });
 
   it("exports path constants rooted in ~/.openclaw", () => {

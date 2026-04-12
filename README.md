@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.0.0`
+**Current version:** `3.1.0`
 
 ---
 
@@ -405,6 +405,12 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v3.1.0
+- **feat:** cross-provider fallback chains — Sonnet → Haiku → Gemini Flash → Codex (was single-model fallback only)
+- **feat:** fallback chain loop — tries each model in order until one succeeds, logs each attempt
+- **fix:** live logs newest-on-top — latest entries now appear at the top of the log viewer
+- **feat:** SSE fallback notifications for each chain attempt so user sees what's happening
 
 ### v3.0.0
 - **feat:** dashboard v2 — sidebar navigation with 9 sections (Overview, Providers, Active, Requests, Fallbacks, Sessions, Live Logs, Timeouts, Models)
