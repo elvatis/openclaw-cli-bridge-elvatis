@@ -78,6 +78,12 @@ export const TOOL_HEAVY_THRESHOLD = 10;
  */
 export const TOOL_ROUTING_THRESHOLD = 8;
 
+/**
+ * Prompt size threshold (bytes) for escalating Sonnet to Opus.
+ * Sonnet hangs ~50% at 30KB+ prompts. Opus handles large contexts reliably.
+ */
+export const OPUS_ESCALATION_THRESHOLD = 30_000;
+
 /** Max characters per message content before truncation. */
 export const MAX_MSG_CHARS = 4_000;
 

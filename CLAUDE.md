@@ -31,7 +31,14 @@ OpenClaw Gateway ──(HTTP)──> proxy-server.ts ──(spawn)──> claude
 - **Compact tool schema** — when >8 tools, only send name+params (skip descriptions/full JSON schema), cuts prompt ~60%
 - **Exit 143 = our SIGTERM** — not OOM, not crash. The bridge's timeout/stale-output detector sends SIGTERM, Claude CLI exits 143
 - **Consecutive timeout rotation** — after 3 timeouts in a row on the same session, auto-expire it and create a fresh one. Prevents poisoned sessions from blocking all requests
-- **Workspace project auto-detection** — scans `~/.openclaw/workspace/` for project directories; when the prompt contains an exact match of a project name, auto-sets `workdir` and injects `[Context: Working directory is ...]` into the prompt
+- **Workspace project auto-detection** — scans `~/.openclaw/workspace/` for project directories; when the prompt contains an exact match of a project name (from user messages only), auto-sets `workdir` and injects context
+- **Opus escalation** — when conversations exceed 20 messages with tools, automatically routes from Sonnet to Opus. Opus handles large contexts reliably (94% success vs Sonnet's 55%)
+- **Opus 90s stale timeout** — Opus gets 90s stale-output timeout (vs 30s for Sonnet) to allow time for long-form generation (blog posts, Lexical JSON)
+- **Session resume: Opus only** — Sonnet/Haiku use fresh `claude -p` every call (session resume caused 45% hang rate). Opus uses `--session-id`/`--resume` for context continuity
+- **Generic skill auto-detection** — scans `~/.openclaw/skills/` for SKILL.md files, injects pointers when prompt matches a skill name. Fully generic, works with any installed skill
+- **First user message pinning** — original user request is always included in the prompt window, even when conversation exceeds MAX_MESSAGES
+- **Haiku skip in tool loops** — fallback chain skips Haiku when tool_calls are expected (Haiku consistently returns text instead of tool_calls in tool loops)
+- **Improved JSON parser** — tries multiple `{` positions for embedded JSON, rescue-from-raw strategy, handles malformed tool_calls from fallback models
 
 ## Build & Test
 
@@ -84,9 +91,12 @@ Parser tries 5 strategies: Claude JSON wrapper, direct JSON, code blocks, embedd
 
 ## Known Issues
 
-- **Sonnet intermittent hangs** — `claude -p` with Sonnet goes completely silent (~50% of the time) on large tool prompts (20KB+). First call often works, subsequent calls hang. NOT RAM-related. Likely API-side rate limiting or request dedup. Workaround: 30s stale-output detection + Haiku fallback.
-- **Haiku empty responses** — occasionally returns zero stdout (len:0). Cause unclear. The JSON reminder at prompt end helps but doesn't fully solve it.
-- **Pre-existing tsc errors** — 5 errors about `openclaw/plugin-sdk` module not found. These are expected — the SDK is injected at runtime by the gateway. Dist output is still generated.
+- **Sonnet intermittent hangs** — `claude -p` with Sonnet goes completely silent (~45% of requests). Session resume makes it worse (corrupted sessions after SIGTERM). Workaround: session resume disabled for Sonnet (fresh `-p` every call), auto-escalate to Opus at 20+ messages. Opus has ~94% success rate.
+- **Sonnet session resume disabled** — session resume caused corrupted sessions when SIGTERM killed processes. Only Opus uses `--session-id`/`--resume` now. Sonnet/Haiku send the full prompt every time (more tokens, but reliable).
+- **Haiku unreliable for tool_calls** — returns text instead of tool_calls ~80% of the time in tool loops. Skipped in fallback chain when tools are expected.
+- **Long-form generation limit** — generating 15KB+ responses (blog posts as Lexical JSON) can exceed even Opus's 90s stale timeout. The `claude -p` CLI sometimes goes silent during long generation. No workaround from the bridge side.
+- **Agent delegation (disabled)** — infrastructure for delegating skills to `openclaw agent` is built but disabled. `openclaw agent` is single-turn only; multi-turn skill execution needs OpenClaw-side support.
+- **Pre-existing tsc errors** — errors about `openclaw/plugin-sdk` module not found. Expected — the SDK is injected at runtime by the gateway. Dist output is still generated.
 
 ## Testing
 
