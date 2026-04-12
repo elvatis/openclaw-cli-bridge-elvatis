@@ -905,6 +905,12 @@ async function handleRequest(
     try {
       result = await routeToCliRunner(usedModel, cleanMessages, effectiveTimeout, routeOpts);
       const latencyMs = Date.now() - cliStart;
+      const hasContent = !!(result.content?.trim()) || !!(result.tool_calls?.length);
+      // Empty response = model returned nothing useful. Treat as error to trigger fallback.
+      if (!hasContent) {
+        debugLog("EMPTY", `${usedModel} returned empty after ${(latencyMs / 1000).toFixed(1)}s`, {});
+        throw new Error(`empty response: ${usedModel} returned no content and no tool_calls`);
+      }
       const estCompletionTokens = estimateTokens(result.content ?? "");
       metrics.recordRequest(usedModel, latencyMs, true, estPromptTokens, estCompletionTokens, promptPreview);
       providerSessions.recordRun(session.id, false);
@@ -938,6 +944,11 @@ async function handleRequest(
           const fallbackStart = Date.now();
           try {
             result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
+            const fbHasContent = !!(result.content?.trim()) || !!(result.tool_calls?.length);
+            if (!fbHasContent) {
+              debugLog("FALLBACK-EMPTY", `${fallbackModel} returned empty`, {});
+              throw new Error(`empty response from ${fallbackModel}`);
+            }
             const fbCompTokens = estimateTokens(result.content ?? "");
             metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens, promptPreview);
             metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, true);
