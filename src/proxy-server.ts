@@ -32,6 +32,7 @@ import {
   BITNET_MAX_MESSAGES,
   BITNET_SYSTEM_PROMPT,
   DEFAULT_MODEL_TIMEOUTS,
+  TOOL_ROUTING_THRESHOLD,
 } from "./config.js";
 import { debugLog, DEBUG_LOG_PATH } from "./debug-log.js";
 
@@ -790,6 +791,18 @@ async function handleRequest(
     // ── CLI runner routing (Gemini / Claude Code / Codex) ──────────────────────
     let result: CliToolResult;
     let usedModel = model;
+
+    // ── Smart tool routing: heavy tool requests → Haiku for speed ──────────
+    // Sonnet hangs intermittently on large tool prompts (20KB+, 21 tools).
+    // Haiku handles tool calls in ~11s vs Sonnet's 80-120s (when it works).
+    // Route tool-heavy requests directly to Haiku, keep Sonnet for reasoning.
+    if (hasTools && tools!.length > TOOL_ROUTING_THRESHOLD && model === "cli-claude/claude-sonnet-4-6") {
+      const toolModel = "cli-claude/claude-haiku-4-5";
+      opts.log(`[cli-bridge] tool-routing: ${model} → ${toolModel} (${tools!.length} tools)`);
+      debugLog("TOOL-ROUTE", `${model} → ${toolModel}`, { tools: tools!.length, threshold: TOOL_ROUTING_THRESHOLD });
+      usedModel = toolModel;
+    }
+
     const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined, log: opts.log };
 
     // ── Provider session: ensure a persistent session for this model ────────
@@ -843,12 +856,12 @@ async function handleRequest(
 
     const cliStart = Date.now();
     try {
-      result = await routeToCliRunner(model, cleanMessages, effectiveTimeout, routeOpts);
+      result = await routeToCliRunner(usedModel, cleanMessages, effectiveTimeout, routeOpts);
       const latencyMs = Date.now() - cliStart;
       const estCompletionTokens = estimateTokens(result.content ?? "");
-      metrics.recordRequest(model, latencyMs, true, estPromptTokens, estCompletionTokens, promptPreview);
+      metrics.recordRequest(usedModel, latencyMs, true, estPromptTokens, estCompletionTokens, promptPreview);
       providerSessions.recordRun(session.id, false);
-      debugLog("OK", `${model} completed in ${(latencyMs / 1000).toFixed(1)}s`, { toolCalls: result.tool_calls?.length ?? 0, contentLen: result.content?.length ?? 0 });
+      debugLog("OK", `${usedModel} completed in ${(latencyMs / 1000).toFixed(1)}s`, { toolCalls: result.tool_calls?.length ?? 0, contentLen: result.content?.length ?? 0 });
     } catch (err) {
       const primaryDuration = Date.now() - cliStart;
       const msg = (err as Error).message;
