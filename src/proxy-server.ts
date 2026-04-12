@@ -448,6 +448,9 @@ async function handleRequest(
     const promptPreview = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.slice(0, 80) : "";
 
     debugLog("REQ", `${model} start`, { msgs: cleanMessages.length, tools: tools?.length ?? 0, stream, media: mediaFiles.length, promptPreview: promptPreview.slice(0, 60) });
+    if (hasTools && tools!.length > 0) {
+      debugLog("TOOLS", `${tools!.length} tools available`, { names: tools!.map(t => t.function?.name ?? t.name ?? "?").join(", ") });
+    }
 
     // Track active request for dashboard
     activeRequests.set(id, { id, model, startedAt: Date.now(), messageCount: cleanMessages.length, toolCount: tools?.length ?? 0, promptPreview });

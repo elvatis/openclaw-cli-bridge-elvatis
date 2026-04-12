@@ -188,6 +188,16 @@ export function parseToolCallResponse(text: string): CliToolResult {
     }
   }
 
+  // Last resort: try to rescue tool_calls from anywhere in the text
+  // Models sometimes output tool_calls JSON with surrounding text that breaks other strategies
+  if (trimmed.includes("tool_calls")) {
+    const rescued = tryRescueToolCallsFromContent(trimmed);
+    if (rescued) {
+      debugLog("PARSE", `rescue-from-raw → tool_calls`, { toolCalls: rescued.tool_calls?.length ?? 0 });
+      return rescued;
+    }
+  }
+
   // Fallback: treat entire text as content
   debugLog("PARSE", "no JSON found → raw content", { len: trimmed.length, preview });
   return { content: trimmed || null };
@@ -307,37 +317,49 @@ function tryExtractCodeBlock(text: string): string | null {
   return match?.[1]?.trim() ?? null;
 }
 
-/** Find the first { ... } JSON object in text (greedy, balanced braces). */
+/** Find a balanced { ... } JSON object in text. Tries multiple start positions if the first fails to parse. */
 function tryExtractEmbeddedJson(text: string): string | null {
-  const start = text.indexOf("{");
-  if (start === -1) return null;
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const start = text.indexOf("{", searchFrom);
+    if (start === -1) return null;
 
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
 
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i];
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\") {
-      escaped = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-    if (ch === "{") depth++;
-    if (ch === "}") {
-      depth--;
-      if (depth === 0) {
-        return text.slice(start, i + 1);
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === "{") depth++;
+      if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          const candidate = text.slice(start, i + 1);
+          // Verify it actually parses as JSON before returning
+          try {
+            JSON.parse(candidate);
+            return candidate;
+          } catch {
+            // This balanced-brace block isn't valid JSON — try next { in text
+            break;
+          }
+        }
       }
     }
+    searchFrom = start + 1;
   }
   return null;
 }
