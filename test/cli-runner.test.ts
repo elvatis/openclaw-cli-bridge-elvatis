@@ -19,18 +19,19 @@ describe("formatPrompt", () => {
     expect(result).toBe("hello");
   });
 
-  it("truncates to MAX_MESSAGES (20) non-system messages", () => {
+  it("truncates to MAX_MESSAGES (20) non-system messages but pins first user message", () => {
     const messages = Array.from({ length: 30 }, (_, i) => ({
       role: "user" as const,
       content: `msg ${i}`,
     }));
     const result = formatPrompt(messages);
     expect(result).toContain("msg 29");
-    expect(result).not.toContain("msg 0\n");
+    expect(result).toContain("msg 0"); // first user message is always pinned
+    expect(result).not.toContain("msg 1\n"); // but intermediate messages are truncated
     expect(result).toContain("[User]");
   });
 
-  it("keeps system message + last 20 non-system messages", () => {
+  it("keeps system message + first user message + last 20 non-system messages", () => {
     const sys = { role: "system" as const, content: "You are helpful" };
     const msgs = Array.from({ length: 25 }, (_, i) => ({
       role: "user" as const,
@@ -40,7 +41,8 @@ describe("formatPrompt", () => {
     expect(result).toContain("[System]");
     expect(result).toContain("You are helpful");
     expect(result).toContain("msg 24");
-    expect(result).not.toContain("msg 0\n");
+    expect(result).toContain("msg 0"); // first user message is always pinned
+    expect(result).not.toContain("msg 1\n"); // but intermediate messages are truncated
   });
 
   it("truncates individual message content at MAX_MSG_CHARS (4000)", () => {
