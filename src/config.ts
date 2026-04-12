@@ -57,7 +57,7 @@ export const TIMEOUT_GRACE_MS = 5_000;
  * assume it's stuck and SIGTERM early. 0 = disabled.
  * Prevents waiting the full timeout when Claude CLI hangs silently.
  */
-export const STALE_OUTPUT_TIMEOUT_MS = 60_000; // 1 min of silence → kill (Sonnet goes silent when rate-limited)
+export const STALE_OUTPUT_TIMEOUT_MS = 30_000; // 30s of silence → kill. Sonnet either starts producing within 30s or it's hung.
 
 /** Max messages to include in the prompt sent to CLI subprocesses. */
 export const MAX_MESSAGES = 20;

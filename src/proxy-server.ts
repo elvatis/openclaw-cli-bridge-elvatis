@@ -792,16 +792,11 @@ async function handleRequest(
     let result: CliToolResult;
     let usedModel = model;
 
-    // ── Smart tool routing: heavy tool requests → Haiku for speed ──────────
-    // Sonnet hangs intermittently on large tool prompts (20KB+, 21 tools).
-    // Haiku handles tool calls in ~11s vs Sonnet's 80-120s (when it works).
-    // Route tool-heavy requests directly to Haiku, keep Sonnet for reasoning.
-    if (hasTools && tools!.length > TOOL_ROUTING_THRESHOLD && model === "cli-claude/claude-sonnet-4-6") {
-      const toolModel = "cli-claude/claude-haiku-4-5";
-      opts.log(`[cli-bridge] tool-routing: ${model} → ${toolModel} (${tools!.length} tools)`);
-      debugLog("TOOL-ROUTE", `${model} → ${toolModel}`, { tools: tools!.length, threshold: TOOL_ROUTING_THRESHOLD });
-      usedModel = toolModel;
-    }
+    // ── Smart tool routing: Sonnet first (better reasoning), fast fallback to Haiku ──
+    // Sonnet picks the right tools but intermittently hangs on large prompts.
+    // Strategy: let Sonnet try first — if it responds, great (better tool selection).
+    // The stale-output detector (60s) kills it fast if it hangs, then fallback to Haiku.
+    // This preserves Sonnet's intelligence for tool selection while keeping Haiku as safety net.
 
     const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined, log: opts.log };
 
