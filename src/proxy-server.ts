@@ -939,7 +939,14 @@ async function handleRequest(
         opts.warn(`[cli-bridge] ${model} failed (${reason}), trying fallback chain: ${fallbackChain.join(" → ")}`);
 
         let chainSuccess = false;
+        const lastMsg = cleanMessages[cleanMessages.length - 1];
+        const inToolLoop = hasTools && (lastMsg?.role === "tool" || lastMsg?.role === "function");
         for (const fallbackModel of fallbackChain) {
+          // Skip Haiku in tool loops — it consistently returns text instead of tool_calls, wasting ~8-12s
+          if (inToolLoop && fallbackModel.includes("haiku")) {
+            debugLog("FALLBACK-SKIP", `skipping ${fallbackModel} in tool loop (unreliable for tool_calls)`, {});
+            continue;
+          }
           debugLog("FALLBACK", `${model} → ${fallbackModel}`, { reason: isTimeout ? "timeout" : "error", primaryDuration: Math.round(primaryDuration / 1000), chain: fallbackChain });
           if (sseHeadersSent) {
             res.write(`: fallback — trying ${fallbackModel}\n\n`);
@@ -952,12 +959,9 @@ async function handleRequest(
               debugLog("FALLBACK-EMPTY", `${fallbackModel} returned empty`, {});
               throw new Error(`empty response from ${fallbackModel}`);
             }
-            // If tools were requested and the last message was a tool result (gateway expects
-            // tool continuation), but the fallback model returned text instead of tool_calls —
+            // If we're in a tool loop but the fallback returned text instead of tool_calls —
             // it ignored the JSON format. Try next model in chain.
-            const lastMsg = cleanMessages[cleanMessages.length - 1];
-            const inToolLoop = lastMsg?.role === "tool" || lastMsg?.role === "function";
-            if (hasTools && inToolLoop && !result.tool_calls?.length && result.content) {
+            if (inToolLoop && !result.tool_calls?.length && result.content) {
               debugLog("FALLBACK-NO-TOOLS", `${fallbackModel} returned text instead of tool_calls in tool loop`, { contentLen: result.content.length, preview: result.content.slice(0, 80) });
               throw new Error(`${fallbackModel} returned text instead of tool_calls`);
             }
