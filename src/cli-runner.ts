@@ -708,8 +708,8 @@ export async function runClaude(
 
   const stderr = result.stderr || "(no output)";
 
-  // Session might be corrupted or expired — invalidate and retry with a fresh session
-  if (stderr.includes("session") || stderr.includes("resume") || stderr.includes("not found")) {
+  // Session might be corrupted, expired, or locked by a zombie process — invalidate and retry
+  if (stderr.includes("session") || stderr.includes("resume") || stderr.includes("not found") || stderr.includes("already in use")) {
     debugLog("CLAUDE", `session ${session.sessionId.slice(0, 8)} invalid, creating fresh`, { error: stderr.slice(0, 100) });
     invalidateSession(model);
     // Retry once with a fresh session
@@ -724,6 +724,8 @@ export async function runClaude(
       recordSessionSuccess(model);
       return retry.stdout;
     }
+    // Retry also failed — invalidate the fresh session so the next request doesn't reuse it
+    invalidateSession(model);
     throw new Error(`claude exited ${retry.exitCode}: ${annotateExitError(retry.exitCode, retry.stderr || "(no output)", false, modelId)}`);
   }
 
