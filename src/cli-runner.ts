@@ -80,11 +80,16 @@ export function formatPrompt(messages: ChatMessage[], toolCount = 0): string {
   // Reduce history when tool schemas dominate the prompt
   const maxMsgs = toolCount > TOOL_HEAVY_THRESHOLD ? MAX_MESSAGES_HEAVY_TOOLS : MAX_MESSAGES;
 
-  // Keep system message (if any) + last N non-system messages
+  // Keep system message (if any) + first user message (original request) + last N non-system messages
   const system = messages.find((m) => m.role === "system");
   const nonSystem = messages.filter((m) => m.role !== "system");
+  const firstUser = nonSystem.find((m) => m.role === "user");
   const recent = nonSystem.slice(-maxMsgs);
-  const truncated = system ? [system, ...recent] : recent;
+  // Pin the first user message so the model never loses the original request
+  const pinned = firstUser && !recent.includes(firstUser)
+    ? [firstUser, ...recent]
+    : recent;
+  const truncated = system ? [system, ...pinned] : pinned;
 
   // Single short user message — send bare (no wrapping needed)
   if (truncated.length === 1 && truncated[0].role === "user") {
