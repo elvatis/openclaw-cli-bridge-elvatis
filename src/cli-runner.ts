@@ -1066,43 +1066,27 @@ function detectSkillHints(userText: string): string | null {
   const skills = getSkillRegistry();
   if (!skills.length) return null;
 
-  const lower = userText.toLowerCase();
   const matched: SkillEntry[] = [];
 
   for (const skill of skills) {
-    // Match by exact skill name in prompt
+    // Match by exact skill name in prompt only
     const nameRegex = new RegExp(`\\b${skill.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
     if (nameRegex.test(userText)) {
-      matched.push(skill);
-      continue;
-    }
-    // Match by description keywords (need at least 2 keyword hits)
-    const uniqueKeywords = [...new Set(skill.keywords)];
-    const hits = uniqueKeywords.filter(kw => lower.includes(kw.toLowerCase()));
-    if (hits.length >= 2) {
       matched.push(skill);
     }
   }
 
   if (!matched.length) return null;
 
+  // Keep hints compact — every byte counts at high message counts
   const hints = matched.map(skill => {
-    const lines = [
-      `[Skill: ${skill.name}]`,
-      `Read the skill instructions with the read tool: ${skill.path}/SKILL.md`,
-      `Then follow the workflow step by step using the available tools (read, exec, web_fetch, etc.).`,
-    ];
-    if (skill.scripts.length > 0) {
-      lines.push(`Available scripts (use exec tool to run them):`);
-      for (const s of skill.scripts) {
-        lines.push(`  - python3 ${skill.path}/scripts/${s}`);
-      }
-      lines.push(`Always use exec to run scripts. Do NOT output results as plain text when a script can do it.`);
-    }
-    return lines.join("\n");
+    const scripts = skill.scripts.length > 0
+      ? ` Scripts: ${skill.scripts.map(s => `${skill.path}/scripts/${s}`).join(", ")}`
+      : "";
+    return `[Skill: ${skill.name}] Read: ${skill.path}/SKILL.md — follow workflow with read/exec tools.${scripts}`;
   });
 
-  return hints.join("\n\n");
+  return hints.join("\n");
 }
 
 /**
@@ -1132,7 +1116,7 @@ export async function routeToCliRunner(
   // Auto-detect project from user messages only (not tool results which mention other projects)
   const userText = messages
     .filter((m) => m.role === "user")
-    .map((m) => typeof m.content === "string" ? m.content : "")
+    .map((m) => contentToString(m.content))
     .join(" ");
 
   if (!opts.workdir) {
