@@ -1027,9 +1027,13 @@ export async function routeToCliRunner(
   let prompt = formatPrompt(messages, toolCount);
   const hasTools = toolCount > 0;
 
-  // Auto-detect project from prompt and set workdir + inject context
+  // Auto-detect project from user messages only (not tool results which mention other projects)
   if (!opts.workdir) {
-    const detected = detectProjectFromPrompt(prompt);
+    const userText = messages
+      .filter((m) => m.role === "user")
+      .map((m) => typeof m.content === "string" ? m.content : "")
+      .join(" ");
+    const detected = detectProjectFromPrompt(userText);
     if (detected) {
       opts = { ...opts, workdir: detected.path };
       prompt = `[Context: Working directory is ${detected.path}]\n\n${prompt}`;
