@@ -304,6 +304,8 @@ export interface RunCliOptions {
    */
   cwd?: string;
   timeoutMs?: number;
+  /** Override stale-output timeout (ms). Opus needs longer (90s) for long-form generation. */
+  staleTimeoutMs?: number;
   /** Optional logger for timeout events. */
   log?: (msg: string) => void;
 }
@@ -373,12 +375,13 @@ export function runCli(
       doKill(`timeout after ${Math.round(timeoutMs / 1000)}s`);
     }, timeoutMs);
 
-    // ── Stale-output detection: kill if no stdout for STALE_OUTPUT_TIMEOUT_MS
-    if (STALE_OUTPUT_TIMEOUT_MS > 0) {
+    // ── Stale-output detection: kill if no stdout for staleTimeoutMs
+    const effectiveStaleTimeout = opts.staleTimeoutMs ?? STALE_OUTPUT_TIMEOUT_MS;
+    if (effectiveStaleTimeout > 0) {
       const checkInterval = 15_000; // check every 15s
       staleTimer = setInterval(() => {
         const silent = Date.now() - lastOutputAt;
-        if (silent >= STALE_OUTPUT_TIMEOUT_MS) {
+        if (silent >= effectiveStaleTimeout) {
           doKill(`stale output — no stdout for ${Math.round(silent / 1000)}s`);
         }
       }, checkInterval);
@@ -667,7 +670,9 @@ export async function runClaude(
 
   const model = stripPrefix(modelId);
   const session = getOrCreateSession("claude", model);
-  const isResume = session.requestCount > 0;
+  // Session resume: enabled for Opus (reliable), disabled for Sonnet/Haiku (45% hang rate)
+  const isOpus = model.includes("opus");
+  const isResume = isOpus && session.requestCount > 0;
 
   const args: string[] = [
     "-p",
@@ -679,24 +684,28 @@ export async function runClaude(
 
   if (isResume) {
     args.push("--resume", session.sessionId);
-  } else {
+  } else if (isOpus) {
     args.push("--session-id", session.sessionId);
   }
+  // Sonnet/Haiku: no session args — fresh call every time
 
-  // When tools are present, sandwich the conversation between tool instructions.
-  // On resume: only send the last user message (Claude has the full history).
-  // On first request: send the full prompt with tool block.
+  // On resume: only send the last user message (Opus has the full history).
+  // On fresh: send the full prompt with tool block.
   const effectivePrompt = opts?.tools?.length
-    ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
+    ? (isResume
+      ? prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
+      : buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else.")
     : prompt;
 
   const cwd = workdir ?? homedir();
-  debugLog("CLAUDE", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
+  debugLog("CLAUDE", `${isResume ? "resume" : "fresh"} ${model}${isResume ? ` session=${session.sessionId.slice(0, 8)}` : ""}`, {
     promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024),
-    requestCount: session.requestCount, cwd, timeoutMs: Math.round(timeoutMs / 1000),
+    cwd, timeoutMs: Math.round(timeoutMs / 1000), ...(isOpus ? { requestCount: session.requestCount } : {}),
   });
 
-  const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
+  // Opus gets 90s stale timeout — it needs think time for long-form generation (blog posts, Lexical JSON)
+  const staleMs = isOpus ? 90_000 : undefined;
+  const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log, staleTimeoutMs: staleMs });
 
   // Session succeeded — update registry
   if (result.exitCode === 0 || result.stdout.length > 0) {
@@ -1128,11 +1137,11 @@ export async function routeToCliRunner(
     }
   }
 
-  // Skill hints: inject pointers to local skill files when user prompt matches known patterns
+  // Skill hints: inject at END of prompt so they're the freshest context (not buried under system msg)
   const skillHints = detectSkillHints(userText);
   if (skillHints) {
-    prompt = `${skillHints}\n\n${prompt}`;
-    debugLog("SKILL-HINT", "injected skill hints", { len: skillHints.length });
+    prompt = `${prompt}\n\n${skillHints}`;
+    debugLog("SKILL-HINT", "injected skill hints at end of prompt", { len: skillHints.length });
   }
 
   // Strip "vllm/" prefix if present — OpenClaw sends the full provider path

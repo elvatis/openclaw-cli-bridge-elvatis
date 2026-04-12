@@ -34,6 +34,7 @@ import {
   BITNET_SYSTEM_PROMPT,
   DEFAULT_MODEL_TIMEOUTS,
   TOOL_ROUTING_THRESHOLD,
+  OPUS_ESCALATION_THRESHOLD,
 } from "./config.js";
 import { debugLog, DEBUG_LOG_PATH, getLogTail, watchLogFile, setDebugLogEnabled } from "./debug-log.js";
 
@@ -1042,11 +1043,20 @@ async function handleRequest(
     let result: CliToolResult;
     let usedModel = model;
 
-    // ── Smart tool routing: Sonnet first (better reasoning), fast fallback to Haiku ──
-    // Sonnet picks the right tools but intermittently hangs on large prompts.
-    // Strategy: let Sonnet try first — if it responds, great (better tool selection).
-    // The stale-output detector (60s) kills it fast if it hangs, then fallback to Haiku.
-    // This preserves Sonnet's intelligence for tool selection while keeping Haiku as safety net.
+    // ── Opus escalation: route heavy conversations to Opus instead of Sonnet ──
+    // Sonnet hangs ~50% at 30KB+ prompts. Opus handles large contexts reliably.
+    // Measure by message count (proxy for formatted prompt size after truncation):
+    //   - With 21 tools + 12 messages (heavy tools window), prompt hits ~30KB
+    //   - Escalate when messages > 20 (conversation is deep enough to cause hangs)
+    const shouldEscalate = model === "cli-claude/claude-sonnet-4-6"
+      && cleanMessages.length > 20
+      && hasTools;
+    if (shouldEscalate) {
+      const originalModel = model;
+      usedModel = "cli-claude/claude-opus-4-6";
+      debugLog("OPUS-ESCALATE", `${originalModel} → ${usedModel}`, { msgs: cleanMessages.length, tools: tools?.length ?? 0 });
+      opts.log(`[cli-bridge] escalating to Opus (${cleanMessages.length} msgs with ${tools?.length ?? 0} tools)`);
+    }
 
     const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined, log: opts.log };
 
