@@ -126,9 +126,11 @@ export declare function runGemini(prompt: string, modelId: string, timeoutMs: nu
     log?: (msg: string) => void;
 }): Promise<string>;
 /**
- * Run Claude Code CLI in headless mode with prompt delivered via stdin.
- * Strips the model prefix ("cli-claude/claude-opus-4-6" → "claude-opus-4-6").
- * cwd = homedir() by default. Override with explicit workdir.
+ * Run Claude Code CLI in headless mode with session resume.
+ *
+ * First request: creates a new session with --session-id.
+ * Subsequent requests: --resume <session-id> with only the new message.
+ * This eliminates the 20KB prompt replay that causes Sonnet to hang.
  */
 export declare function runClaude(prompt: string, modelId: string, timeoutMs: number, workdir?: string, opts?: {
     tools?: ToolDefinition[];

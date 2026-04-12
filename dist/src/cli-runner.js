@@ -17,12 +17,12 @@
  */
 import { spawn, execSync } from "node:child_process";
 import { tmpdir, homedir } from "node:os";
-import { existsSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
+import { existsSync, writeFileSync, unlinkSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { ensureClaudeToken, refreshClaudeToken } from "./claude-auth.js";
 import { buildToolPromptBlock, parseToolCallResponse, } from "./tool-protocol.js";
-import { MAX_MESSAGES, MAX_MESSAGES_HEAVY_TOOLS, TOOL_HEAVY_THRESHOLD, MAX_MSG_CHARS, DEFAULT_CLI_TIMEOUT_MS, TIMEOUT_GRACE_MS, MEDIA_TMP_DIR, STALE_OUTPUT_TIMEOUT_MS, } from "./config.js";
+import { MAX_MESSAGES, MAX_MESSAGES_HEAVY_TOOLS, TOOL_HEAVY_THRESHOLD, MAX_MSG_CHARS, DEFAULT_CLI_TIMEOUT_MS, TIMEOUT_GRACE_MS, MEDIA_TMP_DIR, STALE_OUTPUT_TIMEOUT_MS, WORKSPACE_DIR, } from "./config.js";
 import { debugLog } from "./debug-log.js";
 /**
  * Convert OpenAI messages to a single flat prompt string.
@@ -393,16 +393,22 @@ export function annotateExitError(exitCode, stderr, timedOut, model) {
  */
 export async function runGemini(prompt, modelId, timeoutMs, workdir, opts) {
     const model = stripPrefix(modelId);
+    const session = getOrCreateSession("gemini", model);
+    const isResume = session.requestCount > 0;
     // -p "" = headless mode trigger; actual prompt arrives via stdin
     // --approval-mode yolo: auto-approve all tool executions, never ask questions
     const args = ["-m", model, "-p", "", "--approval-mode", "yolo"];
+    if (isResume) {
+        args.push("--resume", session.sessionId);
+    }
     const cwd = workdir ?? tmpdir();
     // When tools are present, sandwich the conversation between tool instructions.
-    // The reminder at the end ensures models (especially Haiku) remember the JSON format
-    // after processing a long conversation history.
     const effectivePrompt = opts?.tools?.length
         ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
         : prompt;
+    debugLog("GEMINI", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
+        promptLen: effectivePrompt.length, requestCount: session.requestCount,
+    });
     const result = await runCli("gemini", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
     // Filter out [WARN] lines from stderr (Gemini emits noisy permission warnings)
     const cleanStderr = result.stderr
@@ -411,25 +417,114 @@ export async function runGemini(prompt, modelId, timeoutMs, workdir, opts) {
         .join("\n")
         .trim();
     if (result.exitCode !== 0 && result.stdout.length === 0) {
+        // Session might be invalid — invalidate and let next request create a fresh one
+        if (cleanStderr.includes("session") || cleanStderr.includes("resume") || cleanStderr.includes("not found")) {
+            invalidateSession(model);
+        }
         throw new Error(`gemini exited ${result.exitCode}: ${annotateExitError(result.exitCode, cleanStderr, result.timedOut, modelId)}`);
     }
+    recordSessionSuccess(model);
     return result.stdout || cleanStderr;
 }
 // ──────────────────────────────────────────────────────────────────────────────
 // Claude Code CLI
 // ──────────────────────────────────────────────────────────────────────────────
+// ── Claude session registry ─────────────────────────────────────────────────
+// Persistent sessions avoid re-sending the full 20KB prompt on every request.
+// First call creates a session; subsequent calls resume it with just the new message.
+// ── Generic CLI session registry ────────────────────────────────────────────
+// Shared by Claude, Gemini, and Codex — persistent sessions avoid replaying
+// the full conversation on every request.
+const CLI_SESSIONS_FILE = join(homedir(), ".openclaw", "cli-bridge", "cli-sessions.json");
+const SESSION_TTL = 2 * 60 * 60 * 1000; // 2 hours
+const SESSION_MAX_REQUESTS = 50;
+const CONSECUTIVE_TIMEOUT_LIMIT = 3;
+const cliSessions = new Map();
+let sessionsLoaded = false;
+function loadCliSessions() {
+    if (sessionsLoaded)
+        return;
+    sessionsLoaded = true;
+    try {
+        const data = JSON.parse(readFileSync(CLI_SESSIONS_FILE, "utf8"));
+        if (Array.isArray(data.sessions)) {
+            for (const s of data.sessions)
+                cliSessions.set(s.model, s);
+        }
+    }
+    catch { /* no sessions file yet */ }
+}
+function saveCliSessions() {
+    try {
+        mkdirSync(join(homedir(), ".openclaw", "cli-bridge"), { recursive: true });
+        writeFileSync(CLI_SESSIONS_FILE, JSON.stringify({
+            version: 1,
+            sessions: [...cliSessions.values()],
+        }, null, 2));
+    }
+    catch { /* best effort */ }
+}
+function getOrCreateSession(provider, model) {
+    loadCliSessions();
+    const existing = cliSessions.get(model);
+    if (existing && (Date.now() - existing.lastUsedAt) < SESSION_TTL && existing.requestCount < SESSION_MAX_REQUESTS) {
+        return existing;
+    }
+    if (existing) {
+        debugLog("SESSION", `${provider} session ${existing.sessionId.slice(0, 8)} expired`, { reason: existing.requestCount >= SESSION_MAX_REQUESTS ? "max_requests" : "ttl", requestCount: existing.requestCount });
+    }
+    const entry = {
+        sessionId: randomUUID(),
+        provider,
+        model,
+        createdAt: Date.now(),
+        lastUsedAt: Date.now(),
+        requestCount: 0,
+        consecutiveTimeouts: 0,
+    };
+    cliSessions.set(model, entry);
+    saveCliSessions();
+    return entry;
+}
+function recordSessionSuccess(model) {
+    const s = cliSessions.get(model);
+    if (s) {
+        s.requestCount++;
+        s.lastUsedAt = Date.now();
+        s.consecutiveTimeouts = 0;
+        saveCliSessions();
+    }
+}
+function recordSessionTimeout(model) {
+    const s = cliSessions.get(model);
+    if (!s)
+        return;
+    s.consecutiveTimeouts++;
+    s.lastUsedAt = Date.now();
+    if (s.consecutiveTimeouts >= CONSECUTIVE_TIMEOUT_LIMIT) {
+        debugLog("SESSION", `${s.provider} session ${s.sessionId.slice(0, 8)} expired`, {
+            reason: "consecutive_timeouts", consecutiveTimeouts: s.consecutiveTimeouts, requestCount: s.requestCount,
+        });
+        cliSessions.delete(model);
+    }
+    saveCliSessions();
+}
+function invalidateSession(model) {
+    cliSessions.delete(model);
+    saveCliSessions();
+}
 /**
- * Run Claude Code CLI in headless mode with prompt delivered via stdin.
- * Strips the model prefix ("cli-claude/claude-opus-4-6" → "claude-opus-4-6").
- * cwd = homedir() by default. Override with explicit workdir.
+ * Run Claude Code CLI in headless mode with session resume.
+ *
+ * First request: creates a new session with --session-id.
+ * Subsequent requests: --resume <session-id> with only the new message.
+ * This eliminates the 20KB prompt replay that causes Sonnet to hang.
  */
 export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
-    // Proactively refresh OAuth token if it's about to expire (< 5 min remaining).
-    // No-op for API-key users.
     await ensureClaudeToken();
     const model = stripPrefix(modelId);
-    // Always use bypassPermissions to ensure fully autonomous execution (never asks questions).
-    // Use text output for all cases — JSON schema is unreliable with Claude Code's system prompt.
+    const session = getOrCreateSession("claude", model);
+    const isResume = session.requestCount > 0;
     const args = [
         "-p",
         "--output-format", "text",
@@ -437,39 +532,69 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
         "--dangerously-skip-permissions",
         "--model", model,
     ];
+    if (isResume) {
+        args.push("--resume", session.sessionId);
+    }
+    else {
+        args.push("--session-id", session.sessionId);
+    }
     // When tools are present, sandwich the conversation between tool instructions.
-    // The reminder at the end ensures models (especially Haiku) remember the JSON format
-    // after processing a long conversation history.
+    // On resume: only send the last user message (Claude has the full history).
+    // On first request: send the full prompt with tool block.
     const effectivePrompt = opts?.tools?.length
         ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
         : prompt;
     const cwd = workdir ?? homedir();
-    debugLog("CLAUDE", `spawn ${model}`, { promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024), cwd, timeoutMs: Math.round(timeoutMs / 1000) });
+    debugLog("CLAUDE", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
+        promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024),
+        requestCount: session.requestCount, cwd, timeoutMs: Math.round(timeoutMs / 1000),
+    });
     const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
-    // On 401: attempt one token refresh + retry before giving up.
-    if (result.exitCode !== 0 && result.stdout.length === 0) {
-        // If this was a timeout, don't bother with auth retry — it's a supervisor kill, not a 401.
-        if (result.timedOut) {
-            throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, true, modelId)}`);
-        }
-        const stderr = result.stderr || "(no output)";
-        if (stderr.includes("401") || stderr.includes("Invalid authentication credentials") || stderr.includes("authentication_error")) {
-            // Refresh and retry once
-            await refreshClaudeToken();
-            const retry = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
-            if (retry.exitCode !== 0 && retry.stdout.length === 0) {
-                const retryStderr = retry.stderr || "(no output)";
-                if (retryStderr.includes("401") || retryStderr.includes("authentication_error") || retryStderr.includes("Invalid authentication credentials")) {
-                    throw new Error("Claude CLI OAuth token refresh failed. " +
-                        "Re-login required: run `claude auth logout && claude auth login` in a terminal.");
-                }
-                throw new Error(`claude exited ${retry.exitCode} (after token refresh): ${retryStderr}`);
-            }
+    // Session succeeded — update registry
+    if (result.exitCode === 0 || result.stdout.length > 0) {
+        recordSessionSuccess(model);
+        return result.stdout;
+    }
+    // Session failed — check if it's a timeout or auth issue
+    if (result.timedOut) {
+        // Track consecutive timeouts — after 3 in a row, expire the session
+        recordSessionTimeout(model);
+        throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, true, modelId)}`);
+    }
+    const stderr = result.stderr || "(no output)";
+    // Session might be corrupted or expired — invalidate and retry with a fresh session
+    if (stderr.includes("session") || stderr.includes("resume") || stderr.includes("not found")) {
+        debugLog("CLAUDE", `session ${session.sessionId.slice(0, 8)} invalid, creating fresh`, { error: stderr.slice(0, 100) });
+        invalidateSession(model);
+        // Retry once with a fresh session
+        const freshSession = getOrCreateSession("claude", model);
+        const freshArgs = [
+            "-p", "--output-format", "text",
+            "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions",
+            "--model", model, "--session-id", freshSession.sessionId,
+        ];
+        const retry = await runCli("claude", freshArgs, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
+        if (retry.exitCode === 0 || retry.stdout.length > 0) {
+            recordSessionSuccess(model);
             return retry.stdout;
         }
-        throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, stderr, false, modelId)}`);
+        throw new Error(`claude exited ${retry.exitCode}: ${annotateExitError(retry.exitCode, retry.stderr || "(no output)", false, modelId)}`);
     }
-    return result.stdout;
+    // Auth failure — refresh token and retry
+    if (stderr.includes("401") || stderr.includes("Invalid authentication credentials") || stderr.includes("authentication_error")) {
+        await refreshClaudeToken();
+        const retry = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
+        if (retry.exitCode === 0 || retry.stdout.length > 0) {
+            recordSessionSuccess(model);
+            return retry.stdout;
+        }
+        const retryStderr = retry.stderr || "(no output)";
+        if (retryStderr.includes("401") || retryStderr.includes("authentication_error")) {
+            throw new Error("Claude CLI OAuth token refresh failed. Re-login required: run `claude auth logout && claude auth login`.");
+        }
+        throw new Error(`claude exited ${retry.exitCode} (after token refresh): ${retryStderr}`);
+    }
+    throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, stderr, false, modelId)}`);
 }
 // ──────────────────────────────────────────────────────────────────────────────
 // Codex CLI
@@ -490,7 +615,12 @@ function ensureGitRepo(dir) {
  */
 export async function runCodex(prompt, modelId, timeoutMs, workdir, opts) {
     const model = stripPrefix(modelId);
-    const args = ["exec", "--model", model, "--full-auto"];
+    const session = getOrCreateSession("codex", model);
+    const isResume = session.requestCount > 0;
+    // Codex uses "exec resume <session-id>" for resume, "exec" for new
+    const args = isResume
+        ? ["exec", "resume", session.sessionId, "--model", model, "--full-auto"]
+        : ["exec", "--model", model, "--full-auto"];
     // Codex supports native image input via -i flag
     if (opts?.mediaFiles?.length) {
         for (const f of opts.mediaFiles) {
@@ -500,18 +630,20 @@ export async function runCodex(prompt, modelId, timeoutMs, workdir, opts) {
         }
     }
     const cwd = workdir ?? homedir();
-    // Codex requires a git repo in the working directory
     ensureGitRepo(cwd);
-    // When tools are present, sandwich the conversation between tool instructions.
-    // The reminder at the end ensures models (especially Haiku) remember the JSON format
-    // after processing a long conversation history.
     const effectivePrompt = opts?.tools?.length
         ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
         : prompt;
+    debugLog("CODEX", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
+        promptLen: effectivePrompt.length, requestCount: session.requestCount,
+    });
     const result = await runCli("codex", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
     if (result.exitCode !== 0 && result.stdout.length === 0) {
+        if (isResume)
+            invalidateSession(model); // session might be stale
         throw new Error(`codex exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, result.timedOut, modelId)}`);
     }
+    recordSessionSuccess(model);
     return result.stdout || result.stderr;
 }
 // ──────────────────────────────────────────────────────────────────────────────
@@ -589,6 +721,61 @@ function normalizeModelAlias(normalized) {
     };
     return ALIASES[normalized] ?? normalized;
 }
+// ── Workspace project detection ──────────────────────────────────────────────
+// Scans WORKSPACE_DIR for project directories. When the user's prompt contains
+// an exact match of a project name, auto-sets workdir and injects context.
+let _workspaceProjects = null;
+let _workspaceProjectsRefreshedAt = 0;
+const WORKSPACE_CACHE_TTL = 60_000; // refresh project list every 60s
+function getWorkspaceProjects() {
+    const now = Date.now();
+    if (_workspaceProjects && (now - _workspaceProjectsRefreshedAt) < WORKSPACE_CACHE_TTL) {
+        return _workspaceProjects;
+    }
+    try {
+        // Find all .openclaw/workspace dirs — default location + any custom ones
+        const candidates = [WORKSPACE_DIR];
+        _workspaceProjects = [];
+        for (const wsDir of candidates) {
+            if (!existsSync(wsDir))
+                continue;
+            const entries = readdirSync(wsDir);
+            for (const name of entries) {
+                try {
+                    if (statSync(join(wsDir, name)).isDirectory()) {
+                        _workspaceProjects.push(name);
+                    }
+                }
+                catch { /* skip unreadable entries */ }
+            }
+        }
+        _workspaceProjectsRefreshedAt = now;
+    }
+    catch {
+        _workspaceProjects = [];
+    }
+    return _workspaceProjects;
+}
+function detectProjectFromPrompt(prompt) {
+    const projects = getWorkspaceProjects();
+    if (!projects.length)
+        return null;
+    // Sort by name length descending — match longest project name first
+    // (e.g. "openclaw-cli-bridge-elvatis" before "openclaw-cli-bridge")
+    const sorted = [...projects].sort((a, b) => b.length - a.length);
+    for (const name of sorted) {
+        // Case-insensitive exact word match — the project name must appear as a
+        // distinct token in the prompt (not a substring of a longer word)
+        const regex = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+        if (regex.test(prompt)) {
+            const projectPath = join(WORKSPACE_DIR, name);
+            if (existsSync(projectPath)) {
+                return { name, path: projectPath };
+            }
+        }
+    }
+    return null;
+}
 /**
  * Route a chat completion to the correct CLI based on model prefix.
  *   cli-gemini/<id>      → gemini CLI
@@ -605,8 +792,17 @@ function normalizeModelAlias(normalized) {
  */
 export async function routeToCliRunner(model, messages, timeoutMs, opts = {}) {
     const toolCount = opts.tools?.length ?? 0;
-    const prompt = formatPrompt(messages, toolCount);
+    let prompt = formatPrompt(messages, toolCount);
     const hasTools = toolCount > 0;
+    // Auto-detect project from prompt and set workdir + inject context
+    if (!opts.workdir) {
+        const detected = detectProjectFromPrompt(prompt);
+        if (detected) {
+            opts = { ...opts, workdir: detected.path };
+            prompt = `[Context: Working directory is ${detected.path}]\n\n${prompt}`;
+            debugLog("WORKSPACE", `auto-detected project "${detected.name}"`, { path: detected.path });
+        }
+    }
     // Strip "vllm/" prefix if present — OpenClaw sends the full provider path
     // (e.g. "vllm/cli-claude/claude-sonnet-4-6") but the router only needs the
     // "cli-<type>/<model>" portion.

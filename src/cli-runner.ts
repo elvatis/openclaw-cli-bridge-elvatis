@@ -18,7 +18,7 @@
 
 import { spawn, execSync } from "node:child_process";
 import { tmpdir, homedir } from "node:os";
-import { existsSync, writeFileSync, unlinkSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, writeFileSync, unlinkSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes, randomUUID } from "node:crypto";
 import { ensureClaudeToken, refreshClaudeToken } from "./claude-auth.js";
@@ -37,6 +37,7 @@ import {
   TIMEOUT_GRACE_MS,
   MEDIA_TMP_DIR,
   STALE_OUTPUT_TIMEOUT_MS,
+  WORKSPACE_DIR,
 } from "./config.js";
 import { debugLog } from "./debug-log.js";
 
@@ -567,7 +568,10 @@ interface CliSessionEntry {
   createdAt: number;
   lastUsedAt: number;
   requestCount: number;
+  consecutiveTimeouts: number;
 }
+
+const CONSECUTIVE_TIMEOUT_LIMIT = 3;
 
 const cliSessions = new Map<string, CliSessionEntry>();
 let sessionsLoaded = false;
@@ -609,6 +613,7 @@ function getOrCreateSession(provider: string, model: string): CliSessionEntry {
     createdAt: Date.now(),
     lastUsedAt: Date.now(),
     requestCount: 0,
+    consecutiveTimeouts: 0,
   };
   cliSessions.set(model, entry);
   saveCliSessions();
@@ -617,7 +622,21 @@ function getOrCreateSession(provider: string, model: string): CliSessionEntry {
 
 function recordSessionSuccess(model: string): void {
   const s = cliSessions.get(model);
-  if (s) { s.requestCount++; s.lastUsedAt = Date.now(); saveCliSessions(); }
+  if (s) { s.requestCount++; s.lastUsedAt = Date.now(); s.consecutiveTimeouts = 0; saveCliSessions(); }
+}
+
+function recordSessionTimeout(model: string): void {
+  const s = cliSessions.get(model);
+  if (!s) return;
+  s.consecutiveTimeouts++;
+  s.lastUsedAt = Date.now();
+  if (s.consecutiveTimeouts >= CONSECUTIVE_TIMEOUT_LIMIT) {
+    debugLog("SESSION", `${s.provider} session ${s.sessionId.slice(0, 8)} expired`, {
+      reason: "consecutive_timeouts", consecutiveTimeouts: s.consecutiveTimeouts, requestCount: s.requestCount,
+    });
+    cliSessions.delete(model);
+  }
+  saveCliSessions();
 }
 
 function invalidateSession(model: string): void {
@@ -682,8 +701,8 @@ export async function runClaude(
 
   // Session failed — check if it's a timeout or auth issue
   if (result.timedOut) {
-    // Don't invalidate session on timeout — it's still valid, just slow
-    recordSessionSuccess(model); // keep session alive
+    // Track consecutive timeouts — after 3 in a row, expire the session
+    recordSessionTimeout(model);
     throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, true, modelId)}`);
   }
 
@@ -920,6 +939,63 @@ export interface RouteOptions {
   log?: (msg: string) => void;
 }
 
+// ── Workspace project detection ──────────────────────────────────────────────
+// Scans WORKSPACE_DIR for project directories. When the user's prompt contains
+// an exact match of a project name, auto-sets workdir and injects context.
+
+let _workspaceProjects: string[] | null = null;
+let _workspaceProjectsRefreshedAt = 0;
+const WORKSPACE_CACHE_TTL = 60_000; // refresh project list every 60s
+
+function getWorkspaceProjects(): string[] {
+  const now = Date.now();
+  if (_workspaceProjects && (now - _workspaceProjectsRefreshedAt) < WORKSPACE_CACHE_TTL) {
+    return _workspaceProjects;
+  }
+  try {
+    // Find all .openclaw/workspace dirs — default location + any custom ones
+    const candidates = [WORKSPACE_DIR];
+    _workspaceProjects = [];
+    for (const wsDir of candidates) {
+      if (!existsSync(wsDir)) continue;
+      const entries = readdirSync(wsDir);
+      for (const name of entries) {
+        try {
+          if (statSync(join(wsDir, name)).isDirectory()) {
+            _workspaceProjects.push(name);
+          }
+        } catch { /* skip unreadable entries */ }
+      }
+    }
+    _workspaceProjectsRefreshedAt = now;
+  } catch {
+    _workspaceProjects = [];
+  }
+  return _workspaceProjects;
+}
+
+function detectProjectFromPrompt(prompt: string): { name: string; path: string } | null {
+  const projects = getWorkspaceProjects();
+  if (!projects.length) return null;
+
+  // Sort by name length descending — match longest project name first
+  // (e.g. "openclaw-cli-bridge-elvatis" before "openclaw-cli-bridge")
+  const sorted = [...projects].sort((a, b) => b.length - a.length);
+
+  for (const name of sorted) {
+    // Case-insensitive exact word match — the project name must appear as a
+    // distinct token in the prompt (not a substring of a longer word)
+    const regex = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+    if (regex.test(prompt)) {
+      const projectPath = join(WORKSPACE_DIR, name);
+      if (existsSync(projectPath)) {
+        return { name, path: projectPath };
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Route a chat completion to the correct CLI based on model prefix.
  *   cli-gemini/<id>      → gemini CLI
@@ -941,8 +1017,18 @@ export async function routeToCliRunner(
   opts: RouteOptions = {}
 ): Promise<CliToolResult> {
   const toolCount = opts.tools?.length ?? 0;
-  const prompt = formatPrompt(messages, toolCount);
+  let prompt = formatPrompt(messages, toolCount);
   const hasTools = toolCount > 0;
+
+  // Auto-detect project from prompt and set workdir + inject context
+  if (!opts.workdir) {
+    const detected = detectProjectFromPrompt(prompt);
+    if (detected) {
+      opts = { ...opts, workdir: detected.path };
+      prompt = `[Context: Working directory is ${detected.path}]\n\n${prompt}`;
+      debugLog("WORKSPACE", `auto-detected project "${detected.name}"`, { path: detected.path });
+    }
+  }
 
   // Strip "vllm/" prefix if present — OpenClaw sends the full provider path
   // (e.g. "vllm/cli-claude/claude-sonnet-4-6") but the router only needs the

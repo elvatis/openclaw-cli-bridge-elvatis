@@ -85,6 +85,8 @@ export declare const DEFAULT_MODEL_TIMEOUTS: Record<string, number>;
 export declare const DEFAULT_MODEL_FALLBACKS: Record<string, string[]>;
 /** Base directory for all CLI bridge state files. */
 export declare const OPENCLAW_DIR: string;
+/** Workspace directory containing all projects. */
+export declare const WORKSPACE_DIR: string;
 /** State file — persists the model active before the last /cli-* switch. */
 export declare const STATE_FILE: string;
 /** Pending switch file — stores a staged model switch not yet applied. */
