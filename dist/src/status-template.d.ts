@@ -6,12 +6,21 @@
  */
 import type { BrowserContext } from "playwright";
 import type { MetricsSnapshot } from "./metrics.js";
+import type { ProviderSession } from "./provider-sessions.js";
+import type { ActiveRequest } from "./proxy-server.js";
 export interface StatusProvider {
     name: string;
     icon: string;
     expiry: string | null;
     loginCmd: string;
     ctx: BrowserContext | null;
+}
+export interface TimeoutConfigInfo {
+    defaults: Record<string, number>;
+    baseDefault: number;
+    maxEffective: number;
+    perExtraMsg: number;
+    perTool: number;
 }
 export interface StatusTemplateOptions {
     version: string;
@@ -23,10 +32,11 @@ export interface StatusTemplateOptions {
         contextWindow: number;
         maxTokens: number;
     }>;
-    /** Maps model ID → slash command name (e.g. "openai-codex/gpt-5.3-codex" → "/cli-codex") */
     modelCommands?: Record<string, string>;
-    /** In-memory metrics snapshot — optional for backward compat */
     metrics?: MetricsSnapshot;
+    activeRequests?: ActiveRequest[];
+    providerSessionsList?: ProviderSession[];
+    timeoutConfig?: TimeoutConfigInfo;
 }
 export declare function renderStatusPage(opts: StatusTemplateOptions): string;
 //# sourceMappingURL=status-template.d.ts.map

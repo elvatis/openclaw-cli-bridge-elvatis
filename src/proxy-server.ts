@@ -31,7 +31,25 @@ import {
   DEFAULT_BITNET_SERVER_URL,
   BITNET_MAX_MESSAGES,
   BITNET_SYSTEM_PROMPT,
+  DEFAULT_MODEL_TIMEOUTS,
 } from "./config.js";
+
+// ── Active request tracking ─────────────────────────────────────────────────
+
+export interface ActiveRequest {
+  id: string;
+  model: string;
+  startedAt: number;
+  messageCount: number;
+  toolCount: number;
+  promptPreview: string;
+}
+
+const activeRequests = new Map<string, ActiveRequest>();
+
+export function getActiveRequests(): ActiveRequest[] {
+  return [...activeRequests.values()];
+}
 
 export type GrokCompleteOptions = Parameters<typeof grokComplete>[1];
 export type GrokCompleteStreamOptions = Parameters<typeof grokCompleteStream>[1];
@@ -276,7 +294,20 @@ async function handleRequest(
       { name: "ChatGPT",  icon: "◉",  expiry: expiry.chatgpt, loginCmd: "/chatgpt-login", ctx: opts.getChatGPTContext?.() ?? null },
     ];
 
-    const html = renderStatusPage({ version, port: opts.port, providers, models: CLI_MODELS, modelCommands: opts.modelCommands, metrics: metrics.getMetrics() });
+    const html = renderStatusPage({
+      version, port: opts.port, providers, models: CLI_MODELS,
+      modelCommands: opts.modelCommands,
+      metrics: metrics.getMetrics(),
+      activeRequests: getActiveRequests(),
+      providerSessionsList: providerSessions.listSessions(),
+      timeoutConfig: {
+        defaults: { ...DEFAULT_MODEL_TIMEOUTS, ...(opts.modelTimeouts ?? {}) },
+        baseDefault: opts.timeoutMs ?? DEFAULT_PROXY_TIMEOUT_MS,
+        maxEffective: MAX_EFFECTIVE_TIMEOUT_MS,
+        perExtraMsg: TIMEOUT_PER_EXTRA_MSG_MS,
+        perTool: TIMEOUT_PER_TOOL_MS,
+      },
+    });
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
     res.end(html);
     return;
@@ -353,6 +384,13 @@ async function handleRequest(
 
     const id = `chatcmpl-cli-${randomBytes(6).toString("hex")}`;
     const created = Math.floor(Date.now() / 1000);
+
+    // Extract prompt preview from last user message for dashboard
+    const lastUserMsg = [...cleanMessages].reverse().find(m => m.role === "user");
+    const promptPreview = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.slice(0, 80) : "";
+
+    // Track active request for dashboard
+    activeRequests.set(id, { id, model, startedAt: Date.now(), messageCount: cleanMessages.length, toolCount: tools?.length ?? 0, promptPreview });
 
     // ── Grok web-session routing ──────────────────────────────────────────────
     if (model.startsWith("web-grok/")) {
@@ -787,7 +825,7 @@ async function handleRequest(
     try {
       result = await routeToCliRunner(model, cleanMessages, effectiveTimeout, routeOpts);
       const estCompletionTokens = estimateTokens(result.content ?? "");
-      metrics.recordRequest(model, Date.now() - cliStart, true, estPromptTokens, estCompletionTokens);
+      metrics.recordRequest(model, Date.now() - cliStart, true, estPromptTokens, estCompletionTokens, promptPreview);
       providerSessions.recordRun(session.id, false);
     } catch (err) {
       const primaryDuration = Date.now() - cliStart;
@@ -798,18 +836,20 @@ async function handleRequest(
       providerSessions.recordRun(session.id, isTimeout);
       const fallbackModel = opts.modelFallbacks?.[model];
       if (fallbackModel) {
-        metrics.recordRequest(model, primaryDuration, false, estPromptTokens);
+        metrics.recordRequest(model, primaryDuration, false, estPromptTokens, undefined, promptPreview);
         const reason = isTimeout ? `timeout by supervisor, session=${session.id} preserved` : msg;
         opts.warn(`[cli-bridge] ${model} failed (${reason}), falling back to ${fallbackModel}`);
         const fallbackStart = Date.now();
         try {
           result = await routeToCliRunner(fallbackModel, cleanMessages, effectiveTimeout, routeOpts);
           const fbCompTokens = estimateTokens(result.content ?? "");
-          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens);
+          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens, promptPreview);
+          metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, true);
           usedModel = fallbackModel;
           opts.log(`[cli-bridge] fallback to ${fallbackModel} succeeded (response will report original model: ${model})`);
         } catch (fallbackErr) {
-          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, false, estPromptTokens);
+          metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, false, estPromptTokens, undefined, promptPreview);
+          metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, false);
           const fallbackMsg = (fallbackErr as Error).message;
           opts.warn(`[cli-bridge] fallback ${fallbackModel} also failed: ${fallbackMsg}`);
           if (sseHeadersSent) {
@@ -823,7 +863,7 @@ async function handleRequest(
           return;
         }
       } else {
-        metrics.recordRequest(model, primaryDuration, false, estPromptTokens);
+        metrics.recordRequest(model, primaryDuration, false, estPromptTokens, undefined, promptPreview);
         opts.warn(`[cli-bridge] CLI error for ${model}: ${msg}`);
         if (sseHeadersSent) {
           res.write(`data: ${JSON.stringify({ error: { message: msg, type: "cli_error" } })}\n\n`);
@@ -838,6 +878,7 @@ async function handleRequest(
     } finally {
       if (keepaliveInterval) clearInterval(keepaliveInterval);
       cleanupMediaFiles(mediaFiles);
+      activeRequests.delete(id);
     }
 
     const hasToolCalls = !!(result.tool_calls?.length);

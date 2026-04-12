@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `2.8.5`
+**Current version:** `2.9.0`
 
 ---
 
@@ -405,6 +405,16 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2.9.0
+- **feat:** enhanced `/status` dashboard with 5 new panels:
+  - **Active Requests**: live in-flight requests with model, elapsed time, message/tool count, prompt preview
+  - **Recent Request Log**: last 20 requests with latency, success/fail, prompt preview, token counts
+  - **Fallback History**: last 10 fallback events with reason, timing, and outcome
+  - **Provider Sessions**: CLI session state (active/idle/expired), run count, timeout count
+  - **Timeout Configuration**: per-model base timeouts and dynamic scaling formula
+- **feat:** auto-refresh reduced from 30s to 10s for more responsive monitoring
+- **feat:** responsive two-column layout for fallback history and provider sessions
 
 ### v2.8.5
 - **fix:** sync `openclaw.plugin.json` configSchema defaults with code: Sonnet/Opus 300s to 420s, Haiku 90s to 120s. The schema `default` block was overriding `DEFAULT_MODEL_TIMEOUTS` via `cfg.modelTimeouts`, making all code-level timeout bumps ineffective.

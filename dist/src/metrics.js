@@ -22,16 +22,33 @@ export function estimateTokens(text) {
         return 0;
     return Math.ceil(text.length / 4);
 }
+// ── Circular buffer ─────────────────────────────────────────────────────────
+class CircularBuffer {
+    capacity;
+    items = [];
+    constructor(capacity) {
+        this.capacity = capacity;
+    }
+    push(item) {
+        if (this.items.length >= this.capacity)
+            this.items.shift();
+        this.items.push(item);
+    }
+    toArray() { return [...this.items]; }
+    clear() { this.items.length = 0; }
+}
 // ── Collector ───────────────────────────────────────────────────────────────
 class MetricsCollector {
     startedAt = Date.now();
     data = new Map();
     flushTimer = null;
     dirty = false;
+    recentRequests = new CircularBuffer(20);
+    fallbackEvents = new CircularBuffer(10);
     constructor() {
         this.load();
     }
-    recordRequest(model, durationMs, success, promptTokens, completionTokens) {
+    recordRequest(model, durationMs, success, promptTokens, completionTokens, promptPreview) {
         let entry = this.data.get(model);
         if (!entry) {
             entry = {
@@ -54,6 +71,15 @@ class MetricsCollector {
         if (completionTokens)
             entry.completionTokens += completionTokens;
         entry.lastRequestAt = Date.now();
+        this.recentRequests.push({
+            timestamp: Date.now(),
+            model,
+            latencyMs: durationMs,
+            success,
+            promptPreview: promptPreview ?? "",
+            promptTokens: promptTokens ?? 0,
+            completionTokens: completionTokens ?? 0,
+        });
         this.scheduleSave();
     }
     getMetrics() {
@@ -71,11 +97,25 @@ class MetricsCollector {
             totalRequests,
             totalErrors,
             models,
+            recentRequests: this.recentRequests.toArray(),
+            fallbackHistory: this.fallbackEvents.toArray(),
         };
+    }
+    recordFallback(originalModel, fallbackModel, reason, failedDurationMs, fallbackSuccess) {
+        this.fallbackEvents.push({
+            timestamp: Date.now(),
+            originalModel,
+            fallbackModel,
+            reason,
+            failedDurationMs,
+            fallbackSuccess,
+        });
     }
     reset() {
         this.startedAt = Date.now();
         this.data.clear();
+        this.recentRequests.clear();
+        this.fallbackEvents.clear();
         this.saveNow();
     }
     // ── Persistence ─────────────────────────────────────────────────────────

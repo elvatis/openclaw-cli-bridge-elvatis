@@ -17,11 +17,30 @@ export interface ModelMetrics {
     completionTokens: number;
     lastRequestAt: number | null;
 }
+export interface RequestLogEntry {
+    timestamp: number;
+    model: string;
+    latencyMs: number;
+    success: boolean;
+    promptPreview: string;
+    promptTokens: number;
+    completionTokens: number;
+}
+export interface FallbackEvent {
+    timestamp: number;
+    originalModel: string;
+    fallbackModel: string;
+    reason: "timeout" | "error";
+    failedDurationMs: number;
+    fallbackSuccess: boolean;
+}
 export interface MetricsSnapshot {
     startedAt: number;
     totalRequests: number;
     totalErrors: number;
     models: ModelMetrics[];
+    recentRequests: RequestLogEntry[];
+    fallbackHistory: FallbackEvent[];
 }
 /**
  * Rough token count estimate: ~4 characters per token.
@@ -34,9 +53,12 @@ declare class MetricsCollector {
     private data;
     private flushTimer;
     private dirty;
+    private recentRequests;
+    private fallbackEvents;
     constructor();
-    recordRequest(model: string, durationMs: number, success: boolean, promptTokens?: number, completionTokens?: number): void;
+    recordRequest(model: string, durationMs: number, success: boolean, promptTokens?: number, completionTokens?: number, promptPreview?: string): void;
     getMetrics(): MetricsSnapshot;
+    recordFallback(originalModel: string, fallbackModel: string, reason: "timeout" | "error", failedDurationMs: number, fallbackSuccess: boolean): void;
     reset(): void;
     private load;
     private scheduleSave;

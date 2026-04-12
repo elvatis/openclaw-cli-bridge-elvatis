@@ -14,6 +14,15 @@ import { claudeComplete, claudeCompleteStream } from "./claude-browser.js";
 import { chatgptComplete, chatgptCompleteStream } from "./chatgpt-browser.js";
 import { geminiApiComplete, geminiApiCompleteStream } from "./gemini-api-runner.js";
 import type { BrowserContext } from "playwright";
+export interface ActiveRequest {
+    id: string;
+    model: string;
+    startedAt: number;
+    messageCount: number;
+    toolCount: number;
+    promptPreview: string;
+}
+export declare function getActiveRequests(): ActiveRequest[];
 export type GrokCompleteOptions = Parameters<typeof grokComplete>[1];
 export type GrokCompleteStreamOptions = Parameters<typeof grokCompleteStream>[1];
 export type GrokCompleteResult = Awaited<ReturnType<typeof grokComplete>>;

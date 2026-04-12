@@ -23,11 +23,32 @@ export interface ModelMetrics {
   lastRequestAt: number | null;
 }
 
+export interface RequestLogEntry {
+  timestamp: number;
+  model: string;
+  latencyMs: number;
+  success: boolean;
+  promptPreview: string;
+  promptTokens: number;
+  completionTokens: number;
+}
+
+export interface FallbackEvent {
+  timestamp: number;
+  originalModel: string;
+  fallbackModel: string;
+  reason: "timeout" | "error";
+  failedDurationMs: number;
+  fallbackSuccess: boolean;
+}
+
 export interface MetricsSnapshot {
   startedAt: number;
   totalRequests: number;
   totalErrors: number;
   models: ModelMetrics[]; // sorted by requests desc
+  recentRequests: RequestLogEntry[];
+  fallbackHistory: FallbackEvent[];
 }
 
 // ── Token estimation ────────────────────────────────────────────────────────
@@ -40,6 +61,19 @@ export interface MetricsSnapshot {
 export function estimateTokens(text: string): number {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
+}
+
+// ── Circular buffer ─────────────────────────────────────────────────────────
+
+class CircularBuffer<T> {
+  private items: T[] = [];
+  constructor(private capacity: number) {}
+  push(item: T): void {
+    if (this.items.length >= this.capacity) this.items.shift();
+    this.items.push(item);
+  }
+  toArray(): T[] { return [...this.items]; }
+  clear(): void { this.items.length = 0; }
 }
 
 // ── Persistence format ──────────────────────────────────────────────────────
@@ -57,6 +91,8 @@ class MetricsCollector {
   private data = new Map<string, ModelMetrics>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private dirty = false;
+  private recentRequests = new CircularBuffer<RequestLogEntry>(20);
+  private fallbackEvents = new CircularBuffer<FallbackEvent>(10);
 
   constructor() {
     this.load();
@@ -68,6 +104,7 @@ class MetricsCollector {
     success: boolean,
     promptTokens?: number,
     completionTokens?: number,
+    promptPreview?: string,
   ): void {
     let entry = this.data.get(model);
     if (!entry) {
@@ -88,6 +125,15 @@ class MetricsCollector {
     if (promptTokens) entry.promptTokens += promptTokens;
     if (completionTokens) entry.completionTokens += completionTokens;
     entry.lastRequestAt = Date.now();
+    this.recentRequests.push({
+      timestamp: Date.now(),
+      model,
+      latencyMs: durationMs,
+      success,
+      promptPreview: promptPreview ?? "",
+      promptTokens: promptTokens ?? 0,
+      completionTokens: completionTokens ?? 0,
+    });
     this.scheduleSave();
   }
 
@@ -109,12 +155,33 @@ class MetricsCollector {
       totalRequests,
       totalErrors,
       models,
+      recentRequests: this.recentRequests.toArray(),
+      fallbackHistory: this.fallbackEvents.toArray(),
     };
+  }
+
+  recordFallback(
+    originalModel: string,
+    fallbackModel: string,
+    reason: "timeout" | "error",
+    failedDurationMs: number,
+    fallbackSuccess: boolean,
+  ): void {
+    this.fallbackEvents.push({
+      timestamp: Date.now(),
+      originalModel,
+      fallbackModel,
+      reason,
+      failedDurationMs,
+      fallbackSuccess,
+    });
   }
 
   reset(): void {
     this.startedAt = Date.now();
     this.data.clear();
+    this.recentRequests.clear();
+    this.fallbackEvents.clear();
     this.saveNow();
   }
 
