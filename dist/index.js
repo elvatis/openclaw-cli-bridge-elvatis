@@ -40,7 +40,14 @@ const PACKAGE_VERSION = (() => {
         return pkg.version;
     }
     catch {
-        return "0.0.0"; // fallback — should never happen in normal operation
+        // Second attempt: try openclaw.plugin.json (always co-located)
+        try {
+            const manifest = JSON.parse(readFileSync(join(__dirname_local, "openclaw.plugin.json"), "utf-8"));
+            return manifest.version;
+        }
+        catch {
+            return "unknown"; // should never happen — both files are always present
+        }
     }
 })();
 import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk";
@@ -48,6 +55,7 @@ import { DEFAULT_CODEX_AUTH_PATH, DEFAULT_MODEL as CODEX_DEFAULT_MODEL, readCode
 import { importCodexAuth } from "./src/codex-auth-import.js";
 import { startProxyServer } from "./src/proxy-server.js";
 import { patchOpencllawConfig } from "./src/config-patcher.js";
+import { DEFAULT_PROXY_PORT, DEFAULT_PROXY_API_KEY, DEFAULT_PROXY_TIMEOUT_MS, DEFAULT_MODEL_TIMEOUTS, DEFAULT_MODEL_FALLBACKS, STATE_FILE as CONFIG_STATE_FILE, PENDING_FILE as CONFIG_PENDING_FILE, OPENCLAW_DIR, CLI_TEST_DEFAULT_MODEL as CONFIG_CLI_TEST_DEFAULT_MODEL, PROFILE_DIRS, } from "./src/config.js";
 import { deleteSession, verifySession, DEFAULT_SESSION_PATH, } from "./src/grok-session.js";
 import { formatExpiryInfo, formatGeminiExpiry, formatClaudeExpiry, formatChatGPTExpiry, } from "./src/expiry-helpers.js";
 import { checkSystemChrome } from "./src/chrome-check.js";
@@ -57,11 +65,11 @@ import { saveProviderExpiry, loadProviderExpiry, migrateLegacyFiles } from "./sr
 // ──────────────────────────────────────────────────────────────────────────────
 let grokBrowser = null;
 let grokContext = null;
-// Persistent profile dirs — survive gateway restarts, keep cookies intact
-const GROK_PROFILE_DIR = join(homedir(), ".openclaw", "grok-profile");
-const GEMINI_PROFILE_DIR = join(homedir(), ".openclaw", "gemini-profile");
-const CLAUDE_PROFILE_DIR = join(homedir(), ".openclaw", "claude-profile");
-const CHATGPT_PROFILE_DIR = join(homedir(), ".openclaw", "chatgpt-profile");
+// Persistent profile dirs — imported from config.ts
+const GROK_PROFILE_DIR = PROFILE_DIRS.grok;
+const GEMINI_PROFILE_DIR = PROFILE_DIRS.gemini;
+const CLAUDE_PROFILE_DIR = PROFILE_DIRS.claude;
+const CHATGPT_PROFILE_DIR = PROFILE_DIRS.chatgpt;
 // Stealth launch options — prevent Cloudflare/bot detection from flagging the browser
 const STEALTH_ARGS = [
     "--no-sandbox",
@@ -642,13 +650,12 @@ async function tryRestoreGrokSession(_sessionPath, log) {
         return false;
     }
 }
-const DEFAULT_PROXY_PORT = 31337;
-const DEFAULT_PROXY_API_KEY = "cli-bridge";
+// DEFAULT_PROXY_PORT, DEFAULT_PROXY_API_KEY imported from config.ts
 // ──────────────────────────────────────────────────────────────────────────────
 // State file — persists the model that was active before the last /cli-* switch
 // Located at ~/.openclaw/cli-bridge-state.json (survives gateway restarts)
 // ──────────────────────────────────────────────────────────────────────────────
-const STATE_FILE = join(homedir(), ".openclaw", "cli-bridge-state.json");
+const STATE_FILE = CONFIG_STATE_FILE;
 function readState() {
     try {
         return JSON.parse(readFileSync(STATE_FILE, "utf8"));
@@ -659,7 +666,7 @@ function readState() {
 }
 function writeState(state) {
     try {
-        mkdirSync(join(homedir(), ".openclaw"), { recursive: true });
+        mkdirSync(OPENCLAW_DIR, { recursive: true });
         writeFileSync(STATE_FILE, JSON.stringify(state, null, 2) + "\n", "utf8");
     }
     catch {
@@ -725,14 +732,14 @@ const CLI_MODEL_COMMANDS = [
     { name: "cli-bitnet", model: "vllm/local-bitnet/bitnet-2b", description: "BitNet b1.58 2B (local CPU, no API key)", label: "BitNet 2B (local)" },
 ];
 /** Default model used by /cli-test when no arg is given */
-const CLI_TEST_DEFAULT_MODEL = "cli-claude/claude-sonnet-4-6";
+const CLI_TEST_DEFAULT_MODEL = CONFIG_CLI_TEST_DEFAULT_MODEL;
 // ──────────────────────────────────────────────────────────────────────────────
 // Staged-switch state file
 // Stores a pending model switch that has not yet been applied.
 // Written by /cli-* (default), applied by /cli-apply or /cli-* --now.
 // Located at ~/.openclaw/cli-bridge-pending.json
 // ──────────────────────────────────────────────────────────────────────────────
-const PENDING_FILE = join(homedir(), ".openclaw", "cli-bridge-pending.json");
+const PENDING_FILE = CONFIG_PENDING_FILE;
 function readPending() {
     try {
         return JSON.parse(readFileSync(PENDING_FILE, "utf8"));
@@ -743,7 +750,7 @@ function readPending() {
 }
 function writePending(pending) {
     try {
-        mkdirSync(join(homedir(), ".openclaw"), { recursive: true });
+        mkdirSync(OPENCLAW_DIR, { recursive: true });
         writeFileSync(PENDING_FILE, JSON.stringify(pending, null, 2) + "\n", "utf8");
     }
     catch {
@@ -889,7 +896,9 @@ const plugin = {
         const enableProxy = cfg.enableProxy ?? true;
         const port = cfg.proxyPort ?? DEFAULT_PROXY_PORT;
         const apiKey = cfg.proxyApiKey ?? DEFAULT_PROXY_API_KEY;
-        const timeoutMs = cfg.proxyTimeoutMs ?? 120_000;
+        const timeoutMs = cfg.proxyTimeoutMs ?? DEFAULT_PROXY_TIMEOUT_MS;
+        // Per-model timeout overrides — defaults from config.ts, can be extended via plugin config.
+        const modelTimeouts = { ...DEFAULT_MODEL_TIMEOUTS, ...cfg.modelTimeouts };
         const codexAuthPath = cfg.codexAuthPath ?? DEFAULT_CODEX_AUTH_PATH;
         const grokSessionPath = cfg.grokSessionPath ?? DEFAULT_SESSION_PATH;
         // ── Model → slash command mapping for status page ──────────────────────────
@@ -899,14 +908,8 @@ const plugin = {
             const modelId = entry.model.replace(/^vllm\//, "");
             modelCommands[modelId] = `/${entry.name}`;
         }
-        // ── Default model fallback chain ──────────────────────────────────────────
-        // When a primary model fails (timeout, error), retry once with a lighter variant.
-        const modelFallbacks = {
-            "cli-gemini/gemini-2.5-pro": "cli-gemini/gemini-2.5-flash",
-            "cli-gemini/gemini-3-pro-preview": "cli-gemini/gemini-3-flash-preview",
-            "cli-claude/claude-opus-4-6": "cli-claude/claude-sonnet-4-6",
-            "cli-claude/claude-sonnet-4-6": "cli-claude/claude-haiku-4-5",
-        };
+        // ── Default model fallback chain (from config.ts) ──────────────────────────
+        const modelFallbacks = { ...DEFAULT_MODEL_FALLBACKS };
         // ── Migrate legacy per-provider cookie expiry files to consolidated store ─
         const migration = migrateLegacyFiles();
         if (migration.migrated.length > 0) {
@@ -1258,6 +1261,7 @@ const plugin = {
                         version: plugin.version,
                         modelCommands,
                         modelFallbacks,
+                        modelTimeouts,
                         getExpiryInfo: () => ({
                             grok: (() => { const e = loadGrokExpiry(); return e ? formatExpiryInfo(e) : null; })(),
                             gemini: (() => { const e = loadGeminiExpiry(); return e ? formatGeminiExpiry(e) : null; })(),
@@ -1268,6 +1272,24 @@ const plugin = {
                     proxyServer = server;
                     _proxyOwnedByThisProcess = true;
                     api.logger.info(`[cli-bridge] proxy ready on :${port} — vllm/cli-gemini/* and vllm/cli-claude/* available`);
+                    // Warn if OpenClaw's LLM idle timeout is too low for CLI models.
+                    // CLI subprocesses (especially with large prompts) need time before producing
+                    // the first token. The default 60s causes premature 408 timeouts.
+                    const llmIdleTimeout = api.pluginConfig?._resolvedAgentDefaults?.llm?.idleTimeoutSeconds;
+                    if (llmIdleTimeout === undefined) {
+                        // Can't read the resolved config — check the raw file instead
+                        try {
+                            const ocConfig = JSON.parse(readFileSync(join(OPENCLAW_DIR, "openclaw.json"), "utf-8"));
+                            const agentDefaults = ocConfig?.agents?.defaults;
+                            const llm = agentDefaults?.llm;
+                            const idle = llm?.idleTimeoutSeconds;
+                            if (idle === undefined || (idle > 0 && idle < 120)) {
+                                api.logger.warn(`[cli-bridge] ⚠️  agents.defaults.llm.idleTimeoutSeconds is ${idle ?? "not set (default 60s)"} — ` +
+                                    `CLI models need at least 120–300s. Set to 300 in openclaw.json to prevent premature 408 timeouts.`);
+                            }
+                        }
+                        catch { /* non-fatal — just skip the check */ }
+                    }
                     const result = patchOpencllawConfig(port);
                     if (result.patched) {
                         api.logger.info(`[cli-bridge] openclaw.json patched with vllm provider. Restart gateway to activate.`);
@@ -1291,7 +1313,7 @@ const plugin = {
                         // One final attempt
                         try {
                             const server = await startProxyServer({
-                                port, apiKey, timeoutMs, modelCommands, modelFallbacks,
+                                port, apiKey, timeoutMs, modelCommands, modelFallbacks, modelTimeouts,
                                 log: (msg) => api.logger.info(msg),
                                 warn: (msg) => api.logger.warn(msg),
                                 getGrokContext: () => grokContext,

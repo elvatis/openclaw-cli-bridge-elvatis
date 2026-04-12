@@ -12,6 +12,7 @@ import { grokComplete, grokCompleteStream } from "./grok-client.js";
 import { geminiComplete, geminiCompleteStream } from "./gemini-browser.js";
 import { claudeComplete, claudeCompleteStream } from "./claude-browser.js";
 import { chatgptComplete, chatgptCompleteStream } from "./chatgpt-browser.js";
+import { geminiApiComplete, geminiApiCompleteStream } from "./gemini-api-runner.js";
 import type { BrowserContext } from "playwright";
 export type GrokCompleteOptions = Parameters<typeof grokComplete>[1];
 export type GrokCompleteStreamOptions = Parameters<typeof grokCompleteStream>[1];
@@ -54,6 +55,10 @@ export interface ProxyServerOptions {
     _chatgptComplete?: typeof chatgptComplete;
     /** Override for testing — replaces chatgptCompleteStream */
     _chatgptCompleteStream?: typeof chatgptCompleteStream;
+    /** Override for testing — replaces geminiApiComplete */
+    _geminiApiComplete?: typeof geminiApiComplete;
+    /** Override for testing — replaces geminiApiCompleteStream */
+    _geminiApiCompleteStream?: typeof geminiApiCompleteStream;
     /** Returns human-readable expiry string for each web provider (null = no login yet) */
     getExpiryInfo?: () => {
         grok: string | null;
@@ -73,6 +78,20 @@ export interface ProxyServerOptions {
      * with the fallback model. Example: "cli-gemini/gemini-2.5-pro" → "cli-gemini/gemini-2.5-flash"
      */
     modelFallbacks?: Record<string, string>;
+    /**
+     * Per-model timeout overrides (ms). Keys are model IDs (without "vllm/" prefix).
+     * Use this to give heavy models more time or limit fast models.
+     *
+     * Example:
+     *   {
+     *     "cli-claude/claude-sonnet-4-6": 420_000,   // 7 min for interactive chat
+     *     "cli-claude/claude-opus-4-6":   420_000,    // 7 min for heavy tasks
+     *     "cli-claude/claude-haiku-4-5":  120_000,    // 2 min for fast responses
+     *   }
+     *
+     * When not set for a model, falls back to proxyTimeoutMs (default 300s base).
+     */
+    modelTimeouts?: Record<string, number>;
 }
 /** Available CLI bridge models for GET /v1/models */
 export declare const CLI_MODELS: {

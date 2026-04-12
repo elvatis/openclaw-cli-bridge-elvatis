@@ -64,13 +64,16 @@ export declare class SessionManager {
     } | null;
     /** Write data to the session's stdin. */
     write(sessionId: string, data: string): boolean;
-    /** Send SIGTERM to the session process. */
+    /**
+     * Gracefully terminate a session: SIGTERM first, then SIGKILL after grace period.
+     * This prevents the ambiguous "exit 143 (no output)" pattern.
+     */
     kill(sessionId: string): boolean;
     /** List all sessions with their status. */
     list(): SessionInfo[];
-    /** Remove sessions older than SESSION_TTL_MS. Kill running ones first. Clean up isolated workdirs. */
+    /** Remove sessions older than SESSION_TTL_MS. Kill running ones with graceful SIGTERM→SIGKILL. */
     cleanup(): void;
-    /** Stop the cleanup timer (for graceful shutdown). */
+    /** Stop the cleanup timer (for graceful shutdown). SIGTERM all sessions, SIGKILL after grace. */
     stop(): void;
     private resolveCliCommand;
 }
