@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.2.0`
+**Current version:** `3.3.0`
 
 ---
 
@@ -405,6 +405,11 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v3.3.0
+- **feat:** session resume for ALL CLI providers — Claude, Gemini, and Codex all now use persistent sessions with `--resume`. Unified session registry at `~/.openclaw/cli-bridge/cli-sessions.json`.
+- **feat:** auto-rotation: sessions expire after 2 hours OR 50 requests (whichever first) to prevent context bloat
+- **feat:** per-provider debug logging: `[GEMINI]`, `[CODEX]` categories with session state
 
 ### v3.2.0
 - **feat:** Claude session resume — persistent sessions eliminate the 20KB prompt replay that caused Sonnet to hang. First request creates a session (`--session-id`), subsequent requests resume it (`--resume`). Claude keeps the conversation context; the bridge only sends the new message.

@@ -503,17 +503,25 @@ export async function runGemini(
   opts?: { tools?: ToolDefinition[]; log?: (msg: string) => void }
 ): Promise<string> {
   const model = stripPrefix(modelId);
+  const session = getOrCreateSession("gemini", model);
+  const isResume = session.requestCount > 0;
+
   // -p "" = headless mode trigger; actual prompt arrives via stdin
   // --approval-mode yolo: auto-approve all tool executions, never ask questions
   const args = ["-m", model, "-p", "", "--approval-mode", "yolo"];
+  if (isResume) {
+    args.push("--resume", session.sessionId);
+  }
   const cwd = workdir ?? tmpdir();
 
   // When tools are present, sandwich the conversation between tool instructions.
-  // The reminder at the end ensures models (especially Haiku) remember the JSON format
-  // after processing a long conversation history.
   const effectivePrompt = opts?.tools?.length
     ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
     : prompt;
+
+  debugLog("GEMINI", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
+    promptLen: effectivePrompt.length, requestCount: session.requestCount,
+  });
 
   const result = await runCli("gemini", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
 
@@ -525,9 +533,14 @@ export async function runGemini(
     .trim();
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
+    // Session might be invalid — invalidate and let next request create a fresh one
+    if (cleanStderr.includes("session") || cleanStderr.includes("resume") || cleanStderr.includes("not found")) {
+      invalidateSession(model);
+    }
     throw new Error(`gemini exited ${result.exitCode}: ${annotateExitError(result.exitCode, cleanStderr, result.timedOut, modelId)}`);
   }
 
+  recordSessionSuccess(model);
   return result.stdout || cleanStderr;
 }
 
@@ -539,59 +552,77 @@ export async function runGemini(
 // Persistent sessions avoid re-sending the full 20KB prompt on every request.
 // First call creates a session; subsequent calls resume it with just the new message.
 
-const CLAUDE_SESSIONS_FILE = join(homedir(), ".openclaw", "cli-bridge", "claude-sessions.json");
+// ── Generic CLI session registry ────────────────────────────────────────────
+// Shared by Claude, Gemini, and Codex — persistent sessions avoid replaying
+// the full conversation on every request.
 
-interface ClaudeSessionEntry {
+const CLI_SESSIONS_FILE = join(homedir(), ".openclaw", "cli-bridge", "cli-sessions.json");
+const SESSION_TTL = 2 * 60 * 60 * 1000; // 2 hours
+const SESSION_MAX_REQUESTS = 50;
+
+interface CliSessionEntry {
   sessionId: string;
+  provider: string; // "claude" | "gemini" | "codex"
   model: string;
   createdAt: number;
   lastUsedAt: number;
   requestCount: number;
 }
 
-const claudeSessions = new Map<string, ClaudeSessionEntry>();
+const cliSessions = new Map<string, CliSessionEntry>();
+let sessionsLoaded = false;
 
-function loadClaudeSessions(): void {
+function loadCliSessions(): void {
+  if (sessionsLoaded) return;
+  sessionsLoaded = true;
   try {
-    const data = JSON.parse(readFileSync(CLAUDE_SESSIONS_FILE, "utf8"));
+    const data = JSON.parse(readFileSync(CLI_SESSIONS_FILE, "utf8"));
     if (Array.isArray(data.sessions)) {
-      for (const s of data.sessions) claudeSessions.set(s.model, s);
+      for (const s of data.sessions) cliSessions.set(s.model, s);
     }
   } catch { /* no sessions file yet */ }
 }
 
-function saveClaudeSessions(): void {
+function saveCliSessions(): void {
   try {
     mkdirSync(join(homedir(), ".openclaw", "cli-bridge"), { recursive: true });
-    writeFileSync(CLAUDE_SESSIONS_FILE, JSON.stringify({
+    writeFileSync(CLI_SESSIONS_FILE, JSON.stringify({
       version: 1,
-      sessions: [...claudeSessions.values()],
+      sessions: [...cliSessions.values()],
     }, null, 2));
   } catch { /* best effort */ }
 }
 
-function getOrCreateSession(model: string): ClaudeSessionEntry {
-  if (claudeSessions.size === 0) loadClaudeSessions();
-  const existing = claudeSessions.get(model);
-  // Reuse session if it's less than 2 hours old
-  if (existing && (Date.now() - existing.lastUsedAt) < 2 * 60 * 60 * 1000) {
+function getOrCreateSession(provider: string, model: string): CliSessionEntry {
+  loadCliSessions();
+  const existing = cliSessions.get(model);
+  if (existing && (Date.now() - existing.lastUsedAt) < SESSION_TTL && existing.requestCount < SESSION_MAX_REQUESTS) {
     return existing;
   }
-  const entry: ClaudeSessionEntry = {
+  if (existing) {
+    debugLog("SESSION", `${provider} session ${existing.sessionId.slice(0, 8)} expired`, { reason: existing.requestCount >= SESSION_MAX_REQUESTS ? "max_requests" : "ttl", requestCount: existing.requestCount });
+  }
+  const entry: CliSessionEntry = {
     sessionId: randomUUID(),
+    provider,
     model,
     createdAt: Date.now(),
     lastUsedAt: Date.now(),
     requestCount: 0,
   };
-  claudeSessions.set(model, entry);
-  saveClaudeSessions();
+  cliSessions.set(model, entry);
+  saveCliSessions();
   return entry;
 }
 
+function recordSessionSuccess(model: string): void {
+  const s = cliSessions.get(model);
+  if (s) { s.requestCount++; s.lastUsedAt = Date.now(); saveCliSessions(); }
+}
+
 function invalidateSession(model: string): void {
-  claudeSessions.delete(model);
-  saveClaudeSessions();
+  cliSessions.delete(model);
+  saveCliSessions();
 }
 
 /**
@@ -611,7 +642,7 @@ export async function runClaude(
   await ensureClaudeToken();
 
   const model = stripPrefix(modelId);
-  const session = getOrCreateSession(model);
+  const session = getOrCreateSession("claude", model);
   const isResume = session.requestCount > 0;
 
   const args: string[] = [
@@ -645,17 +676,14 @@ export async function runClaude(
 
   // Session succeeded — update registry
   if (result.exitCode === 0 || result.stdout.length > 0) {
-    session.requestCount++;
-    session.lastUsedAt = Date.now();
-    saveClaudeSessions();
+    recordSessionSuccess(model);
     return result.stdout;
   }
 
   // Session failed — check if it's a timeout or auth issue
   if (result.timedOut) {
     // Don't invalidate session on timeout — it's still valid, just slow
-    session.lastUsedAt = Date.now();
-    saveClaudeSessions();
+    recordSessionSuccess(model); // keep session alive
     throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, true, modelId)}`);
   }
 
@@ -666,7 +694,7 @@ export async function runClaude(
     debugLog("CLAUDE", `session ${session.sessionId.slice(0, 8)} invalid, creating fresh`, { error: stderr.slice(0, 100) });
     invalidateSession(model);
     // Retry once with a fresh session
-    const freshSession = getOrCreateSession(model);
+    const freshSession = getOrCreateSession("claude", model);
     const freshArgs = [
       "-p", "--output-format", "text",
       "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions",
@@ -674,9 +702,7 @@ export async function runClaude(
     ];
     const retry = await runCli("claude", freshArgs, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
     if (retry.exitCode === 0 || retry.stdout.length > 0) {
-      freshSession.requestCount++;
-      freshSession.lastUsedAt = Date.now();
-      saveClaudeSessions();
+      recordSessionSuccess(model);
       return retry.stdout;
     }
     throw new Error(`claude exited ${retry.exitCode}: ${annotateExitError(retry.exitCode, retry.stderr || "(no output)", false, modelId)}`);
@@ -687,9 +713,7 @@ export async function runClaude(
     await refreshClaudeToken();
     const retry = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
     if (retry.exitCode === 0 || retry.stdout.length > 0) {
-      session.requestCount++;
-      session.lastUsedAt = Date.now();
-      saveClaudeSessions();
+      recordSessionSuccess(model);
       return retry.stdout;
     }
     const retryStderr = retry.stderr || "(no output)";
@@ -729,7 +753,13 @@ export async function runCodex(
   opts?: { tools?: ToolDefinition[]; mediaFiles?: MediaFile[]; log?: (msg: string) => void }
 ): Promise<string> {
   const model = stripPrefix(modelId);
-  const args = ["exec", "--model", model, "--full-auto"];
+  const session = getOrCreateSession("codex", model);
+  const isResume = session.requestCount > 0;
+
+  // Codex uses "exec resume <session-id>" for resume, "exec" for new
+  const args = isResume
+    ? ["exec", "resume", session.sessionId, "--model", model, "--full-auto"]
+    : ["exec", "--model", model, "--full-auto"];
 
   // Codex supports native image input via -i flag
   if (opts?.mediaFiles?.length) {
@@ -741,23 +771,24 @@ export async function runCodex(
   }
 
   const cwd = workdir ?? homedir();
-
-  // Codex requires a git repo in the working directory
   ensureGitRepo(cwd);
 
-  // When tools are present, sandwich the conversation between tool instructions.
-  // The reminder at the end ensures models (especially Haiku) remember the JSON format
-  // after processing a long conversation history.
   const effectivePrompt = opts?.tools?.length
     ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
     : prompt;
 
+  debugLog("CODEX", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
+    promptLen: effectivePrompt.length, requestCount: session.requestCount,
+  });
+
   const result = await runCli("codex", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
+    if (isResume) invalidateSession(model); // session might be stale
     throw new Error(`codex exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, result.timedOut, modelId)}`);
   }
 
+  recordSessionSuccess(model);
   return result.stdout || result.stderr;
 }
 
