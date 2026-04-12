@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.1.1`
+**Current version:** `3.1.2`
 
 ---
 
@@ -405,6 +405,10 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v3.1.2
+- **fix:** fallback models returning text instead of tool_calls in a tool loop now trigger the next model in the chain. Previously Haiku would say "Lass mich das starten:" as text but never call a tool — conversation died.
+- **feat:** `[FALLBACK-NO-TOOLS]` debug log category for tool-format violations
 
 ### v3.1.1
 - **fix:** empty-response detection — models returning zero content now trigger the next fallback instead of silently stopping the chain. Previously Haiku would return empty (0 bytes) and the bridge treated it as success, leaving the user with no response.

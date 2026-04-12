@@ -949,6 +949,15 @@ async function handleRequest(
               debugLog("FALLBACK-EMPTY", `${fallbackModel} returned empty`, {});
               throw new Error(`empty response from ${fallbackModel}`);
             }
+            // If tools were requested and the last message was a tool result (gateway expects
+            // tool continuation), but the fallback model returned text instead of tool_calls —
+            // it ignored the JSON format. Try next model in chain.
+            const lastMsg = cleanMessages[cleanMessages.length - 1];
+            const inToolLoop = lastMsg?.role === "tool" || lastMsg?.role === "function";
+            if (hasTools && inToolLoop && !result.tool_calls?.length && result.content) {
+              debugLog("FALLBACK-NO-TOOLS", `${fallbackModel} returned text instead of tool_calls in tool loop`, { contentLen: result.content.length, preview: result.content.slice(0, 80) });
+              throw new Error(`${fallbackModel} returned text instead of tool_calls`);
+            }
             const fbCompTokens = estimateTokens(result.content ?? "");
             metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens, promptPreview);
             metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, true);
