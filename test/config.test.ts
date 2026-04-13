@@ -72,7 +72,7 @@ describe("config.ts exports", () => {
   });
 
   it("exports model fallback chains as arrays", () => {
-    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-sonnet-4-6"]).toEqual(["cli-claude/claude-haiku-4-5", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"]);
+    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-sonnet-4-6"]).toEqual(["cli-claude/claude-opus-4-6", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"]);
     expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-opus-4-6"]).toContain("cli-claude/claude-sonnet-4-6");
     expect(DEFAULT_MODEL_FALLBACKS["cli-gemini/gemini-2.5-pro"]).toContain("cli-gemini/gemini-2.5-flash");
     expect(DEFAULT_MODEL_FALLBACKS["gemini-api/gemini-2.5-pro"]).toContain("gemini-api/gemini-2.5-flash");
