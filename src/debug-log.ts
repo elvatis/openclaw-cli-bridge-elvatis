@@ -14,8 +14,9 @@ import { homedir } from "node:os";
 
 const LOG_DIR = join(homedir(), ".openclaw", "cli-bridge");
 const LOG_FILE = join(LOG_DIR, "debug.log");
-const LOG_FILE_PREV = join(LOG_DIR, "debug.log.1");
-const MAX_LOG_SIZE = 5 * 1024 * 1024; // 5 MB
+const LOG_FILE_1 = join(LOG_DIR, "debug.log.1");
+const LOG_FILE_2 = join(LOG_DIR, "debug.log.2");
+const MAX_LOG_SIZE = 1 * 1024 * 1024; // 1 MB — rotates to .1 and .2
 
 let initialized = false;
 
@@ -29,7 +30,8 @@ function rotate(): void {
   try {
     const stat = statSync(LOG_FILE);
     if (stat.size > MAX_LOG_SIZE) {
-      try { renameSync(LOG_FILE, LOG_FILE_PREV); } catch { /* best effort */ }
+      try { renameSync(LOG_FILE_1, LOG_FILE_2); } catch { /* .1 may not exist */ }
+      try { renameSync(LOG_FILE, LOG_FILE_1); } catch { /* best effort */ }
     }
   } catch { /* file doesn't exist yet */ }
 }
