@@ -274,7 +274,15 @@ function tryRescueToolCallsFromContent(content: string): CliToolResult | null {
 
 function tryParseJson(text: string): Record<string, unknown> | null {
   try {
-    const obj = JSON.parse(text);
+    // Models sometimes output raw newlines/tabs inside JSON strings (invalid JSON).
+    // Escape them before parsing: \n → \\n, \r → \\r, \t → \\t (only inside strings).
+    const sanitized = text.replace(/[\x00-\x1f]/g, (ch) => {
+      if (ch === "\n") return "\\n";
+      if (ch === "\r") return "\\r";
+      if (ch === "\t") return "\\t";
+      return "";
+    });
+    const obj = JSON.parse(sanitized);
     if (typeof obj === "object" && obj !== null && !Array.isArray(obj)) {
       return obj as Record<string, unknown>;
     }

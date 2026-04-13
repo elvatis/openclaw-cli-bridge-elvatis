@@ -1186,7 +1186,14 @@ export async function routeToCliRunner(
     return parseToolCallResponse(rawText);
   }
 
-  // No tools — wrap plain text
+  // No tools — but check if the model still wrapped its response in {"content":"..."} JSON
+  // (this happens when tool instructions from a previous turn are still in the conversation)
+  try {
+    const parsed = JSON.parse(rawText.trim());
+    if (typeof parsed?.content === "string") {
+      return { content: parsed.content };
+    }
+  } catch { /* not JSON, that's fine */ }
   return { content: rawText };
 }
 
