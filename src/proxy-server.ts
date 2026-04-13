@@ -558,9 +558,6 @@ async function handleRequest(
     const promptPreview = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.slice(0, 80) : "";
 
     debugLog("REQ", `${model} start`, { msgs: cleanMessages.length, tools: tools?.length ?? 0, stream, media: mediaFiles.length, promptPreview: promptPreview.slice(0, 60) });
-    if (hasTools && tools!.length > 0) {
-      debugLog("TOOLS", `${tools!.length} tools available`, { names: tools!.map(t => t.function?.name ?? t.name ?? "?").join(", ") });
-    }
 
     // Track active request for dashboard
     activeRequests.set(id, { id, model, startedAt: Date.now(), messageCount: cleanMessages.length, toolCount: tools?.length ?? 0, promptPreview });
@@ -1043,18 +1040,8 @@ async function handleRequest(
     let result: CliToolResult;
     let usedModel = model;
 
-    // ── Opus escalation: route heavy Sonnet conversations to Opus ────────────
-    // Sonnet works reliably for most requests but can struggle with very long
-    // conversations (20+ messages with tools). Opus handles these better.
-    const shouldEscalate = model === "cli-claude/claude-sonnet-4-6"
-      && cleanMessages.length > 20
-      && hasTools;
-    if (shouldEscalate) {
-      const originalModel = model;
-      usedModel = "cli-claude/claude-opus-4-6";
-      debugLog("OPUS-ESCALATE", `${originalModel} → ${usedModel}`, { msgs: cleanMessages.length, tools: tools?.length ?? 0 });
-      opts.log(`[cli-bridge] escalating to Opus (${cleanMessages.length} msgs with ${tools?.length ?? 0} tools)`);
-    }
+    // Opus escalation removed — Sonnet works reliably now that cwd is homedir().
+    // If Sonnet fails, the fallback chain handles it (Sonnet → Opus → Haiku → Gemini).
 
     const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined, log: opts.log };
 
