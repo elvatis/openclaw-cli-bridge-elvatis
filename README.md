@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.8.2`
+**Current version:** `3.9.0`
 
 ---
 
@@ -405,6 +405,54 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v3.9.0
+- **fix:** JSON parser sanitizes raw newlines (0x0A) in model output — fixes "no JSON found" errors that caused webchat to display raw `{"content":"..."}` instead of formatted text
+- **fix:** no-tools path extracts content from `{"content":"..."}` wrappers when models carry over JSON format
+
+### v3.8.1
+- **fix:** log rotation reduced to 1MB (was 5MB), keeps 2 rotated files (debug.log.1, .2)
+- **fix:** removed verbose `[TOOLS]` log line (tool count already in `[REQ]`)
+
+### v3.8.0
+- **fix:** ROOT CAUSE — Claude CLI must run from `homedir()`, never from workspace directories. Running from a project dir triggers Claude Code's agentic mode, which ignores tool injection and treats it as "prompt injection". This caused the 90% Sonnet failure rate.
+- **feat:** orchestration test script (`npx tsx test/orchestration-test.ts`) — tests all 5 providers with 3 scenarios x 3 reps
+- **fix:** Sonnet fallback chain now: Opus, Gemini Flash, Codex (Opus as first fallback)
+- **fix:** Opus escalation removed (Sonnet works reliably now that cwd is fixed)
+
+### v3.7.0
+- **feat:** Opus auto-escalation at 20+ messages with tools (Opus 94% vs Sonnet 55% at the time)
+- **feat:** Opus 90s stale-output timeout for long-form generation (blog posts, Lexical JSON)
+- **fix:** session resume disabled for Sonnet/Haiku (45% hang rate from corrupted sessions). Opus keeps `--session-id`/`--resume`
+- **feat:** generic skill auto-detection from `~/.openclaw/skills/` — injects pointers when prompt matches a skill name
+- **feat:** first user message pinning — original request survives prompt windowing at MAX_MESSAGES
+- **fix:** Haiku skip in tool-loop fallbacks (saves ~10s per fallback)
+- **fix:** improved JSON parser: multi-position embedded extraction, rescue-from-raw strategy
+- **fix:** workspace detection scoped to user messages only (not tool results)
+- **feat:** agent delegation infrastructure (disabled — `openclaw agent` is single-turn only)
+
+### v3.6.0
+- **feat:** generic skill auto-detection from `~/.openclaw/skills/` with SKILL.md parsing
+- **fix:** `contentToString()` for multimodal content arrays in skill/workspace detection
+- **fix:** compact skill hints (one-liner per skill, not multi-line)
+
+### v3.5.1
+- **fix:** improved JSON parser — `tryExtractEmbeddedJson` tries multiple `{` positions
+- **feat:** `rescue-from-raw` final parse strategy before falling back to raw content
+- **feat:** `[TOOLS]` debug log showing available tool names per request
+- **fix:** workspace detection scoped to user messages only
+
+### v3.5.0
+- **feat:** first user message pinning — the original request is always included in the prompt window
+- **perf:** skip Haiku in fallback chain during tool loops (consistently returns text, not tool_calls)
+- **fix:** session retry invalidation — prevents "Session ID already in use" loops
+
+### v3.4.1
+- **fix:** invalidate session on retry failure to prevent "already in use" loop
+
+### v3.4.0
+- **feat:** workspace project auto-detection — scans `~/.openclaw/workspace/` for project directories
+- **feat:** consecutive timeout session rotation — after 3 timeouts in a row, auto-expire session
 
 ### v3.3.1
 - **fix:** test requests no longer pollute `debug.log` — test instances (port 0) now skip file logging

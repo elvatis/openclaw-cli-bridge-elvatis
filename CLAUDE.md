@@ -93,6 +93,7 @@ Parser tries 5 strategies: Claude JSON wrapper, direct JSON, code blocks, embedd
 
 - **Sonnet intermittent hangs** — `claude -p` with Sonnet goes completely silent (~45% of requests). Session resume makes it worse (corrupted sessions after SIGTERM). Workaround: session resume disabled for Sonnet (fresh `-p` every call), auto-escalate to Opus at 20+ messages. Opus has ~94% success rate.
 - **Sonnet session resume disabled** — session resume caused corrupted sessions when SIGTERM killed processes. Only Opus uses `--session-id`/`--resume` now. Sonnet/Haiku send the full prompt every time (more tokens, but reliable).
+- **Claude cwd must be homedir() (v3.8.0 ROOT CAUSE)** — running `claude -p` from a project directory triggers Claude Code's agentic mode, which ignores tool injection and treats it as "prompt injection". This was the root cause of the 90% Sonnet failure rate. Fix: Claude always runs from `homedir()`. Orchestration test: 30/30 pass from homedir.
 - **Haiku unreliable for tool_calls** — returns text instead of tool_calls ~80% of the time in tool loops. Skipped in fallback chain when tools are expected.
 - **Long-form generation limit** — generating 15KB+ responses (blog posts as Lexical JSON) can exceed even Opus's 90s stale timeout. The `claude -p` CLI sometimes goes silent during long generation. No workaround from the bridge side.
 - **Agent delegation (disabled)** — infrastructure for delegating skills to `openclaw agent` is built but disabled. `openclaw agent` is single-turn only; multi-turn skill execution needs OpenClaw-side support.
