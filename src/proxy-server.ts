@@ -1043,11 +1043,9 @@ async function handleRequest(
     let result: CliToolResult;
     let usedModel = model;
 
-    // ── Opus escalation: route heavy conversations to Opus instead of Sonnet ──
-    // Sonnet hangs ~50% at 30KB+ prompts. Opus handles large contexts reliably.
-    // Measure by message count (proxy for formatted prompt size after truncation):
-    //   - With 21 tools + 12 messages (heavy tools window), prompt hits ~30KB
-    //   - Escalate when messages > 20 (conversation is deep enough to cause hangs)
+    // ── Opus escalation: route heavy Sonnet conversations to Opus ────────────
+    // Sonnet works reliably for most requests but can struggle with very long
+    // conversations (20+ messages with tools). Opus handles these better.
     const shouldEscalate = model === "cli-claude/claude-sonnet-4-6"
       && cleanMessages.length > 20
       && hasTools;

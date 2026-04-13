@@ -697,14 +697,20 @@ export async function runClaude(
       : buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else.")
     : prompt;
 
-  const cwd = workdir ?? homedir();
+  // CRITICAL: Always use homedir() for Claude CLI. Running from a project directory
+  // triggers Claude Code's agentic mode, which ignores our tool injection and
+  // treats it as a "prompt injection attempt". This was the root cause of the 90%
+  // Sonnet failure rate. Workspace context is injected as text in the prompt instead.
+  const cwd = homedir();
   debugLog("CLAUDE", `${isResume ? "resume" : "fresh"} ${model}${isResume ? ` session=${session.sessionId.slice(0, 8)}` : ""}`, {
     promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024),
     cwd, timeoutMs: Math.round(timeoutMs / 1000), ...(isOpus ? { requestCount: session.requestCount } : {}),
   });
 
   // Opus gets 90s stale timeout — it needs think time for long-form generation (blog posts, Lexical JSON)
-  const staleMs = isOpus ? 90_000 : undefined;
+  // Sonnet/Haiku hang silently on large tool prompts or long responses.
+  // Set stale timeout for all Claude models to 2 minutes (120_000ms) to allow for longer processing.
+  const staleMs = 120_000; // 2 minutes for all Claude models (Opus, Sonnet, Haiku)
   const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log, staleTimeoutMs: staleMs });
 
   // Session succeeded — update registry
