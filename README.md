@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.10.3`
+**Current version:** `3.10.4`
 
 ---
 
@@ -406,14 +406,33 @@ npm run ci          # lint + typecheck + test
 
 ## Changelog
 
-### v3.10.3
-- **feat:** Intelligent prompt routing, ported from [elvatis-mcp](https://github.com/elvatis/elvatis-mcp). Analyzes user message keywords and routes to the best model: code tasks to Codex, research to Gemini, complex reasoning to Opus, simple tasks to Haiku. Only reroutes on strong signals (score >= 2, clear 2x winner). Debug log: `[ROUTE]`.
-- **feat:** New `src/prompt-router.ts` with `matchRules()` and `detectOptimalModel()` functions
-- **feat:** 14 new unit tests for routing rules (`test/prompt-router.test.ts`)
+### v3.10.4
+- **docs:** Full changelog update v3.9.1 through v3.10.3. Updated CLAUDE.md with session resume policy table and routing status.
 
 ### v3.10.3
+- **fix:** Gemini session resume disabled (exit 42 on stale sessions). ALL providers except Opus now use fresh calls.
+- **fix:** Filter "YOLO mode" warnings from Gemini stderr (informational, not errors)
+
+### v3.10.2
+- **fix:** Routing disabled (Codex CLI crashes on tool-injected prompts). Gateway handles model selection.
+- **fix:** Codex session resume disabled, cwd fixed to homedir()
+
+### v3.10.1
+- **fix:** Cross-provider routing only. Removed Claude-to-Claude rerouting (Opus, Haiku). Gateway handles Claude variant selection with 60+ models via direct API.
+
+### v3.10.0
+- **feat:** Intelligent prompt routing, ported from [elvatis-mcp](https://github.com/elvatis/elvatis-mcp). Keyword-based model selection: code to Codex, research to Gemini. Debug log: `[ROUTE]`.
+- **feat:** New `src/prompt-router.ts` with `matchRules()` and `detectOptimalModel()`
+- **feat:** 14 new unit tests for routing rules (`test/prompt-router.test.ts`)
+
+### v3.9.1
 - **fix:** Sonnet 60s stale timeout (was 30s, too aggressive for real-world tool reasoning with 21 tools)
 - **fix:** Task payload rescue from content: detects subagent payloads in `{"content":"..."}` and converts to proper `sessions_spawn` tool calls
+
+### v3.9.0
+- **docs:** Full changelog v3.4.0 through v3.8.2. Updated CLAUDE.md known issues with v3.8.0 root cause.
+
+### v3.8.2
 - **fix:** JSON parser sanitizes raw newlines (0x0A) in model output
 - **fix:** no-tools path extracts content from `{"content":"..."}` wrappers when models carry over JSON format
 
