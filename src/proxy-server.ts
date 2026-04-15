@@ -1042,14 +1042,12 @@ async function handleRequest(
     let usedModel = model;
 
     // ── Intelligent prompt-based routing (ported from elvatis-mcp) ────────────
-    // Analyzes user message keywords and routes to the best model for the task.
-    // Only reroutes on strong signals (score >= 2, clear winner).
-    const routed = detectOptimalModel(extractUserText(cleanMessages), model);
-    if (routed) {
-      usedModel = routed.model;
-      debugLog("ROUTE", `${model} -> ${usedModel}`, { reason: routed.reason, score: routed.score, keywords: routed.keywords.join(", ") });
-      opts.log(`[cli-bridge] routing ${model} -> ${usedModel} (${routed.reason})`);
-    }
+    // Disabled: the gateway should handle model selection. The bridge's role is to
+    // execute CLI calls reliably, not to second-guess the gateway's model choice.
+    // Codex routing caused failures (Codex CLI crashes on startup with our tool prompts).
+    // Re-enable when Codex CLI is stable or when routing targets are verified working.
+    // const routed = detectOptimalModel(extractUserText(cleanMessages), model);
+    const routed: ReturnType<typeof detectOptimalModel> = null;
 
     const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined, log: opts.log };
 
@@ -1085,6 +1083,13 @@ async function handleRequest(
       sseHeadersSent = true;
       res.write(": keepalive\n\n");
       keepaliveInterval = setInterval(() => { res.write(": keepalive\n\n"); }, SSE_KEEPALIVE_INTERVAL_MS);
+
+      // Send visible routing notification so the webchat shows what's happening
+      if (routed) {
+        const modelShort = usedModel.split("/").pop() ?? usedModel;
+        const routeChunk = { id, object: "chat.completion.chunk", created, model: usedModel, choices: [{ index: 0, delta: { role: "assistant", content: `[Routing to ${modelShort}]\n\n` }, finish_reason: null }] };
+        res.write(`data: ${JSON.stringify(routeChunk)}\n\n`);
+      }
     }
 
     // ── Progress notifications: send visible status updates to the webchat ──

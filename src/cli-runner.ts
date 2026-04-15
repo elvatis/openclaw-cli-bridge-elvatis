@@ -795,13 +795,10 @@ export async function runCodex(
   opts?: { tools?: ToolDefinition[]; mediaFiles?: MediaFile[]; log?: (msg: string) => void }
 ): Promise<string> {
   const model = stripPrefix(modelId);
-  const session = getOrCreateSession("codex", model);
-  const isResume = session.requestCount > 0;
 
-  // Codex uses "exec resume <session-id>" for resume, "exec" for new
-  const args = isResume
-    ? ["exec", "resume", session.sessionId, "--model", model, "--full-auto"]
-    : ["exec", "--model", model, "--full-auto"];
+  // Session resume disabled for Codex (same issue as Sonnet: stale sessions cause
+  // "thread/resume failed: no rollout found" errors). Fresh calls every time.
+  const args = ["exec", "--model", model, "--full-auto"];
 
   // Codex supports native image input via -i flag
   if (opts?.mediaFiles?.length) {
@@ -812,25 +809,25 @@ export async function runCodex(
     }
   }
 
-  const cwd = workdir ?? homedir();
+  // Use homedir for Codex too (same reason as Claude: workspace dirs cause issues).
+  // Codex needs a git repo, so we ensure homedir has one.
+  const cwd = homedir();
   ensureGitRepo(cwd);
 
   const effectivePrompt = opts?.tools?.length
     ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
     : prompt;
 
-  debugLog("CODEX", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
-    promptLen: effectivePrompt.length, requestCount: session.requestCount,
+  debugLog("CODEX", `fresh ${model}`, {
+    promptLen: effectivePrompt.length,
   });
 
   const result = await runCli("codex", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
 
   if (result.exitCode !== 0 && result.stdout.length === 0) {
-    if (isResume) invalidateSession(model); // session might be stale
     throw new Error(`codex exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, result.timedOut, modelId)}`);
   }
 
-  recordSessionSuccess(model);
   return result.stdout || result.stderr;
 }
 
