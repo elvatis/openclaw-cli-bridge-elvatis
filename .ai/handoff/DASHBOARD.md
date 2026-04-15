@@ -1,47 +1,57 @@
-# DASHBOARD.md — openclaw-cli-bridge-elvatis
+# DASHBOARD.md - openclaw-cli-bridge-elvatis
 
-_Last updated: 2026-04-10_
+_Last updated: 2026-04-15_
 
-<!-- SECTION: plugin_status -->
 ## Plugin Status
 
 | Component | Version | Build | Tests | Status |
 |-----------|---------|-------|-------|--------|
-| openclaw-cli-bridge-elvatis | 2.4.0 | ✅ | ✅ | ✅ Stable |
-<!-- /SECTION: plugin_status -->
+| openclaw-cli-bridge-elvatis | 3.10.4 | OK (22 pre-existing TS errors) | 292/292 pass | Stable |
 
-<!-- SECTION: release_state -->
 ## Release State
 
 | Platform | Published Version | Status |
 |----------|------------------|--------|
-| GitHub | v2.4.0 | ✅ Pushed to main |
-| npm | 2.4.0 | ⏳ Pending (via CI) |
-| ClawHub | 2.4.0 | ⏳ Pending (via CI) |
-<!-- /SECTION: release_state -->
+| GitHub | v3.10.4 | Pushed to main |
+| npm | 3.10.4 | Pending (via CI) |
+| ClawHub | 3.10.4 | Pending (via CI) |
+| Dashboard | v3.10.4 | Live at http://127.0.0.1:31337/status |
 
-<!-- SECTION: open_tasks -->
+## Provider Health (orchestration test 2026-04-13)
+
+| Provider | Success rate | Avg latency |
+|----------|-------------|-------------|
+| Claude/Opus | 100% (6/6) | 7.2s |
+| Claude/Sonnet | 100% (6/6) | 5.2s |
+| Claude/Haiku | 100% (6/6) | 3.2s |
+| Gemini/Flash | 100% (6/6) | 7.2s |
+| Codex/GPT-5.3 | 100% (6/6) | 5.4s |
+
+## Live session test (2026-04-15)
+
+15 consecutive clean responses, zero failures:
+- Sonnet: 3.4s to 17.0s (tool calls + content)
+- Gemini Pro: 10.7s, 24.9s (tool call + content)
+- Mixed: 44 msgs deep without a single hang
+
 ## Open Tasks
 
-_No open tasks._
-<!-- /SECTION: open_tasks -->
+| Task | Title | Priority |
+|------|-------|----------|
+| T-030 | Fix Codex CLI tool prompt compatibility | High |
+| T-031 | Re-enable prompt routing | Medium |
+| T-032 | Add `/bridge-help` slash command | Low |
+| T-033 | Agent delegation (blocked on OpenClaw) | Blocked |
 
-<!-- SECTION: completed_tasks -->
-## Completed Tasks
+## Key Files
 
-| Task | Title | Version |
-|------|-------|---------|
-| T-020 | Metrics & health dashboard: request volume, latency, errors, token usage | 2.4.0 |
-| T-019 | Full-featured CLI bridge: tool calls + multimodal + autonomous execution | 2.3.0 |
-| T-018 | Fix vllm apiKey corruption (401) + harden config-patcher | 2.2.1 |
-| T-017 | Fix log spam, restart loops, CLI blocking | 2.2.0 |
-| T-016 | Issue #2: Codex auth auto-import into agent auth store | 2.1.0 |
-| T-015 | Issue #4: Background session mgmt with workdir isolation | 2.1.0 |
-| T-014 | Issue #6: Workdir isolation (createIsolatedWorkdir, cleanup, sweep) | 2.1.0 |
-| T-013 | Fix cookie expiry tracking — longest-lived auth cookie (all 4) | 1.7.3 |
-| T-012 | Persistent browser fallback for Claude/Gemini/ChatGPT (no CDP) | 1.4.0 |
-| T-011 | Session-safe staged model switching (/cli-apply, /cli-pending, --now) | 0.2.25 |
-| T-009 | Stability: sleep-resilient token refresh + stopTokenRefresh cleanup | 0.2.25 |
-| T-008 | Validate proxy endpoints + vllm model calls end-to-end | 0.2.21 |
-| T-007 | Create GitHub repo and push initial code | 0.2.5 |
-<!-- /SECTION: completed_tasks -->
+| File | Purpose |
+|------|---------|
+| src/cli-runner.ts | CLI subprocess spawn, timeout, stale detection |
+| src/proxy-server.ts | HTTP proxy, fallback chain, SSE streaming |
+| src/tool-protocol.ts | Tool schema injection, JSON response parsing |
+| src/prompt-router.ts | Routing rules (disabled), matchRules(), detectOptimalModel() |
+| src/config.ts | All timeouts, thresholds, fallback chains |
+| src/debug-log.ts | File-based log with 1MB rotation |
+| test/orchestration-test.ts | Real CLI provider diagnostic (npx tsx) |
+| test/prompt-router.test.ts | 14 routing rule tests |

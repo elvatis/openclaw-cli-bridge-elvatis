@@ -1,45 +1,46 @@
-# NEXT_ACTIONS.md — openclaw-cli-bridge-elvatis
+# NEXT_ACTIONS.md - openclaw-cli-bridge-elvatis
 
-_Last updated: 2026-04-10_
+_Last updated: 2026-04-15_
 
-<!-- SECTION: summary -->
 ## Status Summary
 
 | Status  | Count |
 |---------|-------|
-| Done    | 19    |
-| Ready   | 0     |
-| Blocked | 0     |
-<!-- /SECTION: summary -->
+| Done    | 30    |
+| Ready   | 3     |
+| Blocked | 1     |
 
 ---
 
 ## Ready - Work These Next
 
-_No pending tasks._
+| Task | Title | Priority |
+|------|-------|----------|
+| T-030 | Fix Codex CLI tool prompt compatibility (crashes on startup) | High |
+| T-031 | Re-enable prompt routing when Codex CLI is stable | Medium |
+| T-032 | Add `/bridge-help` slash command with routing guide | Low |
 
 ---
 
 ## Blocked
 
-_No blocked tasks._
+| Task | Title | Blocked by |
+|------|-------|------------|
+| T-033 | Agent delegation for multi-turn skill execution | OpenClaw needs `openclaw agent --multi-turn` or `openclaw skill run` |
 
 ---
 
-## Recently Completed
+## Recently Completed (v3.x)
 
-| Task  | Title                                                              | Date       |
-|-------|--------------------------------------------------------------------|------------|
-| T-019 | Full CLI bridge: tool calls + multimodal + autonomous (v2.3.0)  | 2026-04-10 |
-| T-018 | Fix vllm apiKey corruption (401) + harden config-patcher (v2.2.1)| 2026-04-10 |
-| T-017 | Fix log spam, restart loops, CLI blocking (v2.2.0)               | 2026-04-09 |
-| T-016 | Issue #2: Codex auth auto-import into agent auth store            | 2026-03-19 |
-| T-015 | Issue #4: Background session mgmt with workdir isolation          | 2026-03-19 |
-| T-014 | Issue #6: Workdir isolation (createIsolatedWorkdir, cleanup, sweep) | 2026-03-19 |
-| T-013 | Fix cookie expiry tracking — longest-lived auth cookie (all 4)    | 2026-03-13 |
-| T-012 | Persistent browser fallback for Claude/Gemini/ChatGPT (no CDP)    | 2026-03-12 |
-| T-011 | Session-safe staged model switching (/cli-apply, /cli-pending)     | 2026-03-11 |
-| T-009 | Stability: sleep-resilient token refresh + stopTokenRefresh cleanup | 2026-03-11 |
-| T-008 | Validate proxy endpoints + vllm model calls end-to-end            | 2026-03-08 |
-| T-007 | Create GitHub repo and push initial code                          | 2026-03-07 |
-| T-006 | Implement Claude Code CLI request bridge                          | 2026-03-07 |
+| Task | Title | Date |
+|------|-------|------|
+| T-029 | Gemini session resume disabled + YOLO stderr filter (v3.10.3) | 2026-04-15 |
+| T-028 | Routing disabled, Codex cwd + session fix (v3.10.2) | 2026-04-15 |
+| T-027 | Cross-provider routing only (v3.10.1) | 2026-04-15 |
+| T-026 | Intelligent prompt routing ported from elvatis-mcp (v3.10.0) | 2026-04-15 |
+| T-025 | Sonnet 60s stale timeout + task payload rescue (v3.9.1) | 2026-04-15 |
+| T-024 | Full changelog + docs update (v3.9.0) | 2026-04-13 |
+| T-023 | JSON newline sanitization (v3.8.2) | 2026-04-13 |
+| T-022 | Log rotation 1MB (v3.8.1) | 2026-04-13 |
+| T-021 | ROOT CAUSE: Claude cwd=homedir() + orchestration test (v3.8.0) | 2026-04-13 |
+| T-020 | Opus escalation, session resume overhaul, skill detection (v3.7.0) | 2026-04-12 |
