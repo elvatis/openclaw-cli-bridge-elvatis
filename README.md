@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.9.0`
+**Current version:** `3.9.1`
 
 ---
 
@@ -406,7 +406,7 @@ npm run ci          # lint + typecheck + test
 
 ## Changelog
 
-### v3.9.0
+### v3.9.1
 - **fix:** JSON parser sanitizes raw newlines (0x0A) in model output — fixes "no JSON found" errors that caused webchat to display raw `{"content":"..."}` instead of formatted text
 - **fix:** no-tools path extracts content from `{"content":"..."}` wrappers when models carry over JSON format
 
