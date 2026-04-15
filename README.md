@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.10.4`
+**Current version:** `3.10.5`
 
 ---
 
@@ -405,6 +405,9 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v3.10.5
+- **docs:** Updated `.ai/handoff/` files (STATUS.md, NEXT_ACTIONS.md, DASHBOARD.md) from v2.3.0 to v3.10.4. Added provider health results, session resume policy, key files reference.
 
 ### v3.10.4
 - **docs:** Full changelog update v3.9.1 through v3.10.3. Updated CLAUDE.md with session resume policy table and routing status.
