@@ -33,6 +33,9 @@ export interface RoutingMatch {
 // Ported from elvatis-mcp/src/tools/routing-rules.ts
 // Adapted: MCP tool names replaced with cli-bridge model IDs
 
+// Only cross-provider routing: route to a DIFFERENT provider when there's a clear advantage.
+// Claude-to-Claude rerouting (Sonnet to Opus/Haiku) is left to the OpenClaw gateway,
+// which has 60+ models with direct API access and doesn't need CLI subprocess overhead.
 export const ROUTING_RULES: RoutingRule[] = [
   {
     model: "openai-codex/gpt-5.3-codex",
@@ -52,25 +55,6 @@ export const ROUTING_RULES: RoutingRule[] = [
       "research", "overview", "draft", "write an email", "proofread",
     ],
     reason: "Gemini excels at analysis, long context (1M tokens), and multimodal input",
-  },
-  {
-    model: "cli-claude/claude-opus-4-6",
-    keywords: [
-      "complex", "nuanced", "creative", "strategy", "plan",
-      "cross-check", "second opinion", "verify", "architecture",
-      "design", "review", "audit", "evaluate",
-    ],
-    reason: "Opus handles complex reasoning and strategic planning",
-  },
-  {
-    model: "cli-claude/claude-haiku-4-5",
-    keywords: [
-      "quick", "simple", "classify", "label", "rewrite", "format",
-      "short answer", "yes or no", "extract", "parse", "convert",
-      "json", "csv", "rephrase", "grammar", "markdown", "sentiment",
-      "positive", "negative", "neutral",
-    ],
-    reason: "Haiku is fast and cheap for simple tasks",
   },
 ];
 
@@ -157,24 +141,30 @@ export function detectOptimalModel(
 export const ROUTING_GUIDE = `
 # CLI Bridge: Model Routing Guide
 
-## Available Models
+## Cross-Provider Routing
 
-| Model | Best for | Avg latency |
-|-------|----------|-------------|
-| Sonnet (default) | General tasks, conversation | 5-10s |
-| Opus | Complex reasoning, strategy, long-form | 7-15s |
-| Haiku | Simple tasks, formatting, classification | 2-4s |
-| Gemini Flash | Research, analysis, long documents, images | 6-8s |
-| Codex (GPT-5.3) | Coding, debugging, shell scripts | 5-7s |
+The bridge routes to a different provider when there is a clear advantage.
+Claude-to-Claude routing (Sonnet/Opus/Haiku) is handled by the OpenClaw gateway
+which has 60+ models with direct API access.
 
-## Automatic Routing
+| Prompt keywords | Routed to | Why |
+|----------------|-----------|-----|
+| code, debug, refactor, typescript, python, bash | Codex (GPT-5.3) | Purpose-built for coding |
+| summarize, analyze, research, document, pdf, image | Gemini Flash | 1M context, multimodal |
+| Everything else | Keeps original model | Gateway decides Claude variant |
 
-The bridge automatically routes based on prompt keywords:
-- **Coding** (code, debug, refactor, typescript, python) -> Codex
-- **Research** (summarize, analyze, research, document) -> Gemini
-- **Complex reasoning** (complex, strategy, plan, architecture) -> Opus
-- **Simple tasks** (quick, format, extract, classify, json) -> Haiku
-- **Everything else** -> Sonnet (default)
+## OpenClaw Models (60+ available)
+
+The gateway manages models across 10 providers:
+- Claude (anthropic, claude-cli): Sonnet, Opus, Haiku via direct API
+- GitHub Copilot: GPT-5, Gemini 3, Claude, Grok
+- Codex: GPT-5.1 to 5.4 via CLI
+- Gemini: 2.0 Flash to 3.1 Pro via CLI
+- Perplexity: Sonar Pro, Deep Research via API
+- Local: BitNet, llama.cpp via bridge
+
+The bridge only spawns CLI subprocesses for vllm/* models. All other
+models are accessed by the gateway directly.
 
 ## Fallback Chain
 
