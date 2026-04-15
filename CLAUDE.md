@@ -91,8 +91,20 @@ Analyzes user message content and routes to the best model for the task.
 | code, debug, refactor, typescript, python, shell, bash | Codex (gpt-5.3) | Purpose-built for coding |
 | summarize, analyze, research, document, pdf, image | Gemini Flash | 1M context, multimodal |
 
-Cross-provider only: routes to Codex or Gemini when there is a clear advantage. Claude-to-Claude rerouting (Sonnet/Opus/Haiku) is handled by the OpenClaw gateway, which has 60+ models with direct API access. Only reroutes when top match has score >= 2 AND >= 2x the runner-up. Debug log: `[ROUTE]`.
+Cross-provider only: routes to Codex or Gemini when there is a clear advantage. Claude-to-Claude rerouting (Sonnet/Opus/Haiku) is handled by the OpenClaw gateway, which has 60+ models with direct API access. Only reroutes when top match has score >= 2 AND >= 2x the runner-up. Debug log: `[ROUTE]`. **Currently disabled** (v3.10.2) because Codex CLI crashes on tool-injected prompts. Infrastructure in `src/prompt-router.ts` ready to re-enable.
+
 | `WORKSPACE_DIR` | `~/.openclaw/workspace` | Project directory scanned for auto-detection |
+
+## Session Resume Policy
+
+Session resume (`--session-id`/`--resume`) is disabled for all providers except Opus. Stale sessions after SIGTERM kills cause failures across all CLIs:
+
+| Provider | Session resume | Failure mode |
+|----------|---------------|-------------|
+| Opus | Enabled | Reliable |
+| Sonnet/Haiku | Disabled | 45% hang rate on corrupted sessions |
+| Gemini | Disabled | Exit 42 on stale sessions |
+| Codex | Disabled | "no rollout found" errors |
 
 ## Tool Protocol (src/tool-protocol.ts)
 
