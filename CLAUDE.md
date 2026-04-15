@@ -39,6 +39,7 @@ OpenClaw Gateway ──(HTTP)──> proxy-server.ts ──(spawn)──> claude
 - **First user message pinning** — original user request is always included in the prompt window, even when conversation exceeds MAX_MESSAGES
 - **Haiku skip in tool loops** — fallback chain skips Haiku when tool_calls are expected (Haiku consistently returns text instead of tool_calls in tool loops)
 - **Improved JSON parser** — tries multiple `{` positions for embedded JSON, rescue-from-raw strategy, handles malformed tool_calls from fallback models
+- **Intelligent prompt routing** — keyword-based model selection: code tasks to Codex, research to Gemini, complex reasoning to Opus, simple tasks to Haiku. Routing rules ported from [elvatis-mcp](https://github.com/elvatis/elvatis-mcp). Only reroutes on strong signals (score >= 2, clear winner).
 
 ## Build & Test
 
@@ -79,6 +80,20 @@ All magic numbers live here. Key values:
 | `COMPACT_TOOL_THRESHOLD` | 8 | Switch to compact tool schema (name+params only) |
 | `TOOL_ROUTING_THRESHOLD` | 8 | (in proxy-server) Was used for Haiku routing, now Sonnet-first with fast fallback |
 | `CONSECUTIVE_TIMEOUT_LIMIT` | 3 | (in cli-runner) Auto-expire session after N consecutive timeouts |
+
+## Prompt Routing (src/prompt-router.ts)
+
+Keyword-based model routing ported from [elvatis-mcp](https://github.com/elvatis/elvatis-mcp).
+Analyzes user message content and routes to the best model for the task.
+
+| Keywords | Routed model | Reason |
+|----------|-------------|--------|
+| code, debug, refactor, typescript, python, shell, bash | Codex (gpt-5.3) | Purpose-built for coding |
+| summarize, analyze, research, document, pdf, image | Gemini Flash | 1M context, multimodal |
+| complex, strategy, plan, architecture, review, audit | Opus | Deep reasoning |
+| quick, simple, classify, format, extract, json, csv | Haiku | Fast and cheap |
+
+Only reroutes when the top match has score >= 2 AND >= 2x the runner-up. Weak signals keep the original model. Debug log: `[ROUTE]`.
 | `WORKSPACE_DIR` | `~/.openclaw/workspace` | Project directory scanned for auto-detection |
 
 ## Tool Protocol (src/tool-protocol.ts)

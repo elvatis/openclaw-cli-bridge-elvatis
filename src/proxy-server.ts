@@ -12,6 +12,7 @@ import http from "node:http";
 import { execSync } from "node:child_process";
 import { randomBytes, createHash } from "node:crypto";
 import { type ChatMessage, type CliToolResult, type ToolDefinition, routeToCliRunner, extractMultimodalParts, cleanupMediaFiles } from "./cli-runner.js";
+import { detectOptimalModel } from "./prompt-router.js";
 import { scheduleTokenRefresh, setAuthLogger, stopTokenRefresh } from "./claude-auth.js";
 import { grokComplete, grokCompleteStream, type ChatMessage as GrokChatMessage } from "./grok-client.js";
 import { geminiComplete, geminiCompleteStream, type ChatMessage as GeminiBrowserChatMessage } from "./gemini-browser.js";
@@ -1040,8 +1041,15 @@ async function handleRequest(
     let result: CliToolResult;
     let usedModel = model;
 
-    // Opus escalation removed — Sonnet works reliably now that cwd is homedir().
-    // If Sonnet fails, the fallback chain handles it (Sonnet → Opus → Haiku → Gemini).
+    // ── Intelligent prompt-based routing (ported from elvatis-mcp) ────────────
+    // Analyzes user message keywords and routes to the best model for the task.
+    // Only reroutes on strong signals (score >= 2, clear winner).
+    const routed = detectOptimalModel(extractUserText(cleanMessages), model);
+    if (routed) {
+      usedModel = routed.model;
+      debugLog("ROUTE", `${model} -> ${usedModel}`, { reason: routed.reason, score: routed.score, keywords: routed.keywords.join(", ") });
+      opts.log(`[cli-bridge] routing ${model} -> ${usedModel} (${routed.reason})`);
+    }
 
     const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined, log: opts.log };
 

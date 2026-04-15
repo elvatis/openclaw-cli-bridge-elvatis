@@ -152,7 +152,7 @@ export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
  */
 export const DEFAULT_MODEL_FALLBACKS: Record<string, string[]> = {
   "cli-claude/claude-opus-4-6":       ["cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-2.5-pro", "cli-claude/claude-haiku-4-5"],
-  "cli-claude/claude-sonnet-4-6":     ["cli-claude/claude-haiku-4-5", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
+  "cli-claude/claude-sonnet-4-6":     ["cli-claude/claude-opus-4-6", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
   "cli-claude/claude-haiku-4-5":      ["cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.1-codex-mini"],
   "cli-gemini/gemini-2.5-pro":        ["cli-gemini/gemini-2.5-flash", "cli-claude/claude-haiku-4-5"],
   "cli-gemini/gemini-3-pro-preview":  ["cli-gemini/gemini-3-flash-preview", "cli-gemini/gemini-2.5-flash"],
