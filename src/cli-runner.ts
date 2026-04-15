@@ -512,24 +512,18 @@ export async function runGemini(
   opts?: { tools?: ToolDefinition[]; log?: (msg: string) => void }
 ): Promise<string> {
   const model = stripPrefix(modelId);
-  const session = getOrCreateSession("gemini", model);
-  const isResume = session.requestCount > 0;
 
-  // -p "" = headless mode trigger; actual prompt arrives via stdin
-  // --approval-mode yolo: auto-approve all tool executions, never ask questions
+  // Session resume disabled for Gemini (exit 42 on stale sessions).
+  // Same issue as Claude and Codex: SIGTERM kills leave sessions in bad state.
   const args = ["-m", model, "-p", "", "--approval-mode", "yolo"];
-  if (isResume) {
-    args.push("--resume", session.sessionId);
-  }
-  const cwd = workdir ?? tmpdir();
+  const cwd = tmpdir();
 
-  // When tools are present, sandwich the conversation between tool instructions.
   const effectivePrompt = opts?.tools?.length
     ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
     : prompt;
 
-  debugLog("GEMINI", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
-    promptLen: effectivePrompt.length, requestCount: session.requestCount,
+  debugLog("GEMINI", `fresh ${model}`, {
+    promptLen: effectivePrompt.length,
   });
 
   const result = await runCli("gemini", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
@@ -537,19 +531,15 @@ export async function runGemini(
   // Filter out [WARN] lines from stderr (Gemini emits noisy permission warnings)
   const cleanStderr = result.stderr
     .split("\n")
-    .filter((l) => !l.startsWith("[WARN]") && !l.startsWith("Loaded cached"))
+    .filter((l) => !l.startsWith("[WARN]") && !l.startsWith("Loaded cached") && !l.includes("YOLO mode"))
     .join("\n")
     .trim();
 
+  // Filter YOLO warnings from stderr - these are not errors
   if (result.exitCode !== 0 && result.stdout.length === 0) {
-    // Session might be invalid — invalidate and let next request create a fresh one
-    if (cleanStderr.includes("session") || cleanStderr.includes("resume") || cleanStderr.includes("not found")) {
-      invalidateSession(model);
-    }
     throw new Error(`gemini exited ${result.exitCode}: ${annotateExitError(result.exitCode, cleanStderr, result.timedOut, modelId)}`);
   }
 
-  recordSessionSuccess(model);
   return result.stdout || cleanStderr;
 }
 
