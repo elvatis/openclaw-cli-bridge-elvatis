@@ -1,63 +1,79 @@
-# STATUS — openclaw-cli-bridge-elvatis
+# STATUS - openclaw-cli-bridge-elvatis
 
-## Current Version: 2.3.0
+## Current Version: 3.10.4
 
-- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis@2.3.0
-- **ClawHub:** openclaw-cli-bridge-elvatis@2.3.0
+- **npm:** @elvatis_com/openclaw-cli-bridge-elvatis@3.10.4
+- **ClawHub:** openclaw-cli-bridge-elvatis@3.10.4
 - **GitHub:** https://github.com/elvatis/openclaw-cli-bridge-elvatis (pushed to main)
-
-## CLI Model Token Limits (corrected in v1.9.2)
-| Model | Context Window | Max Output |
-|---|---|---|
-| Claude Opus 4.6 (CLI) | 1,000,000 | 128,000 |
-| Claude Sonnet 4.6 (CLI) | 1,000,000 | 64,000 |
-| Claude Haiku 4.5 (CLI) | 200,000 | 64,000 |
-| Gemini 2.5 Pro (CLI) | 1,048,576 | 65,535 |
-| Gemini 2.5 Flash (CLI) | 1,048,576 | 65,535 |
-| Gemini 3 Pro Preview (CLI) | 1,048,576 | 65,536 |
-| Gemini 3 Flash Preview (CLI) | 1,048,576 | 65,536 |
+- **Dashboard:** http://127.0.0.1:31337/status
 
 ## Architecture
+
 - **Proxy server:** `http://127.0.0.1:31337/v1` (OpenAI-compatible)
 - **OpenClaw connects via** `vllm` provider with `api: openai-completions`
-- **CLI models** (`cli-claude/*`, `cli-gemini/*`, `openai-codex/*`): full tool calling + multimodal support via prompt injection + autonomous execution
+- **CLI models** (`cli-claude/*`, `cli-gemini/*`, `openai-codex/*`): tool calling via prompt injection + JSON parsing
 - **Web-session models** (`web-grok/*`, `web-gemini/*`): browser-based, require `/xxx-login`
 - **Codex models** (`openai-codex/*`): OAuth auth bridge
 - **BitNet** (`local-bitnet/*`): local CPU inference
 
-## Tool Calling Support (v2.3.0)
-All CLI models now support the OpenAI tool calling protocol:
-- Tool definitions are injected into the prompt as structured instructions
-- CLI output is parsed for structured `tool_calls` JSON responses
-- Responses are returned in standard OpenAI `tool_calls` format with `finish_reason: "tool_calls"`
-- Multimodal content (images, audio) is extracted to temp files and passed to CLIs
-- All models run in autonomous mode: Claude `bypassPermissions`, Gemini `yolo`, Codex `full-auto`
+## Key Design Decisions (v3.x)
 
-## All 4 Browser Providers
-| Provider | Models | Login Cmd | Profile Dir |
-|---|---|---|---|
-| Grok | web-grok/grok-3, grok-3-fast, grok-3-mini, grok-3-mini-fast | /grok-login | ~/.openclaw/grok-profile/ |
-| Gemini | web-gemini/gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash | /gemini-login | ~/.openclaw/gemini-profile/ |
-| Claude | web-claude/* (removed in v1.6.x) | /claude-login | ~/.openclaw/claude-profile/ |
-| ChatGPT | web-chatgpt/* (removed in v1.6.x) | /chatgpt-login | ~/.openclaw/chatgpt-profile/ |
+- **Claude cwd = homedir()** (v3.8.0 ROOT CAUSE): running from project dirs triggers agentic mode, 90% failure rate. Fixed.
+- **Session resume: Opus only** (v3.10.3): all other providers use fresh calls. Stale sessions after SIGTERM cause failures across all CLIs.
+- **Sonnet 60s stale timeout** (v3.9.1): real-world tool reasoning with 21 tools takes 28-50s
+- **Opus 90s stale timeout** (v3.7.0): long-form generation needs think time
+- **Prompt routing** (v3.10.0, disabled v3.10.2): keyword-based routing to Codex/Gemini. Infrastructure in `src/prompt-router.ts`, disabled because Codex CLI crashes on tool-injected prompts.
+- **Generic skill auto-detection** (v3.6.0): scans `~/.openclaw/skills/` for SKILL.md files
+- **First user message pinning** (v3.5.0): original request survives prompt windowing
+- **Haiku skip in tool loops** (v3.5.0): Haiku returns text instead of tool_calls ~80% of the time
+- **Task payload rescue** (v3.9.1): detects subagent payloads in `{"content":"..."}` and converts to tool_calls
+- **JSON newline sanitization** (v3.8.2): models output raw 0x0A in JSON strings
+
+## Session Resume Policy
+
+| Provider | Session resume | Failure mode |
+|----------|---------------|-------------|
+| Opus | Enabled | Reliable |
+| Sonnet/Haiku | Disabled | 45% hang rate on corrupted sessions |
+| Gemini | Disabled | Exit 42 on stale sessions |
+| Codex | Disabled | "no rollout found" errors |
+
+## Fallback Chain
+
+- Sonnet: Opus, Gemini Flash, Codex
+- Opus: Sonnet, Gemini Pro, Haiku
 
 ## Stats
-- 22+ total models (7 CLI + 5 Codex + 4 Grok + 4 Gemini + 1 BitNet)
-- Persistent Chromium profiles survive gateway restarts
-- /bridge-status shows cookie-based status
 
-## Release History (recent)
-- v2.3.0 (2026-04-10): Tool calling protocol, multimodal content, autonomous execution mode
-- v2.2.1 (2026-04-10): Fix vllm apiKey corruption (401 Unauthorized) + harden config-patcher to re-patch on wrong apiKey
-- v2.2.0 (2026-04-09): Fix log spam (module-level guards), remove fuser -k restart loops, session restore gateway-only, EADDRINUSE graceful handling
-- v2.1.0 (2026-03-19): Issue #6 workdir isolation, Issue #4 session mgmt enhancements, Issue #2 codex auth auto-import
-- v2.0.0: Major version bump
-- v1.9.2 (2026-03-15): Fix maxTokens/contextWindow for all CLI_MODELS (were 8192, now correct per vendor specs)
-- v1.9.1: Previous stable
-- v1.7.3 (2026-03-13): Fix cookie expiry tracking
-- v1.7.0 (2026-03-13): Startup restore timeout fix, auto-relogin, vitest suite
-- v1.6.0 (2026-03-13): Persistent Chromium profiles for all 4 providers
+- 292 unit tests across 20 files (all passing)
+- 30/30 orchestration test across 5 providers
+- 22+ total models (7 CLI + 5 Codex + 4 Grok + 4 Gemini + 1 BitNet)
+- Log rotation at 1MB with 2 backup files
+
+## Release History (v3.x)
+
+| Version | Date | Highlights |
+|---------|------|-----------|
+| v3.10.4 | 2026-04-15 | Full changelog update, session resume policy docs |
+| v3.10.3 | 2026-04-15 | Gemini session resume disabled, YOLO stderr filtered |
+| v3.10.2 | 2026-04-15 | Routing disabled, Codex cwd + session fix |
+| v3.10.1 | 2026-04-15 | Cross-provider routing only |
+| v3.10.0 | 2026-04-15 | Prompt routing ported from elvatis-mcp |
+| v3.9.1 | 2026-04-15 | Sonnet 60s stale, task payload rescue |
+| v3.9.0 | 2026-04-13 | Full changelog v3.4.0-v3.8.2 |
+| v3.8.2 | 2026-04-13 | JSON newline sanitization |
+| v3.8.1 | 2026-04-13 | Log rotation 1MB |
+| v3.8.0 | 2026-04-13 | ROOT CAUSE: cwd=homedir(), orchestration test |
+| v3.7.0 | 2026-04-12 | Opus escalation, session overhaul, skill detection |
+| v3.6.0 | 2026-04-12 | Generic skill auto-detection |
+| v3.5.0 | 2026-04-12 | First-user-message pinning, Haiku skip |
+| v3.4.0 | 2026-04-12 | Workspace detection, timeout rotation |
+| v3.3.0 | 2026-04-12 | Session resume for all providers |
+| v3.0.0 | 2026-04-12 | Dashboard v2 |
 
 ## Known Issues
-- CLI models cannot do tool calls (by design — plain text proxy)
-- Opus via CLI proxy may halluzinate XML tool-call tags when maxTokens was too low (fixed in v1.9.2)
+
+- **Codex CLI crashes** on tool-injected prompts (exit 1 on startup). Codex routing disabled.
+- **Gemini CLI exit 42** on stale sessions. Fixed by disabling session resume.
+- **Long-form generation** (15KB+ Lexical JSON) can exceed Opus's 90s stale timeout.
+- **Agent delegation disabled**: `openclaw agent` is single-turn only.
