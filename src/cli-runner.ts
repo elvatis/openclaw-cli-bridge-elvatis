@@ -708,9 +708,10 @@ export async function runClaude(
   });
 
   // Opus gets 90s stale timeout — it needs think time for long-form generation (blog posts, Lexical JSON)
-  // Sonnet/Haiku hang silently on large tool prompts or long responses.
-  // Set stale timeout for all Claude models to 2 minutes (120_000ms) to allow for longer processing.
-  const staleMs = 120_000; // 2 minutes for all Claude models (Opus, Sonnet, Haiku)
+  // Opus: 90s stale timeout (long-form generation needs think time).
+  // Sonnet: 60s (real-world tool reasoning with 21 tools can take 30-50s).
+  // Haiku: 30s (default — fast model, if silent for 30s it's hung).
+  const staleMs = isOpus ? 90_000 : model.includes("sonnet") ? 60_000 : undefined;
   const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log, staleTimeoutMs: staleMs });
 
   // Session succeeded — update registry
