@@ -90,10 +90,8 @@ Analyzes user message content and routes to the best model for the task.
 |----------|-------------|--------|
 | code, debug, refactor, typescript, python, shell, bash | Codex (gpt-5.3) | Purpose-built for coding |
 | summarize, analyze, research, document, pdf, image | Gemini Flash | 1M context, multimodal |
-| complex, strategy, plan, architecture, review, audit | Opus | Deep reasoning |
-| quick, simple, classify, format, extract, json, csv | Haiku | Fast and cheap |
 
-Only reroutes when the top match has score >= 2 AND >= 2x the runner-up. Weak signals keep the original model. Debug log: `[ROUTE]`.
+Cross-provider only: routes to Codex or Gemini when there is a clear advantage. Claude-to-Claude rerouting (Sonnet/Opus/Haiku) is handled by the OpenClaw gateway, which has 60+ models with direct API access. Only reroutes when top match has score >= 2 AND >= 2x the runner-up. Debug log: `[ROUTE]`.
 | `WORKSPACE_DIR` | `~/.openclaw/workspace` | Project directory scanned for auto-detection |
 
 ## Tool Protocol (src/tool-protocol.ts)

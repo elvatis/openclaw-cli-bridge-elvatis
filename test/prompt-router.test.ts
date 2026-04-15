@@ -15,16 +15,17 @@ describe("prompt-router", () => {
       expect(matches[0].score).toBeGreaterThanOrEqual(2);
     });
 
-    it("matches complex reasoning keywords to Opus", () => {
+    it("does not route complex reasoning (left to gateway)", () => {
       const matches = matchRules("Design a complex architecture and review the strategy");
-      expect(matches[0].model).toBe("cli-claude/claude-opus-4-6");
-      expect(matches[0].score).toBeGreaterThanOrEqual(2);
+      // No Opus/Haiku in routing rules, cross-provider only
+      const claudeMatch = matches.find(m => m.model.includes("claude"));
+      expect(claudeMatch).toBeUndefined();
     });
 
-    it("matches simple task keywords to Haiku", () => {
+    it("does not route simple tasks to Haiku (left to gateway)", () => {
       const matches = matchRules("Convert this to JSON format and extract the fields");
-      expect(matches[0].model).toBe("cli-claude/claude-haiku-4-5");
-      expect(matches[0].score).toBeGreaterThanOrEqual(2);
+      const claudeMatch = matches.find(m => m.model.includes("claude"));
+      expect(claudeMatch).toBeUndefined();
     });
 
     it("returns empty for ambiguous prompts", () => {
@@ -95,17 +96,14 @@ describe("prompt-router", () => {
       expect(result).toBeNull();
     });
 
-    it("returns null for ambiguous prompts (no clear winner)", () => {
-      // This prompt has keywords for both Codex (code) and Gemini (analyze, research)
+    it("does not reroute to Claude models (gateway handles that)", () => {
       const result = detectOptimalModel(
-        "Analyze the code and research the approach",
+        "Design a complex architecture and plan the strategy",
         "cli-claude/claude-sonnet-4-6",
       );
-      // Should return null because scores are too close (no 2x winner)
-      // OR return one of them if one clearly dominates
+      // Should NOT route to Opus (cross-provider only)
       if (result) {
-        // If it does route, the winner should have >= 2x the runner-up
-        expect(result.score).toBeGreaterThanOrEqual(2);
+        expect(result.model).not.toContain("claude");
       }
     });
 
