@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.10.5`
+**Current version:** `3.10.7`
 
 ---
 
@@ -153,7 +153,7 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 
 ## Requirements
 
-- [OpenClaw](https://openclaw.ai) gateway (tested with `2026.3.x`)
+- [OpenClaw](https://openclaw.ai) gateway (tested with `2026.4.x`)
 - One or more of:
   - [`@openai/codex`](https://github.com/openai/codex) — `npm i -g @openai/codex` + `codex login`
   - [`@google/gemini-cli`](https://github.com/google-gemini/gemini-cli) — `npm i -g @google/gemini-cli` + `gemini auth`
@@ -398,13 +398,20 @@ Model fallback (v1.9.0):
 ```bash
 npm run lint        # eslint (TypeScript-aware)
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (261 tests)
+npm test            # vitest run (278+ tests)
 npm run ci          # lint + typecheck + test
 ```
 
 ---
 
 ## Changelog
+
+### v3.10.7
+- **chore:** Dependency bumps — `@google/genai` 1.49.0→1.50.1, `playwright` 1.58.2→1.59.1, `protobufjs` 7.5.4→7.5.6, `eslint` 10.1.0→10.2.1, `typescript-eslint` 8.58.1→8.59.1, `vitest` 4.1.2→4.1.5, `postcss` 8.5.8→8.5.12
+- **docs:** README updated — version, OpenClaw requirement bumped to 2026.4.x, test count corrected
+
+### v3.10.6
+- **fix:** Pass `GEMINI_CLI_TRUST_WORKSPACE=1` env var to Gemini CLI subprocess — prevents Gemini from refusing to run in trusted workspace directories
 
 ### v3.10.5
 - **docs:** Updated `.ai/handoff/` files (STATUS.md, NEXT_ACTIONS.md, DASHBOARD.md) from v2.3.0 to v3.10.4. Added provider health results, session resume policy, key files reference.
