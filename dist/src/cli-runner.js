@@ -215,6 +215,8 @@ function buildMinimalEnv() {
         // Required for Claude Code OAuth (Gnome Keyring / libsecret access)
         "XDG_RUNTIME_DIR",
         "DBUS_SESSION_BUS_ADDRESS",
+        // Gemini CLI: trust the working directory in headless/automated environments
+        "GEMINI_CLI_TRUST_WORKSPACE",
     ]) {
         const v = pick(key);
         if (v)
@@ -283,12 +285,13 @@ export function runCli(cmd, args, prompt, timeoutMs = DEFAULT_CLI_TIMEOUT_MS, op
         timeoutTimer = setTimeout(() => {
             doKill(`timeout after ${Math.round(timeoutMs / 1000)}s`);
         }, timeoutMs);
-        // ── Stale-output detection: kill if no stdout for STALE_OUTPUT_TIMEOUT_MS
-        if (STALE_OUTPUT_TIMEOUT_MS > 0) {
+        // ── Stale-output detection: kill if no stdout for staleTimeoutMs
+        const effectiveStaleTimeout = opts.staleTimeoutMs ?? STALE_OUTPUT_TIMEOUT_MS;
+        if (effectiveStaleTimeout > 0) {
             const checkInterval = 15_000; // check every 15s
             staleTimer = setInterval(() => {
                 const silent = Date.now() - lastOutputAt;
-                if (silent >= STALE_OUTPUT_TIMEOUT_MS) {
+                if (silent >= effectiveStaleTimeout) {
                     doKill(`stale output — no stdout for ${Math.round(silent / 1000)}s`);
                 }
             }, checkInterval);
@@ -398,37 +401,27 @@ export function annotateExitError(exitCode, stderr, timedOut, model) {
  */
 export async function runGemini(prompt, modelId, timeoutMs, workdir, opts) {
     const model = stripPrefix(modelId);
-    const session = getOrCreateSession("gemini", model);
-    const isResume = session.requestCount > 0;
-    // -p "" = headless mode trigger; actual prompt arrives via stdin
-    // --approval-mode yolo: auto-approve all tool executions, never ask questions
+    // Session resume disabled for Gemini (exit 42 on stale sessions).
+    // Same issue as Claude and Codex: SIGTERM kills leave sessions in bad state.
     const args = ["-m", model, "-p", "", "--approval-mode", "yolo"];
-    if (isResume) {
-        args.push("--resume", session.sessionId);
-    }
-    const cwd = workdir ?? tmpdir();
-    // When tools are present, sandwich the conversation between tool instructions.
+    const cwd = tmpdir();
     const effectivePrompt = opts?.tools?.length
         ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
         : prompt;
-    debugLog("GEMINI", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
-        promptLen: effectivePrompt.length, requestCount: session.requestCount,
+    debugLog("GEMINI", `fresh ${model}`, {
+        promptLen: effectivePrompt.length,
     });
     const result = await runCli("gemini", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
     // Filter out [WARN] lines from stderr (Gemini emits noisy permission warnings)
     const cleanStderr = result.stderr
         .split("\n")
-        .filter((l) => !l.startsWith("[WARN]") && !l.startsWith("Loaded cached"))
+        .filter((l) => !l.startsWith("[WARN]") && !l.startsWith("Loaded cached") && !l.includes("YOLO mode"))
         .join("\n")
         .trim();
+    // Filter YOLO warnings from stderr - these are not errors
     if (result.exitCode !== 0 && result.stdout.length === 0) {
-        // Session might be invalid — invalidate and let next request create a fresh one
-        if (cleanStderr.includes("session") || cleanStderr.includes("resume") || cleanStderr.includes("not found")) {
-            invalidateSession(model);
-        }
         throw new Error(`gemini exited ${result.exitCode}: ${annotateExitError(result.exitCode, cleanStderr, result.timedOut, modelId)}`);
     }
-    recordSessionSuccess(model);
     return result.stdout || cleanStderr;
 }
 // ──────────────────────────────────────────────────────────────────────────────
@@ -529,7 +522,9 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
     await ensureClaudeToken();
     const model = stripPrefix(modelId);
     const session = getOrCreateSession("claude", model);
-    const isResume = session.requestCount > 0;
+    // Session resume: enabled for Opus (reliable), disabled for Sonnet/Haiku (45% hang rate)
+    const isOpus = model.includes("opus");
+    const isResume = isOpus && session.requestCount > 0;
     const args = [
         "-p",
         "--output-format", "text",
@@ -540,21 +535,32 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
     if (isResume) {
         args.push("--resume", session.sessionId);
     }
-    else {
+    else if (isOpus) {
         args.push("--session-id", session.sessionId);
     }
-    // When tools are present, sandwich the conversation between tool instructions.
-    // On resume: only send the last user message (Claude has the full history).
-    // On first request: send the full prompt with tool block.
+    // Sonnet/Haiku: no session args — fresh call every time
+    // On resume: only send the last user message (Opus has the full history).
+    // On fresh: send the full prompt with tool block.
     const effectivePrompt = opts?.tools?.length
-        ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
+        ? (isResume
+            ? prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
+            : buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else.")
         : prompt;
-    const cwd = workdir ?? homedir();
-    debugLog("CLAUDE", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
+    // CRITICAL: Always use homedir() for Claude CLI. Running from a project directory
+    // triggers Claude Code's agentic mode, which ignores our tool injection and
+    // treats it as a "prompt injection attempt". This was the root cause of the 90%
+    // Sonnet failure rate. Workspace context is injected as text in the prompt instead.
+    const cwd = homedir();
+    debugLog("CLAUDE", `${isResume ? "resume" : "fresh"} ${model}${isResume ? ` session=${session.sessionId.slice(0, 8)}` : ""}`, {
         promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024),
-        requestCount: session.requestCount, cwd, timeoutMs: Math.round(timeoutMs / 1000),
+        cwd, timeoutMs: Math.round(timeoutMs / 1000), ...(isOpus ? { requestCount: session.requestCount } : {}),
     });
-    const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
+    // Opus gets 90s stale timeout — it needs think time for long-form generation (blog posts, Lexical JSON)
+    // Opus: 90s stale timeout (long-form generation needs think time).
+    // Sonnet: 60s (real-world tool reasoning with 21 tools can take 30-50s).
+    // Haiku: 30s (default — fast model, if silent for 30s it's hung).
+    const staleMs = isOpus ? 90_000 : model.includes("sonnet") ? 60_000 : undefined;
+    const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log, staleTimeoutMs: staleMs });
     // Session succeeded — update registry
     if (result.exitCode === 0 || result.stdout.length > 0) {
         recordSessionSuccess(model);
@@ -622,12 +628,9 @@ function ensureGitRepo(dir) {
  */
 export async function runCodex(prompt, modelId, timeoutMs, workdir, opts) {
     const model = stripPrefix(modelId);
-    const session = getOrCreateSession("codex", model);
-    const isResume = session.requestCount > 0;
-    // Codex uses "exec resume <session-id>" for resume, "exec" for new
-    const args = isResume
-        ? ["exec", "resume", session.sessionId, "--model", model, "--full-auto"]
-        : ["exec", "--model", model, "--full-auto"];
+    // Session resume disabled for Codex (same issue as Sonnet: stale sessions cause
+    // "thread/resume failed: no rollout found" errors). Fresh calls every time.
+    const args = ["exec", "--model", model, "--full-auto"];
     // Codex supports native image input via -i flag
     if (opts?.mediaFiles?.length) {
         for (const f of opts.mediaFiles) {
@@ -636,21 +639,20 @@ export async function runCodex(prompt, modelId, timeoutMs, workdir, opts) {
             }
         }
     }
-    const cwd = workdir ?? homedir();
+    // Use homedir for Codex too (same reason as Claude: workspace dirs cause issues).
+    // Codex needs a git repo, so we ensure homedir has one.
+    const cwd = homedir();
     ensureGitRepo(cwd);
     const effectivePrompt = opts?.tools?.length
         ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
         : prompt;
-    debugLog("CODEX", `${isResume ? "resume" : "new"} ${model} session=${session.sessionId.slice(0, 8)}`, {
-        promptLen: effectivePrompt.length, requestCount: session.requestCount,
+    debugLog("CODEX", `fresh ${model}`, {
+        promptLen: effectivePrompt.length,
     });
     const result = await runCli("codex", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
     if (result.exitCode !== 0 && result.stdout.length === 0) {
-        if (isResume)
-            invalidateSession(model); // session might be stale
         throw new Error(`codex exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, result.timedOut, modelId)}`);
     }
-    recordSessionSuccess(model);
     return result.stdout || result.stderr;
 }
 // ──────────────────────────────────────────────────────────────────────────────
@@ -887,11 +889,11 @@ export async function routeToCliRunner(model, messages, timeoutMs, opts = {}) {
             debugLog("WORKSPACE", `auto-detected project "${detected.name}"`, { path: detected.path });
         }
     }
-    // Skill hints: inject pointers to local skill files when user prompt matches known patterns
+    // Skill hints: inject at END of prompt so they're the freshest context (not buried under system msg)
     const skillHints = detectSkillHints(userText);
     if (skillHints) {
-        prompt = `${skillHints}\n\n${prompt}`;
-        debugLog("SKILL-HINT", "injected skill hints", { len: skillHints.length });
+        prompt = `${prompt}\n\n${skillHints}`;
+        debugLog("SKILL-HINT", "injected skill hints at end of prompt", { len: skillHints.length });
     }
     // Strip "vllm/" prefix if present — OpenClaw sends the full provider path
     // (e.g. "vllm/cli-claude/claude-sonnet-4-6") but the router only needs the
@@ -925,7 +927,15 @@ export async function routeToCliRunner(model, messages, timeoutMs, opts = {}) {
     if (hasTools) {
         return parseToolCallResponse(rawText);
     }
-    // No tools — wrap plain text
+    // No tools — but check if the model still wrapped its response in {"content":"..."} JSON
+    // (this happens when tool instructions from a previous turn are still in the conversation)
+    try {
+        const parsed = JSON.parse(rawText.trim());
+        if (typeof parsed?.content === "string") {
+            return { content: parsed.content };
+        }
+    }
+    catch { /* not JSON, that's fine */ }
     return { content: rawText };
 }
 // ──────────────────────────────────────────────────────────────────────────────

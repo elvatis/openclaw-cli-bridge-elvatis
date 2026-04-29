@@ -78,6 +78,8 @@ export interface RunCliOptions {
      */
     cwd?: string;
     timeoutMs?: number;
+    /** Override stale-output timeout (ms). Opus needs longer (90s) for long-form generation. */
+    staleTimeoutMs?: number;
     /** Optional logger for timeout events. */
     log?: (msg: string) => void;
 }
