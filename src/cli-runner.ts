@@ -277,6 +277,8 @@ function buildMinimalEnv(): Record<string, string> {
     // Required for Claude Code OAuth (Gnome Keyring / libsecret access)
     "XDG_RUNTIME_DIR",
     "DBUS_SESSION_BUS_ADDRESS",
+    // Gemini CLI: trust the working directory in headless/automated environments
+    "GEMINI_CLI_TRUST_WORKSPACE",
   ]) {
     const v = pick(key);
     if (v) env[key] = v;
