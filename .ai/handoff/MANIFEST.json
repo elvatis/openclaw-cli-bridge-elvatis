@@ -2,12 +2,12 @@
   "aahp_version": "3.0",
   "project": "openclaw-cli-bridge-elvatis",
   "last_session": {
-    "agent": "claude-opus-4-7",
+    "agent": "claude-code",
     "session_id": "close-t010-publish-supersession-2026-04-30",
-    "timestamp": "2026-04-30T16:35:00Z",
+    "timestamp": "2026-04-30T14:37:23.199Z",
     "commit": "99298b6",
     "phase": "release",
-    "duration_minutes": 15
+    "duration_minutes": 2
   },
   "files": {
     "STATUS.md": {
@@ -158,10 +158,9 @@
         "T-011"
       ],
       "created": "2026-03-11T16:30:00Z",
-      "completed": "2026-04-30T16:35:00Z",
-      "completion_note": "Closed by supersession. v0.2.25 was published as part of the release sequence that reached v3.10.7 (npm + GitHub, 2026-04-29). ClawHub last verified at v3.10.4; clawhub CLI not available in current env to push v3.10.7.",
       "github_issue": 29,
-      "github_repo": "elvatis/openclaw-cli-bridge-elvatis"
+      "github_repo": "elvatis/openclaw-cli-bridge-elvatis",
+      "completed": "2026-04-30T14:37:23.199Z"
     },
     "T-011": {
       "title": "Session-safe staged model switching (/cli-apply, /cli-pending, --now)",
