@@ -2,12 +2,12 @@
   "aahp_version": "3.0",
   "project": "openclaw-cli-bridge-elvatis",
   "last_session": {
-    "agent": "claude-opus-4-6",
-    "session_id": "fix-log-spam-2026-04-09",
-    "timestamp": "2026-04-09T14:30:00Z",
-    "commit": "2704a46",
-    "phase": "fix",
-    "duration_minutes": 120
+    "agent": "claude-opus-4-7",
+    "session_id": "close-t010-publish-supersession-2026-04-30",
+    "timestamp": "2026-04-30T16:35:00Z",
+    "commit": "99298b6",
+    "phase": "release",
+    "duration_minutes": 15
   },
   "files": {
     "STATUS.md": {
@@ -20,7 +20,7 @@
       "checksum": "sha256:2a2c1696de45106e01063afa35859955f0d8827c1ea3bbc117d7b46769f89a6c",
       "updated": "2026-03-11T17:39:00Z",
       "lines": 48,
-      "summary": "1 task ready: T-010 \u2014 Publish v0.2.25. No blockers."
+      "summary": "1 task ready: T-010 — Publish v0.2.25. No blockers."
     },
     "LOG.md": {
       "checksum": "sha256:b23892518fd5a5faa0b402bd2553d1d1cbca7b46675ba6dd4d413e1cbf03e19d",
@@ -32,7 +32,7 @@
       "checksum": "sha256:cf1c47a18f52e0b94b932177d4e9b455a0e3ae7f29b1a34802088ffa7ad98cef",
       "updated": "2026-03-11T17:39:00Z",
       "lines": 50,
-      "summary": "Build \u2705 Tests 51/51 \u2705. Local v0.2.25, last published v0.2.23. T-010 (publish) ready."
+      "summary": "Build ✅ Tests 51/51 ✅. Local v0.2.25, last published v0.2.23. T-010 (publish) ready."
     },
     "TRUST.md": {
       "checksum": "sha256:cbfc8dcc17c00f8da8e220eba106aac56c63782caac655c30ba60c463994adc1",
@@ -50,10 +50,10 @@
       "checksum": "sha256:f9224bf9e993863b2b9e17f36ee605950359ba43d420fa7b4c829a6fbdc92482",
       "updated": "2026-03-07T00:00:00Z",
       "lines": 152,
-      "summary": "4-phase AAHP pipeline: Research \u2192 Architecture \u2192 Implementation \u2192 Review \u2192 Handoff."
+      "summary": "4-phase AAHP pipeline: Research → Architecture → Implementation → Review → Handoff."
     }
   },
-  "quick_context": "v2.2.0 pushed to main. Key changes: module-level guards prevent log spam from per-agent register() calls, removed fuser -k (caused restart loops), session restore only in gateway mode (CLI commands no longer hang), EADDRINUSE graceful handling. Plugin deployed on operator production server.",
+  "quick_context": "v3.10.7 published to npm + GitHub on 2026-04-29. T-010 (originally 'Publish v0.2.25') closed by supersession - that work was completed via the v0.2.25 -> v3.10.7 release sequence. ClawHub publish step skipped (clawhub CLI not in this env; v3.10.4 last on ClawHub per STATUS.md). MANIFEST tasks list (T-001..T-017) is several release cycles behind code reality - see git log/releases for actual history.",
   "token_budget": {
     "manifest_only": 90,
     "manifest_plus_core": 380,
@@ -152,12 +152,16 @@
     },
     "T-010": {
       "title": "Publish v0.2.25 to GitHub + npm + ClawHub",
-      "status": "ready",
+      "status": "done",
       "priority": "medium",
       "depends_on": [
         "T-011"
       ],
-      "created": "2026-03-11T16:30:00Z"
+      "created": "2026-03-11T16:30:00Z",
+      "completed": "2026-04-30T16:35:00Z",
+      "completion_note": "Closed by supersession. v0.2.25 was published as part of the release sequence that reached v3.10.7 (npm + GitHub, 2026-04-29). ClawHub last verified at v3.10.4; clawhub CLI not available in current env to push v3.10.7.",
+      "github_issue": 29,
+      "github_repo": "elvatis/openclaw-cli-bridge-elvatis"
     },
     "T-011": {
       "title": "Session-safe staged model switching (/cli-apply, /cli-pending, --now)",
@@ -178,5 +182,5 @@
       "completed": "2026-04-09T16:30:00Z"
     }
   },
-  "version": "2.2.0"
+  "version": "3.10.7"
 }
