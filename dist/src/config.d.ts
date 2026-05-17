@@ -52,6 +52,11 @@ export declare const TOOL_HEAVY_THRESHOLD = 10;
  * Haiku handles tool calls in ~11s vs Sonnet's 80-120s (and Sonnet hangs intermittently).
  */
 export declare const TOOL_ROUTING_THRESHOLD = 8;
+/**
+ * Prompt size threshold (bytes) for escalating Sonnet to Opus.
+ * Sonnet hangs ~50% at 30KB+ prompts. Opus handles large contexts reliably.
+ */
+export declare const OPUS_ESCALATION_THRESHOLD = 30000;
 /** Max characters per message content before truncation. */
 export declare const MAX_MSG_CHARS = 4000;
 /** Auto-cleanup threshold: sessions older than this are killed and removed (ms). */

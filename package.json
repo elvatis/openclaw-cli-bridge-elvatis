@@ -3,13 +3,21 @@
   "version": "3.10.7",
   "description": "Bridges gemini, claude, and codex CLI tools as OpenClaw model providers. Reads existing CLI auth without re-login.",
   "type": "module",
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
   "openclaw": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ]
   },
   "scripts": {
     "build": "tsc --noEmitOnError false",
+    "prepublishOnly": "npm run build",
     "typecheck": "tsc -p tsconfig.check.json",
     "test": "vitest run",
     "lint": "eslint .",

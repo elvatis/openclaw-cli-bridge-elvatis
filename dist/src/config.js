@@ -60,6 +60,11 @@ export const TOOL_HEAVY_THRESHOLD = 10;
  * Haiku handles tool calls in ~11s vs Sonnet's 80-120s (and Sonnet hangs intermittently).
  */
 export const TOOL_ROUTING_THRESHOLD = 8;
+/**
+ * Prompt size threshold (bytes) for escalating Sonnet to Opus.
+ * Sonnet hangs ~50% at 30KB+ prompts. Opus handles large contexts reliably.
+ */
+export const OPUS_ESCALATION_THRESHOLD = 30_000;
 /** Max characters per message content before truncation. */
 export const MAX_MSG_CHARS = 4_000;
 // ──────────────────────────────────────────────────────────────────────────────
@@ -117,7 +122,7 @@ export const DEFAULT_MODEL_TIMEOUTS = {
  */
 export const DEFAULT_MODEL_FALLBACKS = {
     "cli-claude/claude-opus-4-6": ["cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-2.5-pro", "cli-claude/claude-haiku-4-5"],
-    "cli-claude/claude-sonnet-4-6": ["cli-claude/claude-haiku-4-5", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
+    "cli-claude/claude-sonnet-4-6": ["cli-claude/claude-opus-4-6", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
     "cli-claude/claude-haiku-4-5": ["cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.1-codex-mini"],
     "cli-gemini/gemini-2.5-pro": ["cli-gemini/gemini-2.5-flash", "cli-claude/claude-haiku-4-5"],
     "cli-gemini/gemini-3-pro-preview": ["cli-gemini/gemini-3-flash-preview", "cli-gemini/gemini-2.5-flash"],
