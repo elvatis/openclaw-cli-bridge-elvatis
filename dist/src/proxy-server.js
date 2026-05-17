@@ -416,9 +416,6 @@ async function handleRequest(req, res, opts) {
         const lastUserMsg = [...cleanMessages].reverse().find(m => m.role === "user");
         const promptPreview = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.slice(0, 80) : "";
         debugLog("REQ", `${model} start`, { msgs: cleanMessages.length, tools: tools?.length ?? 0, stream, media: mediaFiles.length, promptPreview: promptPreview.slice(0, 60) });
-        if (hasTools && tools.length > 0) {
-            debugLog("TOOLS", `${tools.length} tools available`, { names: tools.map(t => t.function?.name ?? t.name ?? "?").join(", ") });
-        }
         // Track active request for dashboard
         activeRequests.set(id, { id, model, startedAt: Date.now(), messageCount: cleanMessages.length, toolCount: tools?.length ?? 0, promptPreview });
         // ── Grok web-session routing ──────────────────────────────────────────────
@@ -875,11 +872,13 @@ async function handleRequest(req, res, opts) {
         // ── CLI runner routing (Gemini / Claude Code / Codex) ──────────────────────
         let result;
         let usedModel = model;
-        // ── Smart tool routing: Sonnet first (better reasoning), fast fallback to Haiku ──
-        // Sonnet picks the right tools but intermittently hangs on large prompts.
-        // Strategy: let Sonnet try first — if it responds, great (better tool selection).
-        // The stale-output detector (60s) kills it fast if it hangs, then fallback to Haiku.
-        // This preserves Sonnet's intelligence for tool selection while keeping Haiku as safety net.
+        // ── Intelligent prompt-based routing (ported from elvatis-mcp) ────────────
+        // Disabled: the gateway should handle model selection. The bridge's role is to
+        // execute CLI calls reliably, not to second-guess the gateway's model choice.
+        // Codex routing caused failures (Codex CLI crashes on startup with our tool prompts).
+        // Re-enable when Codex CLI is stable or when routing targets are verified working.
+        // const routed = detectOptimalModel(extractUserText(cleanMessages), model);
+        const routed = null;
         const routeOpts = { workdir, tools: hasTools ? tools : undefined, mediaFiles: mediaFiles.length ? mediaFiles : undefined, log: opts.log };
         // ── Provider session: ensure a persistent session for this model ────────
         // Extract provider prefix from model (e.g. "cli-claude" from "cli-claude/claude-sonnet-4-6")
@@ -911,6 +910,12 @@ async function handleRequest(req, res, opts) {
             sseHeadersSent = true;
             res.write(": keepalive\n\n");
             keepaliveInterval = setInterval(() => { res.write(": keepalive\n\n"); }, SSE_KEEPALIVE_INTERVAL_MS);
+            // Send visible routing notification so the webchat shows what's happening
+            if (routed) {
+                const modelShort = usedModel.split("/").pop() ?? usedModel;
+                const routeChunk = { id, object: "chat.completion.chunk", created, model: usedModel, choices: [{ index: 0, delta: { role: "assistant", content: `[Routing to ${modelShort}]\n\n` }, finish_reason: null }] };
+                res.write(`data: ${JSON.stringify(routeChunk)}\n\n`);
+            }
         }
         // ── Progress notifications: send visible status updates to the webchat ──
         // Users shouldn't stare at a blank screen for minutes without feedback.

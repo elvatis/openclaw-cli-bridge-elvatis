@@ -178,13 +178,19 @@ function normalizeResult(obj) {
         const content = typeof obj.content === "string" ? obj.content : null;
         return { content, tool_calls: toolCalls };
     }
-    // Check for content field — but rescue embedded tool_calls JSON from inside content strings.
-    // Models sometimes wrap tool calls inside a content string:
-    //   {"content":"I'll write that file.\n{\"tool_calls\":[...]}"}
+    // Check for content field — but rescue embedded tool_calls or task payloads from inside content strings.
     if (typeof obj.content === "string") {
+        // Rescue tool_calls embedded in content: {"content":"...\n{\"tool_calls\":[...]}"}
         const rescued = tryRescueToolCallsFromContent(obj.content);
         if (rescued)
             return rescued;
+        // Rescue task/subagent payloads: model put a tool call payload in content instead of tool_calls.
+        // e.g. {"content":"{\"task\":{\"message\":\"...\",\"runtime\":\"subagent\",...}}"}
+        const rescuedTask = tryRescueTaskFromContent(obj.content);
+        if (rescuedTask) {
+            debugLog("PARSE", "rescued task payload from content → tool_calls", { tool: rescuedTask.tool_calls[0].function.name });
+            return rescuedTask;
+        }
         return { content: obj.content };
     }
     // Unknown structure — serialize as content
@@ -196,6 +202,52 @@ function normalizeResult(obj) {
  *   {"content":"Some text\n{\"tool_calls\":[...]}"}
  *   {"content":"{\"tool_calls\":[{\"name\":\"write\",...}]}"}
  */
+/**
+ * Rescue task/subagent payloads from content strings.
+ * Models sometimes put a tool call payload in {"content":"..."} instead of {"tool_calls":[...]}.
+ * Detect patterns like {"task":{...,"runtime":"subagent"}} and convert to a sessions_spawn tool call.
+ */
+function tryRescueTaskFromContent(content) {
+    // Must contain a task-like signature
+    if (!content.includes('"task"') && !content.includes('"runtime"'))
+        return null;
+    const embedded = tryExtractEmbeddedJson(content);
+    if (!embedded)
+        return null;
+    const parsed = tryParseJson(embedded);
+    if (!parsed)
+        return null;
+    // Check for task payload: {"task":{"message":"...","runtime":"subagent",...}}
+    const task = parsed.task;
+    if (task && typeof task.message === "string" && task.runtime) {
+        return {
+            content: null,
+            tool_calls: [{
+                    id: generateCallId(),
+                    type: "function",
+                    function: {
+                        name: "sessions_spawn",
+                        arguments: JSON.stringify(task),
+                    },
+                }],
+        };
+    }
+    // Check for direct subagent payload: {"message":"...","runtime":"subagent",...}
+    if (typeof parsed.message === "string" && parsed.runtime) {
+        return {
+            content: null,
+            tool_calls: [{
+                    id: generateCallId(),
+                    type: "function",
+                    function: {
+                        name: "sessions_spawn",
+                        arguments: JSON.stringify(parsed),
+                    },
+                }],
+        };
+    }
+    return null;
+}
 function tryRescueToolCallsFromContent(content) {
     // Only attempt rescue if content contains the tool_calls signature
     if (!content.includes('"tool_calls"') && !content.includes("tool_calls"))
@@ -224,7 +276,18 @@ function tryRescueToolCallsFromContent(content) {
 }
 function tryParseJson(text) {
     try {
-        const obj = JSON.parse(text);
+        // Models sometimes output raw newlines/tabs inside JSON strings (invalid JSON).
+        // Escape them before parsing: \n → \\n, \r → \\r, \t → \\t (only inside strings).
+        const sanitized = text.replace(/[\x00-\x1f]/g, (ch) => {
+            if (ch === "\n")
+                return "\\n";
+            if (ch === "\r")
+                return "\\r";
+            if (ch === "\t")
+                return "\\t";
+            return "";
+        });
+        const obj = JSON.parse(sanitized);
         if (typeof obj === "object" && obj !== null && !Array.isArray(obj)) {
             return obj;
         }
