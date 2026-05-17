@@ -511,13 +511,6 @@ function invalidateSession(model) {
     cliSessions.delete(model);
     saveCliSessions();
 }
-/**
- * Run Claude Code CLI in headless mode with session resume.
- *
- * First request: creates a new session with --session-id.
- * Subsequent requests: --resume <session-id> with only the new message.
- * This eliminates the 20KB prompt replay that causes Sonnet to hang.
- */
 export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
     await ensureClaudeToken();
     const model = stripPrefix(modelId);
@@ -525,9 +518,12 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
     // Session resume: enabled for Opus (reliable), disabled for Sonnet/Haiku (45% hang rate)
     const isOpus = model.includes("opus");
     const isResume = isOpus && session.requestCount > 0;
+    // JSON output mode (v3.11.0): gives us real token usage + cache stats.
+    // Stream-json would be needed for streaming, but the bridge buffers
+    // anyway since OpenClaw's vllm provider doesn't stream from us.
     const args = [
         "-p",
-        "--output-format", "text",
+        "--output-format", "json",
         "--permission-mode", "bypassPermissions",
         "--dangerously-skip-permissions",
         "--model", model,
@@ -564,7 +560,7 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
     // Session succeeded — update registry
     if (result.exitCode === 0 || result.stdout.length > 0) {
         recordSessionSuccess(model);
-        return result.stdout;
+        return parseClaudeJsonOutput(result.stdout);
     }
     // Session failed — check if it's a timeout or auth issue
     if (result.timedOut) {
@@ -580,14 +576,14 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
         // Retry once with a fresh session
         const freshSession = getOrCreateSession("claude", model);
         const freshArgs = [
-            "-p", "--output-format", "text",
+            "-p", "--output-format", "json",
             "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions",
             "--model", model, "--session-id", freshSession.sessionId,
         ];
         const retry = await runCli("claude", freshArgs, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
         if (retry.exitCode === 0 || retry.stdout.length > 0) {
             recordSessionSuccess(model);
-            return retry.stdout;
+            return parseClaudeJsonOutput(retry.stdout);
         }
         // Retry also failed — invalidate the fresh session so the next request doesn't reuse it
         invalidateSession(model);
@@ -599,7 +595,7 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
         const retry = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
         if (retry.exitCode === 0 || retry.stdout.length > 0) {
             recordSessionSuccess(model);
-            return retry.stdout;
+            return parseClaudeJsonOutput(retry.stdout);
         }
         const retryStderr = retry.stderr || "(no output)";
         if (retryStderr.includes("401") || retryStderr.includes("authentication_error")) {
@@ -608,6 +604,54 @@ export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
         throw new Error(`claude exited ${retry.exitCode} (after token refresh): ${retryStderr}`);
     }
     throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, stderr, false, modelId)}`);
+}
+/**
+ * Parse Claude CLI's `--output-format json` response.
+ *
+ * Expected shape (from claude CLI v2.x):
+ *   {
+ *     "result": "model response text",
+ *     "usage": { "input_tokens", "output_tokens", "cache_read_input_tokens", ... },
+ *     "total_cost_usd": 0.0123,
+ *     "stop_reason": "end_turn"
+ *   }
+ *
+ * Robust to malformed output: if parsing fails or the shape is unexpected,
+ * falls back to the raw stdout as content with no usage data.
+ */
+function parseClaudeJsonOutput(stdout) {
+    const trimmed = stdout.trim();
+    if (!trimmed)
+        return { content: "" };
+    try {
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed?.result === "string") {
+            const usage = parsed.usage && typeof parsed.usage === "object" ? parsed.usage : undefined;
+            const out = { content: parsed.result };
+            if (usage) {
+                const tokenUsage = {};
+                if (typeof usage.input_tokens === "number")
+                    tokenUsage.promptTokens = usage.input_tokens;
+                if (typeof usage.output_tokens === "number")
+                    tokenUsage.completionTokens = usage.output_tokens;
+                if (typeof usage.cache_read_input_tokens === "number")
+                    tokenUsage.cacheReadTokens = usage.cache_read_input_tokens;
+                if (typeof usage.cache_creation_input_tokens === "number")
+                    tokenUsage.cacheCreationTokens = usage.cache_creation_input_tokens;
+                if (typeof parsed.total_cost_usd === "number")
+                    tokenUsage.totalCostUsd = parsed.total_cost_usd;
+                if (Object.keys(tokenUsage).length > 0)
+                    out.usage = tokenUsage;
+            }
+            return out;
+        }
+    }
+    catch {
+        // Not JSON or malformed — fall through to raw
+        debugLog("CLAUDE-PARSE", "JSON output mode returned non-JSON, falling back to raw", { preview: trimmed.slice(0, 100) });
+    }
+    // Fallback: treat the whole stdout as plain text content (old --output-format text behavior)
+    return { content: trimmed };
 }
 // ──────────────────────────────────────────────────────────────────────────────
 // Codex CLI
@@ -700,6 +744,7 @@ export async function runPi(prompt, _modelId, timeoutMs, workdir, opts) {
  */
 export const DEFAULT_ALLOWED_CLI_MODELS = new Set([
     // Claude Code CLI
+    "cli-claude/claude-opus-4-7", // newest Opus (v3.11.0) — 1M context, default agent model
     "cli-claude/claude-sonnet-4-6",
     "cli-claude/claude-opus-4-6",
     "cli-claude/claude-haiku-4-5",
@@ -911,10 +956,14 @@ export async function routeToCliRunner(model, messages, timeoutMs, opts = {}) {
     const resolved = normalizeModelAlias(normalized);
     const log = opts.log;
     let rawText;
+    let usage;
     if (resolved.startsWith("cli-gemini/"))
         rawText = await runGemini(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, log });
-    else if (resolved.startsWith("cli-claude/"))
-        rawText = await runClaude(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, log });
+    else if (resolved.startsWith("cli-claude/")) {
+        const claudeResult = await runClaude(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, log });
+        rawText = claudeResult.content;
+        usage = claudeResult.usage;
+    }
     else if (resolved.startsWith("openai-codex/"))
         rawText = await runCodex(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, mediaFiles: opts.mediaFiles, log });
     else if (resolved.startsWith("opencode/"))
@@ -925,18 +974,21 @@ export async function routeToCliRunner(model, messages, timeoutMs, opts = {}) {
         throw new Error(`Unknown CLI bridge model: "${model}". Use "vllm/cli-gemini/<model>", "vllm/cli-claude/<model>", "openai-codex/<model>", "opencode/<model>", or "pi/<model>".`);
     // When tools were provided, try to parse structured tool_calls from the response
     if (hasTools) {
-        return parseToolCallResponse(rawText);
+        const parsed = parseToolCallResponse(rawText);
+        if (usage)
+            parsed.usage = usage;
+        return parsed;
     }
     // No tools — but check if the model still wrapped its response in {"content":"..."} JSON
     // (this happens when tool instructions from a previous turn are still in the conversation)
     try {
         const parsed = JSON.parse(rawText.trim());
         if (typeof parsed?.content === "string") {
-            return { content: parsed.content };
+            return { content: parsed.content, ...(usage ? { usage } : {}) };
         }
     }
     catch { /* not JSON, that's fine */ }
-    return { content: rawText };
+    return { content: rawText, ...(usage ? { usage } : {}) };
 }
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers

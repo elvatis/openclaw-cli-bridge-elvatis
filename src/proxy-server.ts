@@ -248,6 +248,7 @@ export interface ProxyServerOptions {
 /** Available CLI bridge models for GET /v1/models */
 export const CLI_MODELS = [
   // ── Claude Code CLI ───────────────────────────────────────────────────────
+  { id: "cli-claude/claude-opus-4-7",   name: "Claude Opus 4.7 (CLI)",    contextWindow: 1_000_000, maxTokens: 64_000 },
   { id: "cli-claude/claude-sonnet-4-6", name: "Claude Sonnet 4.6 (CLI)",  contextWindow: 1_000_000, maxTokens: 64_000 },
   { id: "cli-claude/claude-opus-4-6",   name: "Claude Opus 4.6 (CLI)",    contextWindow: 1_000_000, maxTokens: 128_000 },
   { id: "cli-claude/claude-haiku-4-5",  name: "Claude Haiku 4.5 (CLI)",   contextWindow: 200_000,   maxTokens: 64_000 },
@@ -1117,10 +1118,18 @@ async function handleRequest(
         debugLog("EMPTY", `${usedModel} returned empty after ${(latencyMs / 1000).toFixed(1)}s`, {});
         throw new Error(`empty response: ${usedModel} returned no content and no tool_calls`);
       }
-      const estCompletionTokens = estimateTokens(result.content ?? "");
-      metrics.recordRequest(usedModel, latencyMs, true, estPromptTokens, estCompletionTokens, promptPreview);
+      // v3.11.0: prefer real token usage from CLI (Claude --output-format json) over estimates
+      const realPromptTokens = result.usage?.promptTokens;
+      const realCompletionTokens = result.usage?.completionTokens;
+      const recordedPrompt = realPromptTokens ?? estPromptTokens;
+      const recordedCompletion = realCompletionTokens ?? estimateTokens(result.content ?? "");
+      metrics.recordRequest(usedModel, latencyMs, true, recordedPrompt, recordedCompletion, promptPreview);
       providerSessions.recordRun(session.id, false);
-      debugLog("OK", `${usedModel} completed in ${(latencyMs / 1000).toFixed(1)}s`, { toolCalls: result.tool_calls?.length ?? 0, contentLen: result.content?.length ?? 0 });
+      debugLog("OK", `${usedModel} completed in ${(latencyMs / 1000).toFixed(1)}s`, {
+        toolCalls: result.tool_calls?.length ?? 0,
+        contentLen: result.content?.length ?? 0,
+        ...(result.usage ? { realTokens: { prompt: realPromptTokens, completion: realCompletionTokens, cacheRead: result.usage.cacheReadTokens } } : {}),
+      });
     } catch (err) {
       const primaryDuration = Date.now() - cliStart;
       const msg = (err as Error).message;
@@ -1168,8 +1177,12 @@ async function handleRequest(
               debugLog("FALLBACK-NO-TOOLS", `${fallbackModel} returned text instead of tool_calls in tool loop`, { contentLen: result.content.length, preview: result.content.slice(0, 80) });
               throw new Error(`${fallbackModel} returned text instead of tool_calls`);
             }
-            const fbCompTokens = estimateTokens(result.content ?? "");
-            metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, estPromptTokens, fbCompTokens, promptPreview);
+            // v3.11.0: prefer real token usage when CLI reports it
+            const fbRealPrompt = result.usage?.promptTokens;
+            const fbRealComp = result.usage?.completionTokens;
+            const fbPromptTokens = fbRealPrompt ?? estPromptTokens;
+            const fbCompTokens = fbRealComp ?? estimateTokens(result.content ?? "");
+            metrics.recordRequest(fallbackModel, Date.now() - fallbackStart, true, fbPromptTokens, fbCompTokens, promptPreview);
             metrics.recordFallback(model, fallbackModel, isTimeout ? "timeout" : "error", primaryDuration, true);
             usedModel = fallbackModel;
             debugLog("FALLBACK-OK", `${fallbackModel} succeeded in ${((Date.now() - fallbackStart) / 1000).toFixed(1)}s`, { toolCalls: result.tool_calls?.length ?? 0 });
@@ -1278,6 +1291,27 @@ async function handleRequest(
         message.content = result.content;
       }
 
+      // v3.11.0: emit real token usage when CLI reports it (Claude --output-format json),
+      // otherwise fall back to character-count estimation. OpenClaw reads these counts
+      // to populate the per-session token table.
+      // `result` is guaranteed assigned at this point (try/catch above either sets it or returns).
+      const usageData = result!.usage;
+      const responsePromptTokens = usageData?.promptTokens ?? estPromptTokens;
+      const responseCompletionTokens = usageData?.completionTokens
+        ?? estimateTokens(typeof message.content === "string" ? message.content : "");
+      const usagePayload: Record<string, number> = {
+        prompt_tokens: responsePromptTokens,
+        completion_tokens: responseCompletionTokens,
+        total_tokens: responsePromptTokens + responseCompletionTokens,
+      };
+      // Pass through Anthropic cache stats when available — OpenClaw shows these as "X% cached"
+      if (typeof usageData?.cacheReadTokens === "number") {
+        usagePayload.cache_read_input_tokens = usageData.cacheReadTokens;
+      }
+      if (typeof usageData?.cacheCreationTokens === "number") {
+        usagePayload.cache_creation_input_tokens = usageData.cacheCreationTokens;
+      }
+
       const response = {
         id,
         object: "chat.completion",
@@ -1290,11 +1324,7 @@ async function handleRequest(
             finish_reason: finishReason,
           },
         ],
-        usage: {
-          prompt_tokens: estPromptTokens,
-          completion_tokens: estimateTokens(typeof message.content === "string" ? message.content : ""),
-          total_tokens: estPromptTokens + estimateTokens(typeof message.content === "string" ? message.content : ""),
-        },
+        usage: usagePayload,
         // Propagate session ID so callers can resume in the same session
         provider_session_id: session.id,
       };

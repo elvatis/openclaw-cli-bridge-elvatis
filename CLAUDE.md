@@ -35,6 +35,8 @@ OpenClaw Gateway --(HTTP)--> proxy-server.ts --(spawn)--> claude/gemini/codex CL
 - **Opus escalation** - when conversations exceed 20 messages with tools, automatically routes from Sonnet to Opus. Opus handles large contexts reliably (94% success vs Sonnet's 55%)
 - **Opus 90s stale timeout** - Opus gets 90s stale-output timeout (vs 30s for Sonnet) to allow time for long-form generation (blog posts, Lexical JSON)
 - **Session resume: Opus only** - Sonnet/Haiku use fresh `claude -p` every call (session resume caused 45% hang rate). Opus uses `--session-id`/`--resume` for context continuity
+- **Real token usage (v3.11.0)** - Claude CLI is invoked with `--output-format json` instead of `text`. The JSON response carries `usage.input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` which the proxy forwards to OpenClaw. Replaces the prior `~4 chars/token` estimation for Claude. Gemini and Codex still use estimates (next release).
+- **Claude Opus 4-7 (v3.11.0)** - new top-tier model with 1M context, available as `vllm/cli-claude/claude-opus-4-7` / `/cli-opus47`. Sonnet 4-6 now escalates to Opus 4-7 first in its fallback chain. Opus 4-6 kept available.
 - **Generic skill auto-detection** - scans `~/.openclaw/skills/` for SKILL.md files, injects pointers when prompt matches a skill name. Fully generic, works with any installed skill
 - **First user message pinning** - original user request is always included in the prompt window, even when conversation exceeds MAX_MESSAGES
 - **Haiku skip in tool loops** - fallback chain skips Haiku when tool_calls are expected (Haiku consistently returns text instead of tool_calls in tool loops)
@@ -45,7 +47,7 @@ OpenClaw Gateway --(HTTP)--> proxy-server.ts --(spawn)--> claude/gemini/codex CL
 
 ```bash
 npm run build    # tsc - always has 5 pre-existing errors (openclaw/plugin-sdk not found at compile time, only at runtime). Dist output is still generated correctly.
-npx vitest run   # 278+ tests across 19 files. All must pass.
+npx vitest run   # 288+ tests across 20 files (~4 pre-existing Codex workdir mock failures are tolerated).
 ```
 
 ## Deploy Workflow

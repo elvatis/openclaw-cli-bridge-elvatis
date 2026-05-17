@@ -24,9 +24,24 @@ export interface ToolCall {
         arguments: string;
     };
 }
+/**
+ * Token usage data reported by the CLI tool.
+ *
+ * When the CLI returns real usage data (e.g. Claude with `--output-format json`),
+ * we prefer it over estimation. Cache fields are Anthropic-specific.
+ */
+export interface TokenUsage {
+    promptTokens?: number;
+    completionTokens?: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    totalCostUsd?: number;
+}
 export interface CliToolResult {
     content: string | null;
     tool_calls?: ToolCall[];
+    /** Real token usage from the CLI subprocess. When absent, the proxy estimates. */
+    usage?: TokenUsage;
 }
 export declare function buildToolPromptBlock(tools: ToolDefinition[]): string;
 /**

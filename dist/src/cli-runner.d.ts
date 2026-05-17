@@ -15,7 +15,7 @@
  *   - OpenCode/Pi: defaults to homedir().
  *   - All runners accept an explicit `workdir` override via RouteOptions.
  */
-import { type ToolDefinition, type CliToolResult } from "./tool-protocol.js";
+import { type ToolDefinition, type CliToolResult, type TokenUsage } from "./tool-protocol.js";
 export interface ContentPart {
     type: string;
     text?: string;
@@ -134,10 +134,20 @@ export declare function runGemini(prompt: string, modelId: string, timeoutMs: nu
  * Subsequent requests: --resume <session-id> with only the new message.
  * This eliminates the 20KB prompt replay that causes Sonnet to hang.
  */
+/**
+ * Result of a Claude CLI invocation. The CLI's `--output-format json` mode
+ * returns real token counts (including cache stats) in the `usage` field —
+ * we extract those here so the proxy can forward them to OpenClaw instead
+ * of falling back to character-count estimation.
+ */
+export interface ClaudeRunResult {
+    content: string;
+    usage?: TokenUsage;
+}
 export declare function runClaude(prompt: string, modelId: string, timeoutMs: number, workdir?: string, opts?: {
     tools?: ToolDefinition[];
     log?: (msg: string) => void;
-}): Promise<string>;
+}): Promise<ClaudeRunResult>;
 /**
  * Run Codex CLI in non-interactive mode with prompt via stdin.
  * cwd = homedir() by default. Override with explicit workdir.

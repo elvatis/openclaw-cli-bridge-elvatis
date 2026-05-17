@@ -10,6 +10,7 @@
  *
  * Phase 3 (slash commands): registers /cli-* commands for instant model switching.
  *   /cli-sonnet       → vllm/cli-claude/claude-sonnet-4-6      (Claude Code CLI proxy)
+ *   /cli-opus47       → vllm/cli-claude/claude-opus-4-7        (Claude Code CLI proxy, 1M ctx)
  *   /cli-opus         → vllm/cli-claude/claude-opus-4-6        (Claude Code CLI proxy)
  *   /cli-haiku        → vllm/cli-claude/claude-haiku-4-5       (Claude Code CLI proxy)
  *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro         (Gemini CLI proxy)
@@ -25,7 +26,8 @@
  *
  * Provider / model naming:
  *   vllm/cli-gemini/gemini-2.5-pro  → `gemini -m gemini-2.5-pro @<tmpfile>`
- *   vllm/cli-claude/claude-opus-4-6 → `claude -p -m claude-opus-4-6 --output-format text` (stdin)
+ *   vllm/cli-claude/claude-opus-4-7 → `claude -p -m claude-opus-4-7 --output-format json` (stdin, real token usage)
+ *   vllm/cli-claude/claude-opus-4-6 → `claude -p -m claude-opus-4-6 --output-format json` (stdin)
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -774,9 +776,10 @@ async function checkBitNetServer(url = "http://127.0.0.1:8082"): Promise<boolean
 // ──────────────────────────────────────────────────────────────────────────────
 const CLI_MODEL_COMMANDS = [
   // ── Claude Code CLI (via local proxy) ────────────────────────────────────────
-  { name: "cli-sonnet",       model: "vllm/cli-claude/claude-sonnet-4-6",    description: "Claude Sonnet 4.6 (Claude Code CLI)",   label: "Claude Sonnet 4.6 (CLI)" },
-  { name: "cli-opus",         model: "vllm/cli-claude/claude-opus-4-6",      description: "Claude Opus 4.6 (Claude Code CLI)",     label: "Claude Opus 4.6 (CLI)" },
-  { name: "cli-haiku",        model: "vllm/cli-claude/claude-haiku-4-5",     description: "Claude Haiku 4.5 (Claude Code CLI)",    label: "Claude Haiku 4.5 (CLI)" },
+  { name: "cli-sonnet",       model: "vllm/cli-claude/claude-sonnet-4-6",    description: "Claude Sonnet 4.6 (Claude Code CLI)",       label: "Claude Sonnet 4.6 (CLI)" },
+  { name: "cli-opus47",       model: "vllm/cli-claude/claude-opus-4-7",      description: "Claude Opus 4.7 (Claude Code CLI, 1M ctx)", label: "Claude Opus 4.7 (CLI)" },
+  { name: "cli-opus",         model: "vllm/cli-claude/claude-opus-4-6",      description: "Claude Opus 4.6 (Claude Code CLI)",         label: "Claude Opus 4.6 (CLI)" },
+  { name: "cli-haiku",        model: "vllm/cli-claude/claude-haiku-4-5",     description: "Claude Haiku 4.5 (Claude Code CLI)",        label: "Claude Haiku 4.5 (CLI)" },
   // ── Gemini CLI (via local proxy) ─────────────────────────────────────────────
   { name: "cli-gemini",       model: "vllm/cli-gemini/gemini-2.5-pro",       description: "Gemini 2.5 Pro (Gemini CLI)",           label: "Gemini 2.5 Pro (CLI)" },
   { name: "cli-gemini-flash", model: "vllm/cli-gemini/gemini-2.5-flash",     description: "Gemini 2.5 Flash (Gemini CLI)",         label: "Gemini 2.5 Flash (CLI)" },

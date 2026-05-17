@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.10.7`
+**Current version:** `3.11.0`
 
 ---
 
@@ -153,7 +153,7 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 
 ## Requirements
 
-- [OpenClaw](https://openclaw.ai) gateway (tested with `2026.4.x`)
+- [OpenClaw](https://openclaw.ai) gateway (tested with `2026.5.x`)
 - One or more of:
   - [`@openai/codex`](https://github.com/openai/codex) — `npm i -g @openai/codex` + `codex login`
   - [`@google/gemini-cli`](https://github.com/google-gemini/gemini-cli) — `npm i -g @google/gemini-cli` + `gemini auth`
@@ -405,6 +405,28 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v3.11.0 — Real token usage + Opus 4-7 + OpenClaw 2026.5.x compat
+
+**Highlights:**
+- **feat: real token usage from Claude CLI.** Switched `claude -p` from `--output-format text` to `--output-format json` and parse the structured response. The CLI returns real `input_tokens`, `output_tokens`, `cache_read_input_tokens`, and `cache_creation_input_tokens` — these now flow through to OpenClaw's session table (replacing the `unknown/200k (?%)` you used to see in `openclaw status`). The proxy also passes Anthropic cache stats through as `cache_read_input_tokens` / `cache_creation_input_tokens` on the `usage` payload, which OpenClaw renders as `X% cached`.
+- **feat: Claude Opus 4-7 (`cli-claude/claude-opus-4-7`).** New `/cli-opus47` slash command. 1M context window, 6 min base timeout, registered in the allowlist and fallback chains. Sonnet 4-6's fallback chain now escalates to Opus 4-7 first (better long-session reasoning) before Gemini Flash. Opus 4-6 remains available as `/cli-opus`.
+- **feat: OpenClaw 2026.5.x compatibility verified.** Plugin loads cleanly on the new gateway (was: tested with 2026.4.x). No breaking changes for cli-bridge plugins.
+
+**Internal:**
+- New `TokenUsage` interface in `src/tool-protocol.ts` carries cache stats through the `CliToolResult` type.
+- New `parseClaudeJsonOutput()` helper in `src/cli-runner.ts` extracts the usage block from JSON output. Falls back to raw stdout if the CLI returns malformed JSON.
+- `runClaude()` return type changed from `Promise<string>` to `Promise<ClaudeRunResult>` (`{ content, usage }`).
+- `proxy-server.ts`: success and fallback paths now prefer real `usage.promptTokens`/`completionTokens` over `estimateTokens()`. Metrics + response usage payload both updated.
+- Test `DEFAULT_MODEL_FALLBACKS["cli-claude/claude-sonnet-4-6"]` updated to expect new Opus 4-7 entry.
+
+**Deferred to v3.12.0:**
+- Web-Grok new models (`grok-4-fast`, `grok-4.1`, etc.) — browser provider doesn't actually pick the model in the DOM; needs investigation before adding labels that wouldn't switch the underlying model.
+- Gemini CLI / Codex CLI real token usage — Codex's `--json` flag emits clean JSONL with `usage` (low-hanging fruit for next release).
+
+### v3.10.8
+- **fix:** Include `dist/` in npm tarball publish; add `openclaw.extensions` field for OpenClaw 2026.5.16 compat (commit `fdb83d1`).
+- **chore:** Dependency bumps — `@google/genai` 1.50.1→2.3.0 (major bump, runtime), `typescript-eslint` 8.59.1→8.59.3, `typescript` 6.0.2→6.0.3, `@types/node` 25.5.2→25.8.0.
 
 ### v3.10.7
 - **chore:** Dependency bumps — `@google/genai` 1.49.0→1.50.1, `playwright` 1.58.2→1.59.1, `protobufjs` 7.5.4→7.5.6, `eslint` 10.1.0→10.2.1, `typescript-eslint` 8.58.1→8.59.1, `vitest` 4.1.2→4.1.5, `postcss` 8.5.8→8.5.12

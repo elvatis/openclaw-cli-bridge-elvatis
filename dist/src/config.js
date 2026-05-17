@@ -97,6 +97,7 @@ export const PROVIDER_SESSION_SWEEP_MS = 10 * 60 * 1_000; // 10 min
  *   - Fast/lightweight (Haiku, Flash, Mini): 120s
  */
 export const DEFAULT_MODEL_TIMEOUTS = {
+    "cli-claude/claude-opus-4-7": 360_000, // 6 min — newest Opus, 1M context, agent default (v3.11.0)
     "cli-claude/claude-opus-4-6": 360_000, // 6 min — leaves room for dynamic scaling up to 580s cap
     "cli-claude/claude-sonnet-4-6": 300_000, // 5 min — was 7 min, reduced so fallback fires before gateway's 600s
     "cli-claude/claude-haiku-4-5": 120_000, // 2 min
@@ -121,8 +122,11 @@ export const DEFAULT_MODEL_TIMEOUTS = {
  * Strategy: same-provider fast model first, then cross-provider alternatives.
  */
 export const DEFAULT_MODEL_FALLBACKS = {
+    // Opus 4-7: fall back to 4-6 first (same family), then cross-provider
+    "cli-claude/claude-opus-4-7": ["cli-claude/claude-opus-4-6", "cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-2.5-pro"],
     "cli-claude/claude-opus-4-6": ["cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-2.5-pro", "cli-claude/claude-haiku-4-5"],
-    "cli-claude/claude-sonnet-4-6": ["cli-claude/claude-opus-4-6", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
+    // Sonnet now prefers Opus 4-7 as escalation target (better reasoning on long sessions)
+    "cli-claude/claude-sonnet-4-6": ["cli-claude/claude-opus-4-7", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
     "cli-claude/claude-haiku-4-5": ["cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.1-codex-mini"],
     "cli-gemini/gemini-2.5-pro": ["cli-gemini/gemini-2.5-flash", "cli-claude/claude-haiku-4-5"],
     "cli-gemini/gemini-3-pro-preview": ["cli-gemini/gemini-3-flash-preview", "cli-gemini/gemini-2.5-flash"],

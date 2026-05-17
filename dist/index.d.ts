@@ -10,6 +10,7 @@
  *
  * Phase 3 (slash commands): registers /cli-* commands for instant model switching.
  *   /cli-sonnet       → vllm/cli-claude/claude-sonnet-4-6      (Claude Code CLI proxy)
+ *   /cli-opus47       → vllm/cli-claude/claude-opus-4-7        (Claude Code CLI proxy, 1M ctx)
  *   /cli-opus         → vllm/cli-claude/claude-opus-4-6        (Claude Code CLI proxy)
  *   /cli-haiku        → vllm/cli-claude/claude-haiku-4-5       (Claude Code CLI proxy)
  *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro         (Gemini CLI proxy)
@@ -25,7 +26,8 @@
  *
  * Provider / model naming:
  *   vllm/cli-gemini/gemini-2.5-pro  → `gemini -m gemini-2.5-pro @<tmpfile>`
- *   vllm/cli-claude/claude-opus-4-6 → `claude -p -m claude-opus-4-6 --output-format text` (stdin)
+ *   vllm/cli-claude/claude-opus-4-7 → `claude -p -m claude-opus-4-7 --output-format json` (stdin, real token usage)
+ *   vllm/cli-claude/claude-opus-4-6 → `claude -p -m claude-opus-4-6 --output-format json` (stdin)
  */
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 declare const plugin: {
