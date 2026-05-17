@@ -34,7 +34,15 @@ jobs:
             exit 1
           fi
 
+      - name: Verify dist exists (if main is dist/*)
+        run: |
+          MAIN=$(node -p "require('./package.json').main || ''")
+          if [[ "$MAIN" == dist/* ]] && [ ! -f "$MAIN" ]; then
+            echo "::error::package.json main is '$MAIN' but file missing — build must have failed silently"
+            exit 1
+          fi
+
       - name: Publish to npm
-        run: npm publish --access public
+        run: npm publish --access public --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
