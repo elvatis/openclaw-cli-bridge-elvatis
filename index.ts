@@ -61,7 +61,13 @@ import type {
 // OpenClawPluginCommandDefinition is defined in the SDK types but not re-exported
 // by the package — derive it from the registerCommand signature.
 type OpenClawPluginCommandDefinition = Parameters<OpenClawPluginApi["registerCommand"]>[0];
-import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk";
+// v3.11.1: in OpenClaw 2026.5.x, buildOauthProviderAuthResult moved from the
+// root `openclaw/plugin-sdk` to the `provider-auth-result` submodule. The old
+// path silently fails ESM resolution (named import returns undefined → plugin
+// fails to register, gateway doesn't surface the error). Verified by:
+//   node -e "import('openclaw/plugin-sdk/provider-auth-result').then(...)"
+// in ~/.npm-global/lib/node_modules/openclaw.
+import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk/provider-auth-result";
 import {
   DEFAULT_CODEX_AUTH_PATH,
   DEFAULT_MODEL as CODEX_DEFAULT_MODEL,
