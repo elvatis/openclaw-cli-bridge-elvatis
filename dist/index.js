@@ -732,6 +732,7 @@ const CLI_MODEL_COMMANDS = [
     { name: "cli-codex-spark", model: "openai-codex/gpt-5.3-codex-spark", description: "GPT-5.3 Codex Spark (Codex CLI auth)", label: "GPT-5.3 Codex Spark" },
     { name: "cli-codex52", model: "openai-codex/gpt-5.2-codex", description: "GPT-5.2 Codex (Codex CLI auth)", label: "GPT-5.2 Codex" },
     { name: "cli-codex54", model: "openai-codex/gpt-5.4", description: "GPT-5.4 (Codex CLI auth)", label: "GPT-5.4" },
+    { name: "cli-codex55", model: "openai-codex/gpt-5.5", description: "GPT-5.5 (Codex CLI auth)", label: "GPT-5.5" },
     { name: "cli-codex-mini", model: "openai-codex/gpt-5.1-codex-mini", description: "GPT-5.1 Codex Mini (Codex CLI auth)", label: "GPT-5.1 Codex Mini" },
     // ── OpenCode CLI (via local proxy) ─────────────────────────────────────────
     { name: "cli-opencode", model: "vllm/opencode/default", description: "OpenCode (CLI)", label: "OpenCode (CLI)" },

@@ -43,6 +43,7 @@
           "type": "number"
         },
         "default": {
+          "cli-claude/claude-opus-4-7": 360000,
           "cli-claude/claude-opus-4-6": 360000,
           "cli-claude/claude-sonnet-4-6": 300000,
           "cli-claude/claude-haiku-4-5": 120000,
@@ -50,6 +51,7 @@
           "cli-gemini/gemini-2.5-flash": 180000,
           "cli-gemini/gemini-3-pro-preview": 300000,
           "cli-gemini/gemini-3-flash-preview": 180000,
+          "openai-codex/gpt-5.5": 300000,
           "openai-codex/gpt-5.4": 300000,
           "openai-codex/gpt-5.3-codex": 180000,
           "openai-codex/gpt-5.1-codex-mini": 90000,

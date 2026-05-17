@@ -57,6 +57,7 @@ All commands use gateway-level `commands.allowFrom` for authorization (`requireA
 | `/cli-codex-spark` | `openai-codex/gpt-5.3-codex-spark` | ✅ Tested |
 | `/cli-codex52` | `openai-codex/gpt-5.2-codex` | ✅ Tested |
 | `/cli-codex54` | `openai-codex/gpt-5.4` | May require upgraded OAuth scope |
+| `/cli-codex55` | `openai-codex/gpt-5.5` | May require upgraded OAuth scope |
 | `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` | ✅ Tested |
 
 **OpenCode CLI** (via local proxy, prompt as CLI argument):
@@ -226,6 +227,7 @@ openclaw models auth login --provider openai-codex
     /cli-codex-spark     gpt-5.3-codex-spark
     /cli-codex52         gpt-5.2-codex
     /cli-codex54         gpt-5.4
+    /cli-codex55         gpt-5.5
     /cli-codex-mini      gpt-5.1-codex-mini
 
   Utility
@@ -289,6 +291,7 @@ In `~/.openclaw/openclaw.json` → `plugins.entries.openclaw-cli-bridge-elvatis.
     "cli-claude/claude-haiku-4-5":       90000,   // 90s  — fast responses
     "cli-gemini/gemini-2.5-pro":        180000,
     "cli-gemini/gemini-2.5-flash":       90000,
+    "openai-codex/gpt-5.5":            300000,
     "openai-codex/gpt-5.4":            300000,
     "openai-codex/gpt-5.3-codex":      180000,
     "openai-codex/gpt-5.1-codex-mini":  90000
@@ -333,7 +336,7 @@ OpenClaw agent
   │
   ├─ openai-codex/*  ──────────────────────────► OpenAI API (direct)
   │    auth: ~/.codex/auth.json OAuth tokens
-  │    /cli-codex, /cli-codex-spark, /cli-codex52, /cli-codex54, /cli-codex-mini
+  │    /cli-codex, /cli-codex-spark, /cli-codex52, /cli-codex54, /cli-codex55, /cli-codex-mini
   │
   └─ vllm/cli-gemini/*  ─┐
      vllm/cli-claude/*   ─┤─► localhost:31337  (openclaw-cli-bridge proxy)
