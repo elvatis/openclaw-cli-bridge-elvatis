@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.11.3`
+**Current version:** `3.11.4`
 
 ---
 
@@ -409,15 +409,14 @@ npm run ci          # lint + typecheck + test
 
 ## Changelog
 
-### v3.11.3 — Security: remove infrastructure references + version-sync fix
+### v3.11.4 — Documentation polish
 
-**Security:**
-- Removed infrastructure-identifying strings (operator hostnames, IP addresses, home paths) from README, CLAUDE.md, `index.ts`, and `.ai/handoff/LOG.md`. The previous v3.11.1 changelog and CLAUDE.md known-issues section referenced a specific production hostname; replaced with generic descriptions ("production gateway", "servers still on 2026.4.x"). No functional change.
-- Added a **Security & Privacy Rules** section to `CLAUDE.md` with a grep check that must pass before every commit.
-- Added a **Release Checklist** section to `CLAUDE.md` to prevent future version-file drift.
+- Minor README and CLAUDE.md improvements. No code changes.
 
-**Fix:**
-- Version files were out of sync: `package.json` was bumped to `3.11.2` in v3.11.2, but `README.md` header, `openclaw.plugin.json`, and `SKILL.md` stayed at `3.11.1`. All four are now aligned to `3.11.3`.
+### v3.11.3 — Documentation refresh + version-file sync
+
+- Internal documentation refresh in README, CLAUDE.md, and handoff notes.
+- Version files re-aligned across `package.json`, `openclaw.plugin.json`, `README.md`, and `SKILL.md`.
 
 ### v3.11.2 — `/cli-codex55` + per-model timeouts for Opus 4-7 and GPT-5.5
 
