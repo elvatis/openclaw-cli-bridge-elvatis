@@ -64,9 +64,8 @@ type OpenClawPluginCommandDefinition = Parameters<OpenClawPluginApi["registerCom
 // v3.11.1: in OpenClaw 2026.5.x, buildOauthProviderAuthResult moved from the
 // root `openclaw/plugin-sdk` to the `provider-auth-result` submodule. The old
 // path silently fails ESM resolution (named import returns undefined → plugin
-// fails to register, gateway doesn't surface the error). Verified by:
-//   node -e "import('openclaw/plugin-sdk/provider-auth-result').then(...)"
-// in ~/.npm-global/lib/node_modules/openclaw.
+// fails to register, gateway doesn't surface the error). Verify with:
+//   node -e "import('openclaw/plugin-sdk/provider-auth-result').then(m => console.log(Object.keys(m)))"
 import { buildOauthProviderAuthResult } from "openclaw/plugin-sdk/provider-auth-result";
 import {
   DEFAULT_CODEX_AUTH_PATH,

@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.11.1`
+**Current version:** `3.11.3`
 
 ---
 
@@ -409,13 +409,28 @@ npm run ci          # lint + typecheck + test
 
 ## Changelog
 
+### v3.11.3 — Security: remove infrastructure references + version-sync fix
+
+**Security:**
+- Removed infrastructure-identifying strings (operator hostnames, IP addresses, home paths) from README, CLAUDE.md, `index.ts`, and `.ai/handoff/LOG.md`. The previous v3.11.1 changelog and CLAUDE.md known-issues section referenced a specific production hostname; replaced with generic descriptions ("production gateway", "servers still on 2026.4.x"). No functional change.
+- Added a **Security & Privacy Rules** section to `CLAUDE.md` with a grep check that must pass before every commit.
+- Added a **Release Checklist** section to `CLAUDE.md` to prevent future version-file drift.
+
+**Fix:**
+- Version files were out of sync: `package.json` was bumped to `3.11.2` in v3.11.2, but `README.md` header, `openclaw.plugin.json`, and `SKILL.md` stayed at `3.11.1`. All four are now aligned to `3.11.3`.
+
+### v3.11.2 — `/cli-codex55` + per-model timeouts for Opus 4-7 and GPT-5.5
+
+- **feat:** New `/cli-codex55` slash command routes to `openai-codex/gpt-5.5` via the Codex CLI.
+- **fix:** Per-model timeouts in plugin config now cover Opus 4-7 (`cli-claude/claude-opus-4-7`) and GPT-5.5 (`openai-codex/gpt-5.5`) — these were missing from `DEFAULT_MODEL_TIMEOUTS` and falling back to the base `proxyTimeoutMs`.
+
 ### v3.11.1 — Plugin-SDK import path fix for OpenClaw 2026.5.x
 
 **Fix:**
 - **`buildOauthProviderAuthResult` import path** moved. In OpenClaw 2026.5.x, this helper was relocated from `openclaw/plugin-sdk` (root) to the `openclaw/plugin-sdk/provider-auth-result` submodule. The old import returns `undefined` and the plugin fails ESM resolution silently, so the gateway never reaches `register()`. Plugin now imports from the new submodule path. Verified against OpenClaw 2026.5.12+.
 
 **Known issue (unresolved, tracked for v3.12.0):**
-- On OpenClaw **2026.5.16-beta.4** the import-path fix above is not enough — the gateway loads the plugin's models (visible in the boot log under `auto-enabled plugins`: `vllm/cli-claude/claude-sonnet-4-6 model configured`) and `openclaw plugins list` reports it as `enabled`, but `register()` is never invoked: no STARTUP line in `~/.openclaw/cli-bridge/debug.log`, port 31337 stays closed, `http server listening` reports `(1 plugin: whatsapp; ...)`. The same plugin file loads correctly via raw `node` and via `jiti` when an `openclaw` symlink is present, so the failure is inside OpenClaw's plugin lifecycle. Most likely a Plugin SDK v1 → v2 shape change. Production servers running 2026.4.x (production-gateway.example) are unaffected and run v3.11.x as before.
+- On OpenClaw **2026.5.16-beta.4** the import-path fix above is not enough — the gateway loads the plugin's models (visible in the boot log under `auto-enabled plugins`: `vllm/cli-claude/claude-sonnet-4-6 model configured`) and `openclaw plugins list` reports it as `enabled`, but `register()` is never invoked: no STARTUP line in `~/.openclaw/cli-bridge/debug.log`, port 31337 stays closed, `http server listening` reports `(1 plugin: whatsapp; ...)`. The same plugin file loads correctly via raw `node` and via `jiti` when an `openclaw` symlink is present, so the failure is inside OpenClaw's plugin lifecycle. Most likely a Plugin SDK v1 → v2 shape change. Servers still on 2026.4.x are unaffected and run v3.11.x as before.
 
 ### v3.11.0 — Real token usage + Opus 4-7 + OpenClaw 2026.5.x compat
 

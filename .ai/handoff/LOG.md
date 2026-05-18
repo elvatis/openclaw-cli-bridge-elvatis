@@ -78,7 +78,7 @@ This caused all `vllm/cli-claude/*` requests to fail silently, triggering the se
 - Codex auth import runs once per startup, not per-agent
 
 ### Also in this session
-- Installed cli-bridge plugin on production server (operator@production-gateway)
+- Installed cli-bridge plugin on production gateway
 - Set default model to `vllm/cli-claude/claude-sonnet-4-6` (Claude CLI, no API costs)
 - Merged 3 Dependabot PRs (#13, #17, #19)
 
@@ -269,7 +269,7 @@ Three issues:
 
 > **Agent:** claude-sonnet-4-6
 > **Phase:** review + analysis
-> **Note:** Planning session. Code analysis of proxy/auth architecture. Plan written to `~/.claude/plans/buzzing-honking-corbato.md`. Implementation deferred to Session 5.
+> **Note:** Planning session. Code analysis of proxy/auth architecture. Plan written to a local notes directory. Implementation deferred to Session 5.
 
 ---
 

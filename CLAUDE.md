@@ -126,7 +126,7 @@ Parser tries 5 strategies: Claude JSON wrapper, direct JSON, code blocks, embedd
 - **Agent delegation (disabled)** - infrastructure for delegating skills to `openclaw agent` is built but disabled. `openclaw agent` is single-turn only; multi-turn skill execution needs OpenClaw-side support.
 - **Pre-existing tsc errors** - errors about `openclaw/plugin-sdk` module not found. Expected - the SDK is injected at runtime by the gateway. Dist output is still generated.
 - **OpenClaw 2026.5.x: SDK import path moved (v3.11.1)** - In 2026.5.x, `buildOauthProviderAuthResult` was moved from `openclaw/plugin-sdk` root to the `openclaw/plugin-sdk/provider-auth-result` submodule. Old root import returns `undefined` for that named export. Fixed in v3.11.1 by importing from the new submodule path. Verified in OpenClaw 2026.5.12+: `node -e "import('openclaw/plugin-sdk/provider-auth-result').then(m => console.log(Object.keys(m)))"` returns `[ 'buildOauthProviderAuthResult' ]`.
-- **OpenClaw 2026.5.16-beta.4: silent plugin skip (unresolved)** - On operator running 2026.5.16-beta.4, the gateway loads the plugin's models (visible in `auto-enabled plugins`: `vllm/cli-claude/claude-sonnet-4-6 model configured`) and shows it as `enabled` in `openclaw plugins list`, but `register()` is never called: no STARTUP entry in `cli-bridge/debug.log`, proxy port 31337 stays closed, "http server listening" reports `(1 plugin: whatsapp; ...)`. The plugin loads cleanly via raw `node` and via jiti when given a `node_modules/openclaw` symlink, so the failure happens inside OpenClaw's plugin lifecycle. Likely Plugin SDK v1 → v2 shape change. Production servers on 2026.4.x (production-gateway.example) are unaffected. Tracked for v3.12.0 SDK migration.
+- **OpenClaw 2026.5.16-beta.4: silent plugin skip (unresolved)** - On gateways running 2026.5.16-beta.4, the gateway loads the plugin's models (visible in `auto-enabled plugins`: `vllm/cli-claude/claude-sonnet-4-6 model configured`) and shows it as `enabled` in `openclaw plugins list`, but `register()` is never called: no STARTUP entry in `cli-bridge/debug.log`, proxy port 31337 stays closed, "http server listening" reports `(1 plugin: whatsapp; ...)`. The plugin loads cleanly via raw `node` and via jiti when given a `node_modules/openclaw` symlink, so the failure happens inside OpenClaw's plugin lifecycle. Likely Plugin SDK v1 → v2 shape change. Gateways still on 2026.4.x are unaffected. Tracked for v3.12.0 SDK migration.
 
 ## Testing
 
@@ -155,6 +155,47 @@ cat ~/.openclaw/cli-bridge/sessions.json     # provider session state
 - [ ] Per-tool routing: write/exec - fast model, search/analyze - smart model
 - [ ] Model health scoring: track success rates, auto-demote unreliable models
 - [ ] Session resume: use `claude --resume` for conversation continuity instead of fresh `-p` each time
+
+## Security & Privacy Rules
+
+**NEVER commit infrastructure-identifying information.** Before every commit, grep the staged diff for:
+
+```bash
+git diff --cached | grep -iE 'hostname|fqdn|\.com|\.de|\.net|192\.168|10\.|172\.|@[a-z0-9-]+\.|/home/[a-z]+/|private|internal'
+```
+
+Specifically:
+- No hostnames, FQDNs, or DNS names (e.g. `xxx.example.com`)
+- No IP addresses (private RFC1918 or public)
+- No SSH config aliases, key paths, or user@host patterns
+- No `/home/<username>/` paths — use `~/` or `$HOME/`
+- No usernames tied to real infrastructure
+- No private email addresses
+- No SSL fingerprints, cookies, tokens, or session IDs
+
+When describing production behavior, say "production gateway" not "server X". When showing paths, use `~/.openclaw/` not `/home/user/.openclaw/`. The codebase, README, CLAUDE.md, and changelog must work for any operator on any machine.
+
+If you spot infrastructure leaks in an existing commit, scrub the working tree, ask the user before rewriting git history, and update this rule with the missed pattern.
+
+## Release Checklist
+
+Run this every time before `gh release create`:
+
+1. **Bump version in 4 files** (must match exactly):
+   - `package.json` → `"version"`
+   - `openclaw.plugin.json` → `"version"`
+   - `README.md` → `**Current version:** \`X.Y.Z\``
+   - `SKILL.md` → `**Version:** X.Y.Z`
+2. **Add changelog entry** to README.md under `## Changelog`
+3. **Run `npm run build`** — dist/ must be regenerated
+4. **Run `npx vitest run`** — 288+ passing (4 pre-existing Codex mock fails tolerated)
+5. **Security scan** (see grep command above)
+6. **`git diff`** — review every line
+7. `git commit && git push`
+8. `gh release create vX.Y.Z --title "..." --notes "..."`
+9. Verify on npm: `npm view @elvatis_com/openclaw-cli-bridge-elvatis version` shows the new version
+
+If any of these are skipped, the release is incomplete.
 
 ## Style Rules
 
