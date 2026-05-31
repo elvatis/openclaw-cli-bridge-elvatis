@@ -14,6 +14,7 @@ const STABLE_CHECKS = 3;
 const STABLE_INTERVAL_MS = 600; // slightly longer — Gemini streams slower
 const GEMINI_HOME = "https://gemini.google.com/app";
 const MODEL_MAP = {
+    "gemini-3-1-pro": "gemini-3.1-pro",
     "gemini-2-5-pro": "gemini-2.5-pro",
     "gemini-2-5-flash": "gemini-2.5-flash",
     "gemini-flash": "gemini-flash",

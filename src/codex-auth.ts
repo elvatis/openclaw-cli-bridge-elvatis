@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 export const DEFAULT_CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
-export const DEFAULT_MODEL = "openai-codex/gpt-5.2";
+export const DEFAULT_MODEL = "openai-codex/gpt-5.5";
 
 /** Subset of ~/.codex/auth.json we care about */
 interface CodexAuthFile {

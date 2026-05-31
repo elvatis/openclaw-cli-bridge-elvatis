@@ -744,19 +744,22 @@ export async function runPi(prompt, _modelId, timeoutMs, workdir, opts) {
  */
 export const DEFAULT_ALLOWED_CLI_MODELS = new Set([
     // Claude Code CLI
-    "cli-claude/claude-opus-4-7", // newest Opus (v3.11.0) — 1M context, default agent model
+    "cli-claude/claude-opus-4-8",
+    "cli-claude/claude-opus-4-7",
     "cli-claude/claude-sonnet-4-6",
     "cli-claude/claude-opus-4-6",
     "cli-claude/claude-haiku-4-5",
     // Gemini CLI
     "cli-gemini/gemini-2.5-pro",
     "cli-gemini/gemini-2.5-flash",
+    "cli-gemini/gemini-3.1-pro-preview",
     "cli-gemini/gemini-3-pro-preview",
     "cli-gemini/gemini-3-flash-preview",
     // Aliases (map to preview variants internally)
-    "cli-gemini/gemini-3-pro", // alias → gemini-3-pro-preview
-    "cli-gemini/gemini-3-flash", // alias → gemini-3-flash-preview
+    "cli-gemini/gemini-3-pro",
+    "cli-gemini/gemini-3-flash",
     // Codex CLI
+    "openai-codex/gpt-5.5",
     "openai-codex/gpt-5.3-codex",
     "openai-codex/gpt-5.3-codex-spark",
     "openai-codex/gpt-5.2-codex",
@@ -770,7 +773,7 @@ export const DEFAULT_ALLOWED_CLI_MODELS = new Set([
 /** Normalize model aliases to their canonical CLI model names. */
 function normalizeModelAlias(normalized) {
     const ALIASES = {
-        "cli-gemini/gemini-3-pro": "cli-gemini/gemini-3-pro-preview",
+        "cli-gemini/gemini-3-pro": "cli-gemini/gemini-3.1-pro-preview",
         "cli-gemini/gemini-3-flash": "cli-gemini/gemini-3-flash-preview",
     };
     return ALIASES[normalized] ?? normalized;

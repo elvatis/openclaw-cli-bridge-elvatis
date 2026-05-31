@@ -10,12 +10,13 @@
  *
  * Phase 3 (slash commands): registers /cli-* commands for instant model switching.
  *   /cli-sonnet       → vllm/cli-claude/claude-sonnet-4-6      (Claude Code CLI proxy)
+ *   /cli-opus         → vllm/cli-claude/claude-opus-4-8        (Claude Code CLI proxy, 1M ctx)
  *   /cli-opus47       → vllm/cli-claude/claude-opus-4-7        (Claude Code CLI proxy, 1M ctx)
- *   /cli-opus         → vllm/cli-claude/claude-opus-4-6        (Claude Code CLI proxy)
+ *   /cli-opus46       → vllm/cli-claude/claude-opus-4-6        (Claude Code CLI proxy)
  *   /cli-haiku        → vllm/cli-claude/claude-haiku-4-5       (Claude Code CLI proxy)
  *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro         (Gemini CLI proxy)
  *   /cli-gemini-flash → vllm/cli-gemini/gemini-2.5-flash       (Gemini CLI proxy)
- *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro-preview   (Gemini CLI proxy)
+ *   /cli-gemini3      → vllm/cli-gemini/gemini-3.1-pro-preview (Gemini CLI proxy)
  *   /cli-codex        → openai-codex/gpt-5.3-codex             (Codex CLI OAuth, direct API)
  *   /cli-codex54      → openai-codex/gpt-5.4                   (Codex CLI OAuth, direct API)
  *   /cli-opencode     → vllm/opencode/default                  (OpenCode CLI proxy)
@@ -26,6 +27,7 @@
  *
  * Provider / model naming:
  *   vllm/cli-gemini/gemini-2.5-pro  → `gemini -m gemini-2.5-pro @<tmpfile>`
+ *   vllm/cli-claude/claude-opus-4-8 → `claude -p -m claude-opus-4-8 --output-format json` (stdin, real token usage)
  *   vllm/cli-claude/claude-opus-4-7 → `claude -p -m claude-opus-4-7 --output-format json` (stdin, real token usage)
  *   vllm/cli-claude/claude-opus-4-6 → `claude -p -m claude-opus-4-6 --output-format json` (stdin)
  */
