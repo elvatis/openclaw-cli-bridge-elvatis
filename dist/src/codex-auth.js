@@ -12,7 +12,7 @@ import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 export const DEFAULT_CODEX_AUTH_PATH = join(homedir(), ".codex", "auth.json");
-export const DEFAULT_MODEL = "openai-codex/gpt-5.2";
+export const DEFAULT_MODEL = "openai-codex/gpt-5.5";
 /**
  * Read and validate credentials from the Codex auth file.
  * Throws if the file is missing, unreadable, or contains no usable token.

@@ -125,19 +125,24 @@ export const PROVIDER_SESSION_SWEEP_MS = 10 * 60 * 1_000; // 10 min
  *   - Fast/lightweight (Haiku, Flash, Mini): 120s
  */
 export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
-  "cli-claude/claude-opus-4-7":        360_000,  // 6 min — newest Opus, 1M context, agent default (v3.11.0)
+  "cli-claude/claude-opus-4-8":        360_000,  // 6 min, current Opus
+  "cli-claude/claude-opus-4-7":        360_000,  // 6 min, previous Opus
   "cli-claude/claude-opus-4-6":        360_000,  // 6 min — leaves room for dynamic scaling up to 580s cap
   "cli-claude/claude-sonnet-4-6":      300_000,  // 5 min — was 7 min, reduced so fallback fires before gateway's 600s
   "cli-claude/claude-haiku-4-5":       120_000,  // 2 min
   "cli-gemini/gemini-2.5-pro":         300_000,  // 5 min — image generation needs more time
   "cli-gemini/gemini-2.5-flash":       180_000,  // 3 min
+  "cli-gemini/gemini-3.1-pro-preview": 300_000,  // 5 min
   "cli-gemini/gemini-3-pro-preview":   300_000,  // 5 min — image generation needs more time
   "cli-gemini/gemini-3-flash-preview": 180_000,  // 3 min
+  "openai-codex/gpt-5.5":             300_000,
   "openai-codex/gpt-5.4":             300_000,
   "openai-codex/gpt-5.3-codex":       180_000,
   "openai-codex/gpt-5.1-codex-mini":   90_000,
   "gemini-api/gemini-2.5-pro":        300_000,  // 5 min — image generation needs time
   "gemini-api/gemini-2.5-flash":      180_000,  // 3 min
+  "gemini-api/gemini-3.1-pro-preview": 300_000,  // 5 min
+  "gemini-api/gemini-3-flash-preview": 180_000,  // 3 min
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -152,17 +157,19 @@ export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
  * Strategy: same-provider fast model first, then cross-provider alternatives.
  */
 export const DEFAULT_MODEL_FALLBACKS: Record<string, string[]> = {
-  // Opus 4-7: fall back to 4-6 first (same family), then cross-provider
+  "cli-claude/claude-opus-4-8":       ["cli-claude/claude-opus-4-7", "cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-3.1-pro-preview"],
   "cli-claude/claude-opus-4-7":       ["cli-claude/claude-opus-4-6", "cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-2.5-pro"],
   "cli-claude/claude-opus-4-6":       ["cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-2.5-pro", "cli-claude/claude-haiku-4-5"],
-  // Sonnet now prefers Opus 4-7 as escalation target (better reasoning on long sessions)
-  "cli-claude/claude-sonnet-4-6":     ["cli-claude/claude-opus-4-7", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
+  "cli-claude/claude-sonnet-4-6":     ["cli-claude/claude-opus-4-8", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
   "cli-claude/claude-haiku-4-5":      ["cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.1-codex-mini"],
   "cli-gemini/gemini-2.5-pro":        ["cli-gemini/gemini-2.5-flash", "cli-claude/claude-haiku-4-5"],
+  "cli-gemini/gemini-3.1-pro-preview": ["cli-gemini/gemini-3-flash-preview", "cli-gemini/gemini-2.5-flash"],
   "cli-gemini/gemini-3-pro-preview":  ["cli-gemini/gemini-3-flash-preview", "cli-gemini/gemini-2.5-flash"],
+  "openai-codex/gpt-5.5":             ["openai-codex/gpt-5.4", "openai-codex/gpt-5.3-codex", "cli-claude/claude-haiku-4-5"],
   "openai-codex/gpt-5.4":             ["openai-codex/gpt-5.3-codex", "cli-claude/claude-haiku-4-5"],
   "openai-codex/gpt-5.3-codex":       ["openai-codex/gpt-5.1-codex-mini", "cli-gemini/gemini-2.5-flash"],
   "gemini-api/gemini-2.5-pro":        ["gemini-api/gemini-2.5-flash"],
+  "gemini-api/gemini-3.1-pro-preview": ["gemini-api/gemini-3-flash-preview", "gemini-api/gemini-2.5-flash"],
 };
 
 // ──────────────────────────────────────────────────────────────────────────────

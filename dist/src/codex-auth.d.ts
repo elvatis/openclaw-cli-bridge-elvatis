@@ -9,7 +9,7 @@
  * any token the Codex CLI has renewed since last read.
  */
 export declare const DEFAULT_CODEX_AUTH_PATH: string;
-export declare const DEFAULT_MODEL = "openai-codex/gpt-5.2";
+export declare const DEFAULT_MODEL = "openai-codex/gpt-5.5";
 export interface CodexCredentials {
     accessToken: string;
     refreshToken: string | null;

@@ -2,7 +2,7 @@
 
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
-**Current version:** `3.11.4`
+**Current version:** `3.11.5`
 
 ---
 
@@ -20,10 +20,13 @@ Starts a local OpenAI-compatible HTTP proxy on `127.0.0.1:31337` and configures 
 |---|---|---|
 | `vllm/cli-gemini/gemini-2.5-pro` | `gemini -m gemini-2.5-pro -p ""` (stdin, cwd=/tmp) | ~8–10s |
 | `vllm/cli-gemini/gemini-2.5-flash` | `gemini -m gemini-2.5-flash -p ""` (stdin, cwd=/tmp) | ~4–6s |
-| `vllm/cli-gemini/gemini-3-pro-preview` | `gemini -m gemini-3-pro-preview -p ""` (stdin, cwd=/tmp) | ~8–10s |
+| `vllm/cli-gemini/gemini-3.1-pro-preview` | `gemini -m gemini-3.1-pro-preview -p ""` (stdin, cwd=/tmp) | ~8–10s |
+| `vllm/cli-gemini/gemini-3-pro-preview` | `gemini -m gemini-3-pro-preview -p ""` (legacy alias, stdin, cwd=/tmp) | ~8–10s |
 | `vllm/cli-gemini/gemini-3-flash-preview` | `gemini -m gemini-3-flash-preview -p ""` (stdin, cwd=/tmp) | ~4–6s |
 | `vllm/cli-claude/claude-sonnet-4-6` | `claude -p --output-format text --model claude-sonnet-4-6` (stdin) | ~2–4s |
-| `vllm/cli-claude/claude-opus-4-6` | `claude -p --output-format text --model claude-opus-4-6` (stdin) | ~3–5s |
+| `vllm/cli-claude/claude-opus-4-8` | `claude -p --output-format text --model claude-opus-4-8` (stdin) | ~3–5s |
+| `vllm/cli-claude/claude-opus-4-7` | `claude -p --output-format text --model claude-opus-4-7` (stdin) | ~3–5s |
+| `vllm/cli-claude/claude-opus-4-6` | `claude -p --output-format text --model claude-opus-4-6` (legacy, stdin) | ~3–5s |
 | `vllm/cli-claude/claude-haiku-4-5` | `claude -p --output-format text --model claude-haiku-4-5` (stdin) | ~1–3s |
 | `vllm/opencode/default` | `opencode run "prompt"` (CLI arg) | varies |
 | `vllm/pi/default` | `pi -p "prompt"` (CLI arg) | varies |
@@ -37,7 +40,9 @@ All commands use gateway-level `commands.allowFrom` for authorization (`requireA
 | Command | Model | Notes |
 |---|---|---|
 | `/cli-sonnet` | `vllm/cli-claude/claude-sonnet-4-6` | ✅ Tested |
-| `/cli-opus` | `vllm/cli-claude/claude-opus-4-6` | ✅ Tested |
+| `/cli-opus` | `vllm/cli-claude/claude-opus-4-8` | ✅ Tested |
+| `/cli-opus47` | `vllm/cli-claude/claude-opus-4-7` | ✅ Tested |
+| `/cli-opus46` | `vllm/cli-claude/claude-opus-4-6` | Legacy |
 | `/cli-haiku` | `vllm/cli-claude/claude-haiku-4-5` | ✅ Tested |
 
 **Gemini CLI** (routed via local proxy on `:31337`, stdin + `cwd=/tmp`):
@@ -46,7 +51,8 @@ All commands use gateway-level `commands.allowFrom` for authorization (`requireA
 |---|---|---|
 | `/cli-gemini` | `vllm/cli-gemini/gemini-2.5-pro` | ✅ Tested |
 | `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` | ✅ Tested |
-| `/cli-gemini3` | `vllm/cli-gemini/gemini-3-pro-preview` | ✅ Tested |
+| `/cli-gemini3` | `vllm/cli-gemini/gemini-3.1-pro-preview` | ✅ Tested |
+| `/cli-gemini3-pro-preview` | `vllm/cli-gemini/gemini-3-pro-preview` | Legacy |
 | `/cli-gemini3-flash` | `vllm/cli-gemini/gemini-3-flash-preview` | ✅ Tested |
 
 **Codex CLI** (via `openai-codex` provider — OAuth auth, calls OpenAI API directly, **not** through the local proxy):
@@ -113,7 +119,8 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 
 | Model | Notes |
 |---|---|
-| `web-grok/grok-3` | Full model | ✅ Tested |
+| `web-grok/grok-4` | Full model | ✅ Tested |
+| `web-grok/grok-3` | Previous full model | ✅ Tested |
 | `web-grok/grok-3-fast` | Faster variant | ✅ Tested |
 | `web-grok/grok-3-mini` | Lightweight | ✅ Tested |
 | `web-grok/grok-3-mini-fast` | Fastest | ✅ Tested |
@@ -128,6 +135,7 @@ Routes requests through real browser sessions on the provider's web UI. Requires
 
 | Model | Notes |
 |---|---|
+| `web-gemini/gemini-3-1-pro` | Gemini 3.1 Pro | Listed |
 | `web-gemini/gemini-2-5-pro` | Gemini 2.5 Pro | ✅ Tested |
 | `web-gemini/gemini-2-5-flash` | Gemini 2.5 Flash | ✅ Tested |
 | `web-gemini/gemini-3-pro` | Gemini 3 Pro | ✅ Tested |
@@ -213,13 +221,16 @@ openclaw models auth login --provider openai-codex
 
   Claude Code CLI
     /cli-sonnet          claude-sonnet-4-6
-    /cli-opus            claude-opus-4-6
+    /cli-opus            claude-opus-4-8
+    /cli-opus47          claude-opus-4-7
+    /cli-opus46          claude-opus-4-6
     /cli-haiku           claude-haiku-4-5
 
   Gemini CLI
     /cli-gemini          gemini-2.5-pro
     /cli-gemini-flash    gemini-2.5-flash
-    /cli-gemini3         gemini-3-pro-preview
+    /cli-gemini3         gemini-3.1-pro-preview
+    /cli-gemini3-pro-preview gemini-3-pro-preview
     /cli-gemini3-flash   gemini-3-flash-preview
 
   Codex (OAuth)
@@ -286,7 +297,9 @@ In `~/.openclaw/openclaw.json` → `plugins.entries.openclaw-cli-bridge-elvatis.
   "proxyApiKey": "cli-bridge", // key between OpenClaw vllm provider and proxy (default: "cli-bridge")
   "proxyTimeoutMs": 300000,    // base CLI subprocess timeout in ms (default: 300s, scales dynamically)
   "modelTimeouts": {           // per-model timeout overrides in ms (optional)
-    "cli-claude/claude-opus-4-6":       300000,   // 5 min — heavy/agentic tasks
+    "cli-claude/claude-opus-4-8":       360000,
+    "cli-claude/claude-opus-4-7":       360000,
+    "cli-claude/claude-opus-4-6":       300000,
     "cli-claude/claude-sonnet-4-6":     180000,   // 3 min — interactive chat
     "cli-claude/claude-haiku-4-5":       90000,   // 90s  — fast responses
     "cli-gemini/gemini-2.5-pro":        180000,
@@ -409,6 +422,14 @@ npm run ci          # lint + typecheck + test
 
 ## Changelog
 
+### v3.11.5 — Model catalog refresh
+
+- **feat:** `/cli-opus` now targets Claude Opus 4.8, with `/cli-opus47` and `/cli-opus46` kept for explicit older Opus routing.
+- **feat:** `/cli-gemini3` now targets Gemini 3.1 Pro Preview, while `/cli-gemini3-pro-preview` remains available as a legacy alias.
+- **feat:** Adds GPT-5.5, Claude Opus 4.8, Gemini 3.1 Pro Preview, and Gemini API 3.1 timeout and fallback defaults.
+- **docs:** Refreshes CLI and web model lists based on current provider docs and local CLI probes.
+- **test:** Updates config coverage for the refreshed model timeout and fallback defaults.
+
 ### v3.11.4 — Documentation polish
 
 - Minor README and CLAUDE.md improvements. No code changes.
@@ -421,7 +442,7 @@ npm run ci          # lint + typecheck + test
 ### v3.11.2 — `/cli-codex55` + per-model timeouts for Opus 4-7 and GPT-5.5
 
 - **feat:** New `/cli-codex55` slash command routes to `openai-codex/gpt-5.5` via the Codex CLI.
-- **fix:** Per-model timeouts in plugin config now cover Opus 4-7 (`cli-claude/claude-opus-4-7`) and GPT-5.5 (`openai-codex/gpt-5.5`) — these were missing from `DEFAULT_MODEL_TIMEOUTS` and falling back to the base `proxyTimeoutMs`.
+- **fix:** Per-model timeouts in plugin config now cover Opus 4.8 (`cli-claude/claude-opus-4-8`), Opus 4.7 (`cli-claude/claude-opus-4-7`), and GPT-5.5 (`openai-codex/gpt-5.5`), which were missing from `DEFAULT_MODEL_TIMEOUTS` and falling back to the base `proxyTimeoutMs`.
 
 ### v3.11.1 — Plugin-SDK import path fix for OpenClaw 2026.5.x
 

@@ -36,6 +36,10 @@ const STABLE_INTERVAL_MS = 500;
 const CHATGPT_HOME = "https://chatgpt.com";
 
 const MODEL_URLS: Record<string, string> = {
+  "chat-latest":  "https://chatgpt.com/?model=chat-latest",
+  "gpt-5.5":      "https://chatgpt.com/?model=gpt-5.5",
+  "gpt-5.4":      "https://chatgpt.com/?model=gpt-5.4",
+  "gpt-5.3":      "https://chatgpt.com/?model=gpt-5.3",
   "gpt-4o":       "https://chatgpt.com/?model=gpt-4o",
   "gpt-4o-mini":  "https://chatgpt.com/?model=gpt-4o-mini",
   "gpt-4.1":      "https://chatgpt.com/?model=gpt-4.1",
@@ -47,6 +51,10 @@ const MODEL_URLS: Record<string, string> = {
 
 const MODEL_MAP: Record<string, string> = {
   // canonical names
+  "chat-latest":   "chat-latest",
+  "gpt-5.5":       "gpt-5.5",
+  "gpt-5.4":       "gpt-5.4",
+  "gpt-5.3":       "gpt-5.3",
   "gpt-4o":        "gpt-4o",
   "gpt-4o-mini":   "gpt-4o-mini",
   "gpt-4.1":       "gpt-4.1",
@@ -58,6 +66,9 @@ const MODEL_MAP: Record<string, string> = {
   "gpt-o3":        "o3",
   "gpt-o4-mini":   "o4-mini",
   "gpt-4-1":       "gpt-4.1",
+  "gpt-5-5":       "gpt-5.5",
+  "gpt-5-4":       "gpt-5.4",
+  "gpt-5-3":       "gpt-5.3",
 };
 
 function resolveModel(m?: string): string {

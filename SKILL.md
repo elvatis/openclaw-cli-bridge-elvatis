@@ -22,8 +22,8 @@ Registers `openai-codex` provider from existing `~/.codex/auth.json` tokens. No 
 
 ## Phase 2 — Request Proxy
 Local OpenAI-compatible HTTP proxy (`127.0.0.1:31337`) routes vllm model calls to CLI subprocesses:
-- `vllm/cli-gemini/gemini-2.5-pro` / `gemini-2.5-flash` / `gemini-3-pro`
-- `vllm/cli-claude/claude-sonnet-4-6` / `claude-opus-4-6` / `claude-haiku-4-5`
+- `vllm/cli-gemini/gemini-2.5-pro` / `gemini-2.5-flash` / `gemini-3.1-pro-preview` / `gemini-3-flash-preview`
+- `vllm/cli-claude/claude-sonnet-4-6` / `claude-opus-4-8` / `claude-opus-4-7` / `claude-opus-4-6` / `claude-haiku-4-5`
 - `vllm/local-bitnet/bitnet-2b` → BitNet llama-server on 127.0.0.1:8082
 
 Prompts go via stdin/tmpfile — never as CLI args (prevents `E2BIG` for long sessions).
@@ -34,11 +34,13 @@ Six instant model-switch commands (authorized senders only):
 | Command | Model |
 |---|---|
 | `/cli-sonnet` | `vllm/cli-claude/claude-sonnet-4-6` |
-| `/cli-opus` | `vllm/cli-claude/claude-opus-4-6` |
+| `/cli-opus` | `vllm/cli-claude/claude-opus-4-8` |
+| `/cli-opus47` | `vllm/cli-claude/claude-opus-4-7` |
+| `/cli-opus46` | `vllm/cli-claude/claude-opus-4-6` |
 | `/cli-haiku` | `vllm/cli-claude/claude-haiku-4-5` |
 | `/cli-gemini` | `vllm/cli-gemini/gemini-2.5-pro` |
 | `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` |
-| `/cli-gemini3` | `vllm/cli-gemini/gemini-3-pro` |
+| `/cli-gemini3` | `vllm/cli-gemini/gemini-3.1-pro-preview` |
 | `/cli-codex` | `openai-codex/gpt-5.3-codex` |
 | `/cli-codex54` | `openai-codex/gpt-5.4` |
 | `/cli-bitnet` | `vllm/local-bitnet/bitnet-2b` |
@@ -68,4 +70,4 @@ On gateway restart, if any session has expired, a **WhatsApp alert** is sent aut
 
 See `README.md` for full configuration reference and architecture diagram.
 
-**Version:** 3.11.4
+**Version:** 3.11.5

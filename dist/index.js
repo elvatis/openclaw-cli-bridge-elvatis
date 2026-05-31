@@ -10,12 +10,13 @@
  *
  * Phase 3 (slash commands): registers /cli-* commands for instant model switching.
  *   /cli-sonnet       → vllm/cli-claude/claude-sonnet-4-6      (Claude Code CLI proxy)
+ *   /cli-opus         → vllm/cli-claude/claude-opus-4-8        (Claude Code CLI proxy, 1M ctx)
  *   /cli-opus47       → vllm/cli-claude/claude-opus-4-7        (Claude Code CLI proxy, 1M ctx)
- *   /cli-opus         → vllm/cli-claude/claude-opus-4-6        (Claude Code CLI proxy)
+ *   /cli-opus46       → vllm/cli-claude/claude-opus-4-6        (Claude Code CLI proxy)
  *   /cli-haiku        → vllm/cli-claude/claude-haiku-4-5       (Claude Code CLI proxy)
  *   /cli-gemini       → vllm/cli-gemini/gemini-2.5-pro         (Gemini CLI proxy)
  *   /cli-gemini-flash → vllm/cli-gemini/gemini-2.5-flash       (Gemini CLI proxy)
- *   /cli-gemini3      → vllm/cli-gemini/gemini-3-pro-preview   (Gemini CLI proxy)
+ *   /cli-gemini3      → vllm/cli-gemini/gemini-3.1-pro-preview (Gemini CLI proxy)
  *   /cli-codex        → openai-codex/gpt-5.3-codex             (Codex CLI OAuth, direct API)
  *   /cli-codex54      → openai-codex/gpt-5.4                   (Codex CLI OAuth, direct API)
  *   /cli-opencode     → vllm/opencode/default                  (OpenCode CLI proxy)
@@ -26,6 +27,7 @@
  *
  * Provider / model naming:
  *   vllm/cli-gemini/gemini-2.5-pro  → `gemini -m gemini-2.5-pro @<tmpfile>`
+ *   vllm/cli-claude/claude-opus-4-8 → `claude -p -m claude-opus-4-8 --output-format json` (stdin, real token usage)
  *   vllm/cli-claude/claude-opus-4-7 → `claude -p -m claude-opus-4-7 --output-format json` (stdin, real token usage)
  *   vllm/cli-claude/claude-opus-4-6 → `claude -p -m claude-opus-4-6 --output-format json` (stdin)
  */
@@ -718,13 +720,15 @@ async function checkBitNetServer(url = "http://127.0.0.1:8082") {
 const CLI_MODEL_COMMANDS = [
     // ── Claude Code CLI (via local proxy) ────────────────────────────────────────
     { name: "cli-sonnet", model: "vllm/cli-claude/claude-sonnet-4-6", description: "Claude Sonnet 4.6 (Claude Code CLI)", label: "Claude Sonnet 4.6 (CLI)" },
+    { name: "cli-opus", model: "vllm/cli-claude/claude-opus-4-8", description: "Claude Opus 4.8 (Claude Code CLI, 1M ctx)", label: "Claude Opus 4.8 (CLI)" },
     { name: "cli-opus47", model: "vllm/cli-claude/claude-opus-4-7", description: "Claude Opus 4.7 (Claude Code CLI, 1M ctx)", label: "Claude Opus 4.7 (CLI)" },
-    { name: "cli-opus", model: "vllm/cli-claude/claude-opus-4-6", description: "Claude Opus 4.6 (Claude Code CLI)", label: "Claude Opus 4.6 (CLI)" },
+    { name: "cli-opus46", model: "vllm/cli-claude/claude-opus-4-6", description: "Claude Opus 4.6 (Claude Code CLI)", label: "Claude Opus 4.6 (CLI)" },
     { name: "cli-haiku", model: "vllm/cli-claude/claude-haiku-4-5", description: "Claude Haiku 4.5 (Claude Code CLI)", label: "Claude Haiku 4.5 (CLI)" },
     // ── Gemini CLI (via local proxy) ─────────────────────────────────────────────
     { name: "cli-gemini", model: "vllm/cli-gemini/gemini-2.5-pro", description: "Gemini 2.5 Pro (Gemini CLI)", label: "Gemini 2.5 Pro (CLI)" },
     { name: "cli-gemini-flash", model: "vllm/cli-gemini/gemini-2.5-flash", description: "Gemini 2.5 Flash (Gemini CLI)", label: "Gemini 2.5 Flash (CLI)" },
-    { name: "cli-gemini3", model: "vllm/cli-gemini/gemini-3-pro-preview", description: "Gemini 3 Pro (Gemini CLI)", label: "Gemini 3 Pro (CLI)" },
+    { name: "cli-gemini3", model: "vllm/cli-gemini/gemini-3.1-pro-preview", description: "Gemini 3.1 Pro Preview (Gemini CLI)", label: "Gemini 3.1 Pro Preview (CLI)" },
+    { name: "cli-gemini3-pro-preview", model: "vllm/cli-gemini/gemini-3-pro-preview", description: "Gemini 3 Pro Preview legacy alias (Gemini CLI)", label: "Gemini 3 Pro Preview (CLI)" },
     { name: "cli-gemini3-flash", model: "vllm/cli-gemini/gemini-3-flash-preview", description: "Gemini 3 Flash (Gemini CLI)", label: "Gemini 3 Flash (CLI)" },
     // ── Codex CLI (openai-codex provider, OAuth auth) ────────────────────────────
     { name: "cli-codex", model: "openai-codex/gpt-5.3-codex", description: "GPT-5.3 Codex (Codex CLI auth)", label: "GPT-5.3 Codex" },
@@ -1646,16 +1650,16 @@ const plugin = {
                     {
                         name: "Grok",
                         ctx: grokContext,
-                        models: ["web-grok/grok-3", "web-grok/grok-3-fast", "web-grok/grok-3-mini", "web-grok/grok-3-mini-fast"],
-                        cmds: ["openclaw models set vllm/web-grok/grok-3"],
+                        models: ["web-grok/grok-4", "web-grok/grok-3", "web-grok/grok-3-fast", "web-grok/grok-3-mini", "web-grok/grok-3-mini-fast"],
+                        cmds: ["openclaw models set vllm/web-grok/grok-4"],
                         loginCmd: "/grok-login",
                         expiry: (() => { const e = loadGrokExpiry(); return e ? formatExpiryInfo(e) : null; })(),
                     },
                     {
                         name: "Gemini (web)",
                         ctx: geminiContext,
-                        models: ["web-gemini/gemini-2-5-pro", "web-gemini/gemini-2-5-flash", "web-gemini/gemini-3-pro", "web-gemini/gemini-3-flash"],
-                        cmds: ["openclaw models set vllm/web-gemini/gemini-2-5-pro"],
+                        models: ["web-gemini/gemini-3-1-pro", "web-gemini/gemini-3-pro", "web-gemini/gemini-3-flash", "web-gemini/gemini-2-5-pro", "web-gemini/gemini-2-5-flash"],
+                        cmds: ["openclaw models set vllm/web-gemini/gemini-3-1-pro"],
                         loginCmd: "/gemini-login",
                         expiry: (() => { const e = loadGeminiExpiry(); return e ? formatGeminiExpiry(e) : null; })(),
                     },
@@ -1785,7 +1789,7 @@ const plugin = {
                     api.logger.info(`[cli-bridge:grok] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
                 }
                 const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatExpiryInfo(expiry)}` : "";
-                return { text: `✅ Grok session ready!\n\nModels available:\n• \`vllm/web-grok/grok-3\`\n• \`vllm/web-grok/grok-3-fast\`\n• \`vllm/web-grok/grok-3-mini\`\n• \`vllm/web-grok/grok-3-mini-fast\`${expiryLine}` };
+                return { text: `✅ Grok session ready!\n\nModels available:\n• \`vllm/web-grok/grok-4\`\n• \`vllm/web-grok/grok-3\`\n• \`vllm/web-grok/grok-3-fast\`\n• \`vllm/web-grok/grok-3-mini\`\n• \`vllm/web-grok/grok-3-mini-fast\`${expiryLine}` };
             },
         });
         api.registerCommand({
@@ -1799,7 +1803,7 @@ const plugin = {
                 if (check.valid) {
                     const expiry = loadGrokExpiry();
                     const expiryLine = expiry ? `\n🕐 ${formatExpiryInfo(expiry)}` : "";
-                    return { text: `✅ grok.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-grok/grok-3, web-grok/grok-3-fast, web-grok/grok-3-mini, web-grok/grok-3-mini-fast${expiryLine}` };
+                    return { text: `✅ grok.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-grok/grok-4, web-grok/grok-3, web-grok/grok-3-fast, web-grok/grok-3-mini, web-grok/grok-3-mini-fast${expiryLine}` };
                 }
                 grokContext = null;
                 return { text: `❌ Session expired: ${check.reason}\nRun \`/grok-login\` to re-authenticate.` };
@@ -1904,7 +1908,7 @@ const plugin = {
                     api.logger.info(`[cli-bridge:gemini] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
                 }
                 const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatGeminiExpiry(expiry)}` : "";
-                return { text: `✅ Gemini session ready!\n\nModels available:\n• \`vllm/web-gemini/gemini-2-5-pro\`\n• \`vllm/web-gemini/gemini-2-5-flash\`\n• \`vllm/web-gemini/gemini-3-pro\`\n• \`vllm/web-gemini/gemini-3-flash\`${expiryLine}` };
+                return { text: `✅ Gemini session ready!\n\nModels available:\n• \`vllm/web-gemini/gemini-3-1-pro\`\n• \`vllm/web-gemini/gemini-3-pro\`\n• \`vllm/web-gemini/gemini-3-flash\`\n• \`vllm/web-gemini/gemini-2-5-pro\`\n• \`vllm/web-gemini/gemini-2-5-flash\`${expiryLine}` };
             },
         });
         api.registerCommand({
@@ -1921,7 +1925,7 @@ const plugin = {
                     if (editor) {
                         const expiry = loadGeminiExpiry();
                         const expiryLine = expiry ? `\n🕐 ${formatGeminiExpiry(expiry)}` : "";
-                        return { text: `✅ gemini.google.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-gemini/gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash${expiryLine}` };
+                        return { text: `✅ gemini.google.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-gemini/gemini-3-1-pro, gemini-3-pro, gemini-3-flash, gemini-2-5-pro, gemini-2-5-flash${expiryLine}` };
                     }
                 }
                 catch { /* fall through */ }
@@ -2027,7 +2031,7 @@ const plugin = {
                     api.logger.info(`[cli-bridge:claude-web] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
                 }
                 const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatClaudeExpiry(expiry)}` : "";
-                return { text: `✅ Claude.ai session ready!\n\nModels available:\n• \`vllm/web-claude/claude-sonnet\`\n• \`vllm/web-claude/claude-opus\`\n• \`vllm/web-claude/claude-haiku\`${expiryLine}` };
+                return { text: `✅ Claude.ai session ready!\n\nModels available:\n• \`vllm/web-claude/claude-opus-4-8\`\n• \`vllm/web-claude/claude-sonnet-4-6\`\n• \`vllm/web-claude/claude-haiku-4-5\`\n• \`vllm/web-claude/claude-opus\`\n• \`vllm/web-claude/claude-sonnet\`\n• \`vllm/web-claude/claude-haiku\`${expiryLine}` };
             },
         });
         api.registerCommand({
@@ -2044,7 +2048,7 @@ const plugin = {
                     if (editor) {
                         const expiry = loadClaudeExpiry();
                         const expiryLine = expiry ? `\n🕐 ${formatClaudeExpiry(expiry)}` : "";
-                        return { text: `✅ claude.ai session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-claude/claude-sonnet, claude-opus, claude-haiku${expiryLine}` };
+                        return { text: `✅ claude.ai session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-claude/claude-opus-4-8, claude-sonnet-4-6, claude-haiku-4-5, claude-opus, claude-sonnet, claude-haiku${expiryLine}` };
                     }
                 }
                 catch { /* fall through */ }
@@ -2150,7 +2154,7 @@ const plugin = {
                     api.logger.info(`[cli-bridge:chatgpt] cookie expiry: ${new Date(expiry.expiresAt).toISOString()}`);
                 }
                 const expiryLine = expiry ? `\n\n🕐 Cookie expiry: ${formatChatGPTExpiry(expiry)}` : "";
-                return { text: `✅ ChatGPT session ready!\n\nModels available:\n• \`vllm/web-chatgpt/gpt-4o\`\n• \`vllm/web-chatgpt/gpt-4o-mini\`\n• \`vllm/web-chatgpt/gpt-4.1\`\n• \`vllm/web-chatgpt/gpt-4.1-mini\`\n• \`vllm/web-chatgpt/o3\`\n• \`vllm/web-chatgpt/o4-mini\`\n• \`vllm/web-chatgpt/gpt-5\`\n• \`vllm/web-chatgpt/gpt-5-mini\`${expiryLine}` };
+                return { text: `✅ ChatGPT session ready!\n\nModels available:\n• \`vllm/web-chatgpt/chat-latest\`\n• \`vllm/web-chatgpt/gpt-5.5\`\n• \`vllm/web-chatgpt/gpt-5.4\`\n• \`vllm/web-chatgpt/gpt-5.3\`\n• \`vllm/web-chatgpt/gpt-5\`\n• \`vllm/web-chatgpt/gpt-5-mini\`${expiryLine}` };
             },
         });
         api.registerCommand({
@@ -2167,7 +2171,7 @@ const plugin = {
                     if (editor) {
                         const expiry = loadChatGPTExpiry();
                         const expiryLine = expiry ? `\n🕐 ${formatChatGPTExpiry(expiry)}` : "";
-                        return { text: `✅ chatgpt.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-chatgpt/gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, o3, o4-mini, gpt-5, gpt-5-mini${expiryLine}` };
+                        return { text: `✅ chatgpt.com session active\nProxy: \`127.0.0.1:${port}\`\nModels: web-chatgpt/chat-latest, gpt-5.5, gpt-5.4, gpt-5.3, gpt-5, gpt-5-mini${expiryLine}` };
                     }
                 }
                 catch { /* fall through */ }
@@ -2202,7 +2206,7 @@ const plugin = {
                             }
                             return r.valid;
                         },
-                        models: "web-grok/grok-3, grok-3-fast, grok-3-mini",
+                        models: "web-grok/grok-4, grok-3, grok-3-fast, grok-3-mini",
                         loginCmd: "/grok-login",
                         expiry: () => { const e = loadGrokExpiry(); return e ? formatExpiryInfo(e) : null; },
                     },
@@ -2222,7 +2226,7 @@ const plugin = {
                                 return false;
                             }
                         },
-                        models: "web-gemini/gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash",
+                        models: "web-gemini/gemini-3-1-pro, gemini-3-pro, gemini-3-flash, gemini-2-5-pro, gemini-2-5-flash",
                         loginCmd: "/gemini-login",
                         expiry: () => { const e = loadGeminiExpiry(); return e ? formatGeminiExpiry(e) : null; },
                     },
@@ -2242,7 +2246,7 @@ const plugin = {
                                 return false;
                             }
                         },
-                        models: "web-claude/claude-sonnet, claude-opus, claude-haiku",
+                        models: "web-claude/claude-opus-4-8, claude-sonnet-4-6, claude-haiku-4-5, claude-opus, claude-sonnet, claude-haiku",
                         loginCmd: "/claude-login",
                         expiry: () => { const e = loadClaudeExpiry(); return e ? formatClaudeExpiry(e) : null; },
                     },
@@ -2262,7 +2266,7 @@ const plugin = {
                                 return false;
                             }
                         },
-                        models: "web-chatgpt/gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, o3, o4-mini, gpt-5, gpt-5-mini",
+                        models: "web-chatgpt/chat-latest, gpt-5.5, gpt-5.4, gpt-5.3, gpt-5, gpt-5-mini",
                         loginCmd: "/chatgpt-login",
                         expiry: () => { const e = loadChatGPTExpiry(); return e ? formatChatGPTExpiry(e) : null; },
                     },
