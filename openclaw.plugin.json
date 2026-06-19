@@ -3,7 +3,7 @@
   "slug": "openclaw-cli-bridge-elvatis",
   "name": "OpenClaw CLI Bridge",
   "version": "3.11.5",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "description": "Phase 1: openai-codex auth bridge. Phase 2: local HTTP proxy routing model calls through gemini/claude CLIs (vllm provider).",
   "providers": [
     "openai-codex"

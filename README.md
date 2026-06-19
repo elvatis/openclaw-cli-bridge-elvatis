@@ -1,5 +1,7 @@
 # openclaw-cli-bridge-elvatis
 
+> **Archived and no longer maintained.** This project is no longer actively developed and has been archived. It is provided as-is under the MIT License. Feel free to fork and use it.
+
 > OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
 
 **Current version:** `3.11.5`
