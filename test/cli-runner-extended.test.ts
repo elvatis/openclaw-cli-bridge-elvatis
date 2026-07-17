@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { spawn, execSync } from "node:child_process";
+import { homedir } from "node:os";
 
 // ── Mock child_process ──────────────────────────────────────────────────────
 
@@ -101,19 +102,19 @@ describe("runCodex()", () => {
     );
   });
 
-  it("passes workdir as cwd", async () => {
+  it("always uses homedir as cwd, ignoring workdir (workspace dirs break codex)", async () => {
     await runCodex("test", "openai-codex/gpt-5.3-codex", 5000, "/my/workdir");
     expect(mockSpawn).toHaveBeenCalledWith(
       "codex",
       expect.any(Array),
-      expect.objectContaining({ cwd: "/my/workdir" })
+      expect.objectContaining({ cwd: homedir() })
     );
   });
 
-  it("auto-initializes git when workdir has no .git", async () => {
+  it("auto-initializes git in homedir when it has no .git", async () => {
     existsSyncRef.value = false;
     await runCodex("test", "openai-codex/gpt-5.3-codex", 5000, "/no-git");
-    expect(mockExecSync).toHaveBeenCalledWith("git init", expect.objectContaining({ cwd: "/no-git" }));
+    expect(mockExecSync).toHaveBeenCalledWith("git init", expect.objectContaining({ cwd: homedir() }));
   });
 
   it("does not run git init when .git exists", async () => {
@@ -225,14 +226,16 @@ describe("routeToCliRunner — new model prefixes", () => {
   });
 
   it("passes workdir option through to the runner cwd", async () => {
+    // Use opencode: it honors workdir. (Codex intentionally overrides cwd to homedir.)
+    mockSpawn.mockImplementation(() => makeFakeProc("opencode result", 0));
     await routeToCliRunner(
-      "openai-codex/gpt-5.3-codex",
+      "opencode/default",
       [{ role: "user", content: "hi" }],
       5000,
       { workdir: "/custom/dir" }
     );
     expect(mockSpawn).toHaveBeenCalledWith(
-      "codex",
+      "opencode",
       expect.any(Array),
       expect.objectContaining({ cwd: "/custom/dir" })
     );
@@ -250,7 +253,7 @@ describe("routeToCliRunner — new model prefixes", () => {
 // ──────────────────────────────────────────────────────────────────────────────
 
 describe("Codex auto-git-init via routeToCliRunner", () => {
-  it("calls git init when workdir has no .git directory", async () => {
+  it("calls git init in homedir when it has no .git directory", async () => {
     existsSyncRef.value = false;
     mockSpawn.mockImplementation(() => makeFakeProc("codex output", 0));
     mockExecSync.mockClear();
@@ -262,7 +265,7 @@ describe("Codex auto-git-init via routeToCliRunner", () => {
       { workdir: "/no-git-dir" }
     );
 
-    expect(mockExecSync).toHaveBeenCalledWith("git init", expect.objectContaining({ cwd: "/no-git-dir" }));
+    expect(mockExecSync).toHaveBeenCalledWith("git init", expect.objectContaining({ cwd: homedir() }));
   });
 });
 

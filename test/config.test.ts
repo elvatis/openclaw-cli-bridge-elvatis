@@ -61,11 +61,8 @@ describe("config.ts exports", () => {
   });
 
   it("exports per-model timeouts for all major models", () => {
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-opus-4-8"]).toBe(360_000);
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-opus-4-7"]).toBe(360_000);
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-opus-4-6"]).toBe(360_000);
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-sonnet-4-6"]).toBe(300_000);
-    expect(DEFAULT_MODEL_TIMEOUTS["cli-claude/claude-haiku-4-5"]).toBe(120_000);
+    // Claude models intentionally have no per-model override — they use the
+    // base DEFAULT_PROXY_TIMEOUT_MS with dynamic scaling instead.
     expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-3.1-pro-preview"]).toBe(300_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-pro"]).toBe(300_000);
     expect(DEFAULT_MODEL_TIMEOUTS["cli-gemini/gemini-2.5-flash"]).toBe(180_000);
@@ -77,11 +74,6 @@ describe("config.ts exports", () => {
   });
 
   it("exports model fallback chains as arrays", () => {
-    // Current Sonnet escalation target is Opus 4.8.
-    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-sonnet-4-6"]).toEqual(["cli-claude/claude-opus-4-8", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"]);
-    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-opus-4-8"]).toContain("cli-claude/claude-opus-4-7");
-    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-opus-4-7"]).toContain("cli-claude/claude-opus-4-6");
-    expect(DEFAULT_MODEL_FALLBACKS["cli-claude/claude-opus-4-6"]).toContain("cli-claude/claude-sonnet-4-6");
     expect(DEFAULT_MODEL_FALLBACKS["cli-gemini/gemini-2.5-pro"]).toContain("cli-gemini/gemini-2.5-flash");
     expect(DEFAULT_MODEL_FALLBACKS["cli-gemini/gemini-3.1-pro-preview"]).toContain("cli-gemini/gemini-3-flash-preview");
     expect(DEFAULT_MODEL_FALLBACKS["gemini-api/gemini-2.5-pro"]).toContain("gemini-api/gemini-2.5-flash");
@@ -113,6 +105,6 @@ describe("config.ts exports", () => {
   });
 
   it("exports CLI test default model", () => {
-    expect(CLI_TEST_DEFAULT_MODEL).toBe("cli-claude/claude-sonnet-4-6");
+    expect(CLI_TEST_DEFAULT_MODEL).toBe("cli-gemini/gemini-2.5-flash");
   });
 });
