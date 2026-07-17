@@ -9,6 +9,8 @@
  *   are routed to CLI tools or browser-session providers.
  *
  * Phase 3 (slash commands): registers /cli-* commands for instant model switching.
+ *   /cli-fable5       → vllm/cli-claude/claude-fable-5         (Claude Code CLI proxy, 1M ctx, flagship)
+ *   /cli-sonnet5      → vllm/cli-claude/claude-sonnet-5        (Claude Code CLI proxy, 1M ctx)
  *   /cli-sonnet       → vllm/cli-claude/claude-sonnet-4-6      (Claude Code CLI proxy)
  *   /cli-opus         → vllm/cli-claude/claude-opus-4-8        (Claude Code CLI proxy, 1M ctx)
  *   /cli-opus47       → vllm/cli-claude/claude-opus-4-7        (Claude Code CLI proxy, 1M ctx)
@@ -794,6 +796,8 @@ async function checkBitNetServer(url = "http://127.0.0.1:8082"): Promise<boolean
 // ──────────────────────────────────────────────────────────────────────────────
 const CLI_MODEL_COMMANDS = [
   // ── Claude Code CLI (via local proxy) ────────────────────────────────────────
+  { name: "cli-fable5",       model: "vllm/cli-claude/claude-fable-5",       description: "Claude Fable 5 (Claude Code CLI, 1M ctx, Anthropic flagship)", label: "Claude Fable 5 (CLI)" },
+  { name: "cli-sonnet5",      model: "vllm/cli-claude/claude-sonnet-5",      description: "Claude Sonnet 5 (Claude Code CLI, 1M ctx)", label: "Claude Sonnet 5 (CLI)" },
   { name: "cli-sonnet",       model: "vllm/cli-claude/claude-sonnet-4-6",    description: "Claude Sonnet 4.6 (Claude Code CLI)",       label: "Claude Sonnet 4.6 (CLI)" },
   { name: "cli-opus",         model: "vllm/cli-claude/claude-opus-4-8",      description: "Claude Opus 4.8 (Claude Code CLI, 1M ctx)", label: "Claude Opus 4.8 (CLI)" },
   { name: "cli-opus47",       model: "vllm/cli-claude/claude-opus-4-7",      description: "Claude Opus 4.7 (Claude Code CLI, 1M ctx)", label: "Claude Opus 4.7 (CLI)" },

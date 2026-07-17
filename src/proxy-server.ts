@@ -250,6 +250,8 @@ export interface ProxyServerOptions {
 /** Available CLI bridge models for GET /v1/models */
 export const CLI_MODELS = [
   // ── Claude Code CLI ───────────────────────────────────────────────────────
+  { id: "cli-claude/claude-fable-5",    name: "Claude Fable 5 (CLI)",     contextWindow: 1_000_000, maxTokens: 128_000 },
+  { id: "cli-claude/claude-sonnet-5",   name: "Claude Sonnet 5 (CLI)",    contextWindow: 1_000_000, maxTokens: 128_000 },
   { id: "cli-claude/claude-opus-4-8",   name: "Claude Opus 4.8 (CLI)",    contextWindow: 1_000_000, maxTokens: 128_000 },
   { id: "cli-claude/claude-opus-4-7",   name: "Claude Opus 4.7 (CLI)",    contextWindow: 1_000_000, maxTokens: 64_000 },
   { id: "cli-claude/claude-sonnet-4-6", name: "Claude Sonnet 4.6 (CLI)",  contextWindow: 1_000_000, maxTokens: 64_000 },
