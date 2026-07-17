@@ -824,6 +824,8 @@ const CLI_MODEL_COMMANDS = [
   { name: "cli-grok",         model: "vllm/cli-grok/grok-4.5",              description: "Grok 4.5 (Grok CLI)",                    label: "Grok 4.5 (CLI)" },
   // ── BitNet local inference (via local proxy → llama-server) ─────────────────
   { name: "cli-bitnet",       model: "vllm/local-bitnet/bitnet-2b",         description: "BitNet b1.58 2B (local CPU, no API key)", label: "BitNet 2B (local)" },
+  // ── LM Studio (local network inference, OpenAI-compatible, URL from LM_STUDIO_URL in .env) ──
+  { name: "lms",          model: "vllm/lm-studio/auto",    description: "LM Studio: uses whatever model is currently loaded (URL from LM_STUDIO_URL in ~/.openclaw/.env)", label: "LM Studio (auto)" },
   // ── OpenRouter API (REST, uses $OPENROUTER_API_KEY, 200+ models) ─────────────
   { name: "or-opus",          model: "vllm/openrouter-api/anthropic/claude-opus-4-8",   description: "Claude Opus 4.8 via OpenRouter",      label: "Claude Opus 4.8 (OpenRouter)" },
   { name: "or-sonnet",        model: "vllm/openrouter-api/anthropic/claude-sonnet-4-6", description: "Claude Sonnet 4.6 via OpenRouter",    label: "Claude Sonnet 4.6 (OpenRouter)" },
@@ -1760,6 +1762,7 @@ const plugin = {
           "Claude Code CLI": [],
           "Gemini CLI": [],
           "Codex (OAuth)": [],
+          "LM Studio (local)": [],
           "Perplexity API": [],
           "OpenRouter API": [],
           "Other": [],
@@ -1770,6 +1773,7 @@ const plugin = {
           if (c.model.startsWith("vllm/cli-claude/")) groups["Claude Code CLI"].push(entry);
           else if (c.model.startsWith("vllm/cli-gemini/")) groups["Gemini CLI"].push(entry);
           else if (c.model.startsWith("openai-codex/")) groups["Codex (OAuth)"].push(entry);
+          else if (c.model.startsWith("vllm/lm-studio/")) groups["LM Studio (local)"].push(entry);
           else if (c.model.startsWith("vllm/perplexity-api/")) groups["Perplexity API"].push(entry);
           else if (c.model.startsWith("vllm/openrouter-api/")) groups["OpenRouter API"].push(entry);
           else groups["Other"].push(entry);
@@ -1785,6 +1789,7 @@ const plugin = {
               .replace(/^openai-codex\//, "")
               .replace(/^vllm\/perplexity-api\//, "")
               .replace(/^vllm\/openrouter-api\//, "")
+              .replace(/^vllm\/lm-studio\//, "lm-studio:")
               .replace(/^vllm\//, "");
             lines.push(`  ${cmd.padEnd(22)} ${modelId}`);
           }
@@ -2426,6 +2431,79 @@ const plugin = {
       },
     } satisfies OpenClawPluginCommandDefinition);
 
+    // ── /lms-models — discover & register LM Studio models ───────────────────
+    api.registerCommand({
+      name: "lms-models",
+      description: "Discover models currently loaded in LM Studio and show their IDs. Use the ID with /lms-use to switch.",
+      requireAuth: false,
+      handler: async (): Promise<PluginCommandResult> => {
+        const { discoverLmStudioModels, getLmStudioUrl } = await import("./src/lm-studio-runner.js");
+        const url = getLmStudioUrl();
+        const models = await discoverLmStudioModels(6_000);
+
+        if (models.length === 0) {
+          return {
+            text: [
+              `❌ LM Studio unreachable at \`${url}\``,
+              "",
+              "Make sure LM Studio is running with the local server enabled.",
+              "Set the URL in `~/.openclaw/.env`:",
+              "`LM_STUDIO_URL=http://192.168.177.4:1234`",
+            ].join("\n"),
+          };
+        }
+
+        const lines = [`🖥️ *LM Studio Models* — \`${url}\``, ""];
+        for (const m of models) {
+          lines.push(`  \`${m.id}\``);
+        }
+        lines.push("");
+        lines.push("Use any model ID as a slash command: `/lms-use <model-id>`");
+        lines.push("Or use `/lms` to send to whichever model is currently active.");
+
+        return { text: lines.join("\n") };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    // ── /lms-status — check LM Studio connectivity ───────────────────────────
+    api.registerCommand({
+      name: "lms-status",
+      description: "Check LM Studio connectivity and show active model.",
+      requireAuth: false,
+      handler: async (): Promise<PluginCommandResult> => {
+        const { discoverLmStudioModels, getLmStudioUrl } = await import("./src/lm-studio-runner.js");
+        const url = getLmStudioUrl();
+        const models = await discoverLmStudioModels(5_000);
+
+        if (models.length === 0) {
+          return { text: `❌ LM Studio unreachable at \`${url}\`\n\nSet \`LM_STUDIO_URL\` in \`~/.openclaw/.env\` if your LM Studio runs on a different host.` };
+        }
+
+        const lines = [`✅ *LM Studio connected* — \`${url}\``, ""];
+        lines.push(`Loaded model${models.length > 1 ? "s" : ""}: ${models.map(m => `\`${m.id}\``).join(", ")}`);
+        lines.push("");
+        lines.push("Use `/lms` to chat with the active model, or `/lms-models` for the full list.");
+
+        return { text: lines.join("\n") };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
+    // ── /lms-use — stage-switch to a specific LM Studio model ────────────────
+    api.registerCommand({
+      name: "lms-use",
+      description: "Switch to a specific LM Studio model. Usage: /lms-use <model-id>  (get IDs from /lms-models)",
+      acceptsArgs: true,
+      requireAuth: false,
+      handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
+        const modelName = (ctx.args ?? "").trim();
+        if (!modelName) {
+          return { text: "❌ Provide a model ID: `/lms-use <model-id>`\nRun `/lms-models` to see what's available." };
+        }
+        const vllmModel = `vllm/lm-studio/${modelName}`;
+        return switchModel(api, vllmModel, `LM Studio: ${modelName}`, false);
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
     // ── /pipeline — multi-phase AI pipeline with user-selectable models ─────
     api.registerCommand({
       name: "pipeline",
@@ -2519,7 +2597,7 @@ const plugin = {
         // Parse --skip=phase1,phase2
         const skipMatch = remainder.match(/--skip=([^\s]+)/);
         const skipPhases = new Set<string>(
-          skipMatch ? skipMatch[1].split(",").map(s => s.trim()) : []
+          skipMatch ? skipMatch[1].split(",").map((s: string) => s.trim()) : []
         );
 
         // Parse phase=model overrides
@@ -2771,6 +2849,9 @@ const plugin = {
       "/bridge-status",
       "/cli-help",
       "/pipeline",
+      "/lms-models",
+      "/lms-status",
+      "/lms-use",
     ];
     // Command registration is silent — fires on every register() call
   },

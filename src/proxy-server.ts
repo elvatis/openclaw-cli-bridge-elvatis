@@ -21,6 +21,7 @@ import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrow
 import { geminiApiComplete, geminiApiCompleteStream, type GeminiApiResult, type ContentPart } from "./gemini-api-runner.js";
 import { perplexityApiComplete, perplexityApiCompleteStream } from "./perplexity-api-runner.js";
 import { openrouterApiComplete, openrouterApiCompleteStream } from "./openrouter-runner.js";
+import { lmStudioComplete, lmStudioCompleteStream, discoverLmStudioModels, getLmStudioUrl } from "./lm-studio-runner.js";
 import type { BrowserContext } from "playwright";
 import { renderStatusPage, renderDashboardData, type StatusProvider } from "./status-template.js";
 import { sessionManager } from "./session-manager.js";
@@ -336,6 +337,11 @@ export const CLI_MODELS = [
   { id: "perplexity-api/perplexity/glm-5.2",          name: "GLM-5.2 (Perplexity)",         contextWindow: 128_000, maxTokens: 16_384 },
   // NVIDIA via Perplexity
   { id: "perplexity-api/nvidia/nemotron-3-super-120b-a12b", name: "Nemotron 3 Super 120B (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+
+  // ── LM Studio (local inference, OpenAI-compatible, no auth needed) ───────
+  // Static fallback entries — real model list is discovered dynamically at startup.
+  // Override URL via LM_STUDIO_URL in ~/.openclaw/.env
+  { id: "lm-studio/auto", name: "LM Studio (active model)", contextWindow: 32_768, maxTokens: 8_192 },
 
   // ── OpenRouter (unified API key, hundreds of models) ─────────────────────
   // Anthropic via OpenRouter
@@ -987,6 +993,54 @@ async function handleRequest(
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json", ...corsHeaders() });
           res.end(JSON.stringify({ error: { message: msg, type: "perplexity_api_error" } }));
+        }
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── LM Studio routing (local inference, OpenAI-compatible) ───────────────
+    const lmStudioModel = model.startsWith("vllm/") ? model.slice(5) : model;
+    if (lmStudioModel.startsWith("lm-studio/")) {
+      const timeoutMs = opts.modelTimeouts?.[lmStudioModel] ?? opts.timeoutMs ?? 120_000;
+      const apiStart = Date.now();
+      const apiOpts = { model: lmStudioModel, timeoutMs, log: opts.log };
+      try {
+        if (stream) {
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
+          sendSseChunk(res, { id, created, model: lmStudioModel, delta: { role: "assistant" }, finish_reason: null });
+          const result = await lmStudioCompleteStream(
+            cleanMessages,
+            apiOpts,
+            (token) => sendSseChunk(res, { id, created, model: lmStudioModel, delta: { content: token }, finish_reason: null })
+          );
+          const estComp = estimateTokens(result.content);
+          metrics.recordRequest(lmStudioModel, Date.now() - apiStart, true, estPromptTokens, result.completionTokens ?? estComp);
+          sendSseChunk(res, { id, created, model: result.model ?? lmStudioModel, delta: {}, finish_reason: result.finishReason });
+          res.write("data: [DONE]\n\n");
+          res.end();
+        } else {
+          const result = await lmStudioComplete(cleanMessages, apiOpts);
+          const estComp = estimateTokens(result.content);
+          metrics.recordRequest(lmStudioModel, Date.now() - apiStart, true, estPromptTokens, result.completionTokens ?? estComp);
+          res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({
+            id, object: "chat.completion", created, model: result.model ?? lmStudioModel,
+            choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: result.finishReason }],
+            usage: {
+              prompt_tokens: result.promptTokens ?? estPromptTokens,
+              completion_tokens: result.completionTokens ?? estComp,
+              total_tokens: (result.promptTokens ?? estPromptTokens) + (result.completionTokens ?? estComp),
+            },
+          }));
+        }
+      } catch (err) {
+        metrics.recordRequest(lmStudioModel, Date.now() - apiStart, false, estPromptTokens);
+        const msg = (err as Error).message;
+        opts.warn(`[cli-bridge] LM Studio error for ${lmStudioModel}: ${msg}`);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({ error: { message: msg, type: "lm_studio_error" } }));
         }
       }
       return;
