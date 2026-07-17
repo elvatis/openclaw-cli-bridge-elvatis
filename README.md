@@ -1,293 +1,388 @@
 # openclaw-cli-bridge-elvatis
 
-> OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, OpenCode, Pi) and web browser sessions (Grok, Gemini Web) as model providers. Includes slash commands for instant model switching, restore, health testing, and model listing.
+> OpenClaw plugin that bridges multiple AI model providers into OpenClaw via a local OpenAI-compatible proxy on port 31337. Supports CLI subprocesses, browser sessions, and direct API integrations -- all accessible through a unified slash-command interface and multi-phase pipeline.
 
-**Current version:** `2026.7.1`
+**Version:** `2026.7.1` | **Node.js:** 22+ | **OpenClaw:** 2026.7.x
 
 ---
 
-## What it does
+## What's new in v2026.7.1
 
-### Phase 1 — Auth bridge (`openai-codex`)
-Registers the `openai-codex` provider by reading OAuth tokens already stored by the Codex CLI (`~/.codex/auth.json`). No re-login needed.
+- Switched to date-based versioning (`YYYY.M.D`) aligned with OpenClaw releases.
+- Plugin now compiles against OpenClaw 2026.7.1 SDK (resolved `openclaw/plugin-sdk` module path change).
+- **Claude Code CLI models re-added** with the latest models: Fable 5, Sonnet 5, Opus 4.8, and legacy variants. Each runs in `--print` mode via stdin.
+- **Grok CLI added** (`cli-grok/grok-4.5`) via `--prompt-file` headless mode.
+- **Phase 5 expanded:** Perplexity API (35 models), OpenRouter (17+ models), LM Studio (dynamic discovery).
+- **Phase 6 added:** `/pipeline` multi-phase AI pipeline (research, architect, implement, review).
+- Project is actively maintained again. Archive notice removed.
 
-### Phase 2 — Request bridge (local proxy)
-Starts a local OpenAI-compatible HTTP proxy on `127.0.0.1:31337` and configures OpenClaw's `vllm` provider to route calls through `gemini` and `claude` CLI subprocesses.
+---
 
-**Prompt delivery:** always via **stdin** (never CLI args or `@file`) — avoids `E2BIG` for long sessions and Gemini agentic mode. Each message batch is truncated to the last 20 messages + system message (`MAX_MESSAGES`/`MAX_MSG_CHARS` in `src/cli-runner.ts`).
+## Table of Contents
 
-| Model reference | CLI invoked | Latency |
+1. [How it works](#how-it-works)
+2. [Phase 1 -- Codex Auth Bridge](#phase-1----codex-auth-bridge)
+3. [Phase 2 -- Local Proxy (CLI Subprocesses)](#phase-2----local-proxy-cli-subprocesses)
+4. [Phase 3 -- Slash Commands](#phase-3----slash-commands)
+5. [Phase 4 -- Web Browser Providers](#phase-4----web-browser-providers)
+6. [Phase 5 -- API Integrations](#phase-5----api-integrations)
+7. [Phase 6 -- Pipeline](#phase-6----pipeline)
+8. [Configuration](#configuration)
+9. [Setup](#setup)
+10. [Architecture](#architecture)
+11. [Requirements](#requirements)
+12. [Development](#development)
+13. [Known Issues and Fixes](#known-issues-and-fixes)
+14. [Changelog](#changelog)
+
+---
+
+## How it works
+
+The plugin starts a local OpenAI-compatible HTTP proxy on `127.0.0.1:31337`. OpenClaw connects to it via the `vllm` provider. Incoming requests are dispatched to the appropriate backend based on the model path:
+
+```
+vllm/cli-claude/<model>   -> Claude Code CLI subprocess (stdin, --print mode)
+vllm/cli-gemini/<model>   -> Gemini CLI subprocess (stdin, cwd=/tmp)
+vllm/cli-grok/<model>     -> Grok CLI subprocess (--prompt-file, headless)
+openai-codex/<model>      -> OpenAI API (direct, via Codex OAuth tokens)
+vllm/local-bitnet/<model> -> llama-server on 127.0.0.1:8082
+vllm/opencode/default     -> OpenCode CLI
+vllm/pi/default           -> Pi CLI
+perplexity/<model>        -> Perplexity REST API
+openrouter/<model>        -> OpenRouter REST API
+lmstudio/<model>          -> LM Studio REST API
+```
+
+All slash commands use staged switching by default: `/cli-<name>` stages the switch, `/cli-apply` applies it. Add `--now` to any switch command for an immediate switch.
+
+---
+
+## Phase 1 -- Codex Auth Bridge
+
+Reads existing OAuth tokens from `~/.codex/auth.json` and registers an `openai-codex` provider in OpenClaw. No re-login is required. Tokens are refreshed automatically 30 minutes before expiry.
+
+The `openai-codex` provider routes directly to the OpenAI API -- it does not go through the local proxy.
+
+---
+
+## Phase 2 -- Local Proxy (CLI Subprocesses)
+
+A local proxy on `127.0.0.1:31337` routes model calls to locally installed CLI tools. Prompts are always delivered via stdin to avoid `E2BIG` errors on long sessions. Message history is truncated to the last 20 messages + system message.
+
+### Claude Code CLI models
+
+| Model path | CLI invoked | Context |
 |---|---|---|
-| `vllm/cli-gemini/gemini-2.5-pro` | `gemini -m gemini-2.5-pro -p ""` (stdin, cwd=/tmp) | ~8–10s |
-| `vllm/cli-gemini/gemini-2.5-flash` | `gemini -m gemini-2.5-flash -p ""` (stdin, cwd=/tmp) | ~4–6s |
-| `vllm/cli-gemini/gemini-3.1-pro-preview` | `gemini -m gemini-3.1-pro-preview -p ""` (stdin, cwd=/tmp) | ~8–10s |
-| `vllm/cli-gemini/gemini-3-pro-preview` | `gemini -m gemini-3-pro-preview -p ""` (legacy alias, stdin, cwd=/tmp) | ~8–10s |
-| `vllm/cli-gemini/gemini-3-flash-preview` | `gemini -m gemini-3-flash-preview -p ""` (stdin, cwd=/tmp) | ~4–6s |
-| `vllm/cli-claude/claude-sonnet-4-6` | `claude -p --output-format text --model claude-sonnet-4-6` (stdin) | ~2–4s |
-| `vllm/cli-claude/claude-opus-4-8` | `claude -p --output-format text --model claude-opus-4-8` (stdin) | ~3–5s |
-| `vllm/cli-claude/claude-opus-4-7` | `claude -p --output-format text --model claude-opus-4-7` (stdin) | ~3–5s |
-| `vllm/cli-claude/claude-opus-4-6` | `claude -p --output-format text --model claude-opus-4-6` (legacy, stdin) | ~3–5s |
-| `vllm/cli-claude/claude-haiku-4-5` | `claude -p --output-format text --model claude-haiku-4-5` (stdin) | ~1–3s |
-| `vllm/opencode/default` | `opencode run "prompt"` (CLI arg) | varies |
-| `vllm/pi/default` | `pi -p "prompt"` (CLI arg) | varies |
+| `vllm/cli-claude/claude-fable-5` | `claude -p --output-format json --model claude-fable-5` | 1M |
+| `vllm/cli-claude/claude-sonnet-5` | `claude -p --output-format json --model claude-sonnet-5` | 1M |
+| `vllm/cli-claude/claude-opus-4-8` | `claude -p --output-format json --model claude-opus-4-8` | 1M |
+| `vllm/cli-claude/claude-opus-4-7` | `claude -p --output-format json --model claude-opus-4-7` | 1M |
+| `vllm/cli-claude/claude-opus-4-6` | `claude -p --output-format json --model claude-opus-4-6` | 1M |
+| `vllm/cli-claude/claude-sonnet-4-6` | `claude -p --output-format json --model claude-sonnet-4-6` | 1M |
+| `vllm/cli-claude/claude-haiku-4-5` | `claude -p --output-format json --model claude-haiku-4-5` | 200k |
 
-### Phase 3 — Slash commands
+### Gemini CLI models
 
-All commands use gateway-level `commands.allowFrom` for authorization (`requireAuth: false` at plugin level).
+Prompt is sent via stdin. `cwd=/tmp` prevents agentic mode from activating.
 
-**Claude Code CLI** (routed via local proxy on `:31337`):
+| Model path | Gemini model flag |
+|---|---|
+| `vllm/cli-gemini/gemini-2.5-pro` | `gemini-2.5-pro` |
+| `vllm/cli-gemini/gemini-2.5-flash` | `gemini-2.5-flash` |
+| `vllm/cli-gemini/gemini-3.1-pro-preview` | `gemini-3.1-pro-preview` |
+| `vllm/cli-gemini/gemini-3-pro-preview` | `gemini-3-pro-preview` (legacy alias) |
+| `vllm/cli-gemini/gemini-3-flash-preview` | `gemini-3-flash-preview` |
 
-| Command | Model | Notes |
+### Grok CLI
+
+| Model path | CLI invoked |
+|---|---|
+| `vllm/cli-grok/grok-4.5` | `grok --prompt-file <tmpfile>` (headless) |
+
+### Codex CLI (OAuth)
+
+These models use the `openai-codex` provider and call the OpenAI API directly via your Codex OAuth session. They do not go through the local proxy.
+
+| Model path | Notes |
+|---|---|
+| `openai-codex/gpt-5.3-codex` | Tested |
+| `openai-codex/gpt-5.3-codex-spark` | Tested |
+| `openai-codex/gpt-5.2-codex` | Tested |
+| `openai-codex/gpt-5.4` | May require upgraded OAuth scope |
+| `openai-codex/gpt-5.5` | May require upgraded OAuth scope |
+| `openai-codex/gpt-5.1-codex-mini` | Tested |
+
+### Other CLI providers
+
+| Model path | CLI invoked | Notes |
 |---|---|---|
-| `/cli-sonnet` | `vllm/cli-claude/claude-sonnet-4-6` | ✅ Tested |
-| `/cli-opus` | `vllm/cli-claude/claude-opus-4-8` | ✅ Tested |
-| `/cli-opus47` | `vllm/cli-claude/claude-opus-4-7` | ✅ Tested |
-| `/cli-opus46` | `vllm/cli-claude/claude-opus-4-6` | Legacy |
-| `/cli-haiku` | `vllm/cli-claude/claude-haiku-4-5` | ✅ Tested |
+| `vllm/opencode/default` | `opencode run "prompt"` | Requires `opencode` CLI |
+| `vllm/pi/default` | `pi -p "prompt"` | Requires `pi` CLI |
+| `vllm/local-bitnet/bitnet-2b` | llama-server on port 8082 | CPU inference, no API key |
 
-**Gemini CLI** (routed via local proxy on `:31337`, stdin + `cwd=/tmp`):
+---
 
-| Command | Model | Notes |
-|---|---|---|
-| `/cli-gemini` | `vllm/cli-gemini/gemini-2.5-pro` | ✅ Tested |
-| `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` | ✅ Tested |
-| `/cli-gemini3` | `vllm/cli-gemini/gemini-3.1-pro-preview` | ✅ Tested |
-| `/cli-gemini3-pro-preview` | `vllm/cli-gemini/gemini-3-pro-preview` | Legacy |
-| `/cli-gemini3-flash` | `vllm/cli-gemini/gemini-3-flash-preview` | ✅ Tested |
+## Phase 3 -- Slash Commands
 
-**Codex CLI** (via `openai-codex` provider — OAuth auth, calls OpenAI API directly, **not** through the local proxy):
+All slash commands use staged switching by default. A staged switch is queued but not applied until you run `/cli-apply`, preventing mid-session model disruption. Use `--now` to apply immediately.
 
-| Command | Model | Notes |
-|---|---|---|
-| `/cli-codex` | `openai-codex/gpt-5.3-codex` | ✅ Tested |
-| `/cli-codex-spark` | `openai-codex/gpt-5.3-codex-spark` | ✅ Tested |
-| `/cli-codex52` | `openai-codex/gpt-5.2-codex` | ✅ Tested |
-| `/cli-codex54` | `openai-codex/gpt-5.4` | May require upgraded OAuth scope |
-| `/cli-codex55` | `openai-codex/gpt-5.5` | May require upgraded OAuth scope |
-| `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` | ✅ Tested |
+### Claude Code CLI
 
-**OpenCode CLI** (via local proxy, prompt as CLI argument):
+| Command | Model |
+|---|---|
+| `/cli-fable5` | `vllm/cli-claude/claude-fable-5` |
+| `/cli-sonnet5` | `vllm/cli-claude/claude-sonnet-5` |
+| `/cli-opus` | `vllm/cli-claude/claude-opus-4-8` |
+| `/cli-opus47` | `vllm/cli-claude/claude-opus-4-7` |
+| `/cli-opus46` | `vllm/cli-claude/claude-opus-4-6` |
+| `/cli-sonnet` | `vllm/cli-claude/claude-sonnet-4-6` |
+| `/cli-haiku` | `vllm/cli-claude/claude-haiku-4-5` |
 
-| Command | Model | Notes |
-|---|---|---|
-| `/cli-opencode` | `vllm/opencode/default` | Requires `opencode` CLI installed |
+### Gemini CLI
 
-**Pi CLI** (via local proxy, prompt as `-p` flag):
+| Command | Model |
+|---|---|
+| `/cli-gemini` | `vllm/cli-gemini/gemini-2.5-pro` |
+| `/cli-gemini-flash` | `vllm/cli-gemini/gemini-2.5-flash` |
+| `/cli-gemini3` | `vllm/cli-gemini/gemini-3.1-pro-preview` |
+| `/cli-gemini3-pro-preview` | `vllm/cli-gemini/gemini-3-pro-preview` |
+| `/cli-gemini3-flash` | `vllm/cli-gemini/gemini-3-flash-preview` |
 
-| Command | Model | Notes |
-|---|---|---|
-| `/cli-pi` | `vllm/pi/default` | Requires `pi` CLI installed |
+### Codex CLI
 
-**BitNet local inference** (via local proxy → llama-server on 127.0.0.1:8082, no API key):
+| Command | Model |
+|---|---|
+| `/cli-codex` | `openai-codex/gpt-5.3-codex` |
+| `/cli-codex-spark` | `openai-codex/gpt-5.3-codex-spark` |
+| `/cli-codex52` | `openai-codex/gpt-5.2-codex` |
+| `/cli-codex54` | `openai-codex/gpt-5.4` |
+| `/cli-codex55` | `openai-codex/gpt-5.5` |
+| `/cli-codex-mini` | `openai-codex/gpt-5.1-codex-mini` |
 
-| Command | Model | Notes |
-|---|---|---|
-| `/cli-bitnet` | `vllm/local-bitnet/bitnet-2b` | ✅ Tested |
+### Grok CLI
 
-**Utility:**
+| Command | Model |
+|---|---|
+| `/cli-grok` | `vllm/cli-grok/grok-4.5` |
+
+### Other CLI providers
+
+| Command | Model |
+|---|---|
+| `/cli-opencode` | `vllm/opencode/default` |
+| `/cli-pi` | `vllm/pi/default` |
+| `/cli-bitnet` | `vllm/local-bitnet/bitnet-2b` |
+
+### Perplexity API
+
+| Command | Model |
+|---|---|
+| `/plex-opus` | Claude Opus via Perplexity |
+| `/plex-sonnet` | Claude Sonnet via Perplexity |
+| `/plex-haiku` | Claude Haiku via Perplexity |
+| `/plex-gpt5` | GPT-5 via Perplexity |
+| `/plex-gpt54` | GPT-5.4 via Perplexity |
+| `/plex-gpt55` | GPT-5.5 via Perplexity |
+| `/plex-grok4` | Grok 4 via Perplexity |
+| `/plex-gemini` | Gemini via Perplexity |
+| `/plex-sonar` | Perplexity Sonar (web-search) |
+
+### OpenRouter API
+
+| Command | Model |
+|---|---|
+| `/or-opus` | Claude Opus |
+| `/or-sonnet` | Claude Sonnet |
+| `/or-haiku` | Claude Haiku |
+| `/or-gpt4o` | GPT-4o |
+| `/or-gpt41` | GPT-4.1 |
+| `/or-o3` | o3 |
+| `/or-gemini` | Gemini 2.5 Pro |
+| `/or-gemini-flash` | Gemini 2.5 Flash |
+| `/or-grok3` | Grok 3 |
+| `/or-deepseek` | DeepSeek R1 |
+| `/or-deepseek-v3` | DeepSeek V3 |
+| `/or-llama4` | Llama 4 Maverick |
+
+### LM Studio
 
 | Command | What it does |
 |---|---|
-| `/cli-back` | Restore the model active **before** the last `/cli-*` switch |
-| `/cli-test [model]` | One-shot proxy health check — **does NOT switch your active model** |
-| `/cli-list` | Show all registered CLI bridge models with commands |
-| `/cli-help` | Full reference card — CLI/Codex/Web/BitNet sections, expiry info, quick examples, dashboard links |
+| `/lms` | Switch to the currently active model in LM Studio |
+| `/lms-models` | List all models loaded in LM Studio |
+| `/lms-status` | Show LM Studio connection status |
+| `/lms-use <model-id>` | Switch to a specific LM Studio model by ID |
 
-**`/cli-back` details:**
-- Before every `/cli-*` switch the current model is saved to `~/.openclaw/cli-bridge-state.json`
-- `/cli-back` reads it, calls `openclaw models set <previous>`, then clears the file
-- State survives gateway restarts — safe to use any time
+### Utility commands
 
-**`/cli-test` details:**
-- Accepts short form (`cli-sonnet`) or full path (`vllm/cli-claude/claude-sonnet-4-6`)
-- Default when no arg given: `cli-claude/claude-sonnet-4-6`
-- Reports response content, latency, and confirms your active model is unchanged
+| Command | What it does |
+|---|---|
+| `/cli-back` | Restore the model active before the last `/cli-*` switch |
+| `/cli-apply` | Apply a staged model switch |
+| `/cli-pending` | Show the currently staged switch (if any) |
+| `/cli-test [model]` | Health check the proxy without switching your active model |
+| `/cli-list` | List all registered models grouped by provider |
+| `/cli-help` | Full reference card with sections, expiry info, examples, and dashboard link |
 
-**`/cli-list` details:**
-- Lists all registered models grouped by provider (Claude CLI, Gemini CLI, Codex)
-- No arguments required
+**`/cli-back` details**
+
+Before every `/cli-*` switch, the current model is saved to `~/.openclaw/cli-bridge-state.json`. `/cli-back` reads that file, restores the previous model, then clears the file. State survives gateway restarts.
+
+**`/cli-test` details**
+
+Accepts a short form (`cli-sonnet`) or full path (`vllm/cli-claude/claude-sonnet-4-6`). Default when no argument is given: `cli-claude/claude-sonnet-4-6`. Reports response content, latency, and confirms your active model is unchanged.
 
 ---
 
-### Phase 4 — Web Browser Providers (headless, no API key needed)
+## Phase 4 -- Web Browser Providers
 
-Routes requests through real browser sessions on the provider's web UI. Requires a valid login session (free or paid tier). Uses persistent Chromium profiles — sessions survive gateway restarts.
+Routes requests through real browser sessions on the provider's web UI. Uses persistent Chromium profiles -- sessions survive gateway restarts. No API key required.
 
-> **Note:** Only Grok and Gemini are active browser providers. Claude and ChatGPT browser routes were removed in v1.6.x — use `cli-claude/*` (Claude CLI) and `openai-codex/*` / `copilot-proxy` instead.
+The first time you use a provider, run `/xxx-login` to authenticate. If headless login fails, a headed browser opens for manual login (5-minute timeout). After login, cookies are saved to a persistent profile.
 
-**Grok** (grok.com — SuperGrok subscription):
+On gateway restart, sessions are automatically restored from saved profiles (~25 seconds after start).
+
+### Grok (grok.com -- SuperGrok subscription)
 
 | Model | Notes |
 |---|---|
-| `web-grok/grok-4` | Full model | ✅ Tested |
-| `web-grok/grok-3` | Previous full model | ✅ Tested |
-| `web-grok/grok-3-fast` | Faster variant | ✅ Tested |
-| `web-grok/grok-3-mini` | Lightweight | ✅ Tested |
-| `web-grok/grok-3-mini-fast` | Fastest | ✅ Tested |
+| `web-grok/grok-4` | Full model |
+| `web-grok/grok-3` | Previous generation |
+| `web-grok/grok-3-fast` | Faster variant |
+| `web-grok/grok-3-mini` | Lightweight |
+| `web-grok/grok-3-mini-fast` | Fastest |
 
 | Command | What it does |
 |---|---|
 | `/grok-login` | Authenticate via X.com OAuth, save session to `~/.openclaw/grok-profile/` |
-| `/grok-status` | Show session validity + cookie expiry |
+| `/grok-status` | Show session validity and cookie expiry |
 | `/grok-logout` | Clear session |
 
-**Gemini** (gemini.google.com):
+### Gemini (gemini.google.com)
 
 | Model | Notes |
 |---|---|
-| `web-gemini/gemini-3-1-pro` | Gemini 3.1 Pro | Listed |
-| `web-gemini/gemini-2-5-pro` | Gemini 2.5 Pro | ✅ Tested |
-| `web-gemini/gemini-2-5-flash` | Gemini 2.5 Flash | ✅ Tested |
-| `web-gemini/gemini-3-pro` | Gemini 3 Pro | ✅ Tested |
-| `web-gemini/gemini-3-flash` | Gemini 3 Flash | ✅ Tested |
+| `web-gemini/gemini-3-1-pro` | Gemini 3.1 Pro |
+| `web-gemini/gemini-2-5-pro` | Gemini 2.5 Pro |
+| `web-gemini/gemini-2-5-flash` | Gemini 2.5 Flash |
+| `web-gemini/gemini-3-pro` | Gemini 3 Pro |
+| `web-gemini/gemini-3-flash` | Gemini 3 Flash |
 
 | Command | What it does |
 |---|---|
 | `/gemini-login` | Authenticate, save cookies to `~/.openclaw/gemini-profile/` |
-| `/gemini-status` | Show session validity + cookie expiry |
+| `/gemini-status` | Show session validity and cookie expiry |
 | `/gemini-logout` | Clear session |
 
-**Claude.ai** ~~(removed in v1.6.x)~~ — use `/cli-sonnet`, `/cli-opus`, `/cli-haiku` instead.
+### Claude.ai
 
-**ChatGPT** ~~(removed in v1.6.x)~~ — use `/cli-codex`, `openai-codex/*`, or `copilot-proxy` instead.
+| Command | What it does |
+|---|---|
+| `/claude-login` | Authenticate, save session to `~/.openclaw/claude-profile/` |
+| `/claude-status` | Show session validity |
+| `/claude-logout` | Clear session |
 
-**Session lifecycle:**
-- First use: run `/xxx-login` once — authenticates and saves cookies to persistent Chromium profile
-- **No CDP required:** `/xxx-login` no longer depends on the OpenClaw browser (CDP port 18800). If CDP is available, cookies are imported from it; otherwise a standalone persistent Chromium is launched automatically.
-- If headless login fails, a **headed browser** opens for manual login (5 min timeout)
-- After gateway restart: sessions are **automatically restored** from saved profiles on startup (sequential, ~25s after start)
-- `/bridge-status` — shows all 4 providers at a glance with login state + expiry info
+### ChatGPT
+
+| Command | What it does |
+|---|---|
+| `/chatgpt-login` | Authenticate, save session to `~/.openclaw/chatgpt-profile/` |
+| `/chatgpt-status` | Show session validity |
+| `/chatgpt-logout` | Clear session |
+
+### All providers at a glance
+
+```
+/bridge-status
+```
+
+Shows all four providers with login state and cookie expiry in one view.
+
+### Status dashboard
+
+Live HTML dashboard at: `http://127.0.0.1:31337/status`
+
+Auto-refreshes every 10 seconds. Includes provider health, active requests, request log, fallback history, and live log viewer.
 
 ---
 
-## Requirements
+## Phase 5 -- API Integrations
 
-- [OpenClaw](https://openclaw.ai) gateway (tested with `2026.5.x`)
-- One or more of:
-  - [`@openai/codex`](https://github.com/openai/codex) — `npm i -g @openai/codex` + `codex login`
-  - [`@google/gemini-cli`](https://github.com/google-gemini/gemini-cli) — `npm i -g @google/gemini-cli` + `gemini auth`
-  - [`@anthropic-ai/claude-code`](https://github.com/anthropic-ai/claude-code) — `npm i -g @anthropic-ai/claude-code` + `claude auth`
+Pure REST integrations -- no subprocess overhead, no browser.
 
----
+### Perplexity API
 
-## Installation
+Set `PERPLEXITY_API_KEY` in `~/.openclaw/.env`. Provides access to 35 models across OpenAI, Anthropic, Google, xAI, NVIDIA, and Perplexity-native providers.
 
-```bash
-# From ClawHub
-clawhub install openclaw-cli-bridge-elvatis
+Notable model: `plex-sonar` uses Perplexity Sonar for web-search-augmented responses. Recommended as the default `research` phase model in `/pipeline`.
 
-# Or from workspace (development)
-# Add to ~/.openclaw/openclaw.json:
-# plugins.load.paths: ["~/.openclaw/workspace/openclaw-cli-bridge-elvatis"]
-# plugins.entries.openclaw-cli-bridge-elvatis: { "enabled": true }
+### OpenRouter API
+
+Set `OPENROUTER_API_KEY` in `~/.openclaw/.env`. Provides 17+ models:
+
+- Claude Opus, Sonnet, Haiku
+- GPT-4o, GPT-4.1, o3
+- Gemini 2.5 Pro, Gemini 2.5 Flash
+- Grok 3
+- DeepSeek R1, DeepSeek V3
+- Llama 4 Maverick
+
+### LM Studio
+
+Set `LM_STUDIO_URL` in `~/.openclaw/.env` (default: `http://127.0.0.1:1234`). Connects to any LM Studio instance on the network. Models are discovered dynamically -- no hardcoded model list required.
+
+```
+/lms              Switch to the currently active LM Studio model
+/lms-models       List available models
+/lms-status       Show connection status
+/lms-use <id>     Switch to a specific model
 ```
 
 ---
 
-## Setup
+## Phase 6 -- Pipeline
 
-### 1. Enable + restart
+`/pipeline` runs a multi-phase AI workflow where each phase uses a different model and each phase's output feeds into the next as context.
 
-```json
-// ~/.openclaw/openclaw.json → plugins.entries
-"openclaw-cli-bridge-elvatis": { "enabled": true }
-```
+**Phases:** research -> architect -> implement -> review
 
-```bash
-openclaw gateway restart
-```
-
-### 2. Verify (check gateway logs)
+**Usage:**
 
 ```
-[cli-bridge] system Chrome found: Google Chrome 146.x
-[cli-bridge] openai-codex provider registered
-[cli-bridge] registered 32 commands (use /cli-list to see all)
-[cli-bridge] proxy ready on :31337 — vllm/cli-gemini/* and vllm/cli-claude/* available
+/pipeline "topic"
+/pipeline "topic" research=plex-sonar architect=cli-fable5 implement=or-sonnet review=or-deepseek
+/pipeline "topic" --skip=research,architect implement=or-o3 review=plex-opus
 ```
 
-### 3. Register Codex auth (optional — Phase 1 only)
+**Default model assignments:**
 
-```bash
-openclaw models auth login --provider openai-codex
-# Select: "Codex CLI (existing login)"
-```
+| Phase | Default model |
+|---|---|
+| research | `plex-sonar` |
+| architect | `cli-opus` |
+| implement | `cli-sonnet` |
+| review | `plex-gpt55` |
 
-### 4. List available models
-
-```
-/cli-list
-→ 🤖 CLI Bridge Models
-
-  Claude Code CLI
-    /cli-sonnet          claude-sonnet-4-6
-    /cli-opus            claude-opus-4-8
-    /cli-opus47          claude-opus-4-7
-    /cli-opus46          claude-opus-4-6
-    /cli-haiku           claude-haiku-4-5
-
-  Gemini CLI
-    /cli-gemini          gemini-2.5-pro
-    /cli-gemini-flash    gemini-2.5-flash
-    /cli-gemini3         gemini-3.1-pro-preview
-    /cli-gemini3-pro-preview gemini-3-pro-preview
-    /cli-gemini3-flash   gemini-3-flash-preview
-
-  Codex (OAuth)
-    /cli-codex           gpt-5.3-codex
-    /cli-codex-spark     gpt-5.3-codex-spark
-    /cli-codex52         gpt-5.2-codex
-    /cli-codex54         gpt-5.4
-    /cli-codex55         gpt-5.5
-    /cli-codex-mini      gpt-5.1-codex-mini
-
-  Utility
-    /cli-back            Restore previous model
-    /cli-test [model]    Health check (no model switch)
-    /cli-list            All models with slash commands + dashboard URL
-    /cli-help            Full reference card (sections, expiry, examples, links)
-
-  Proxy: 127.0.0.1:31337
-```
-
-### 5. Test without switching your model
-
-```
-/cli-test
-→ 🧪 CLI Bridge Test
-  Model: vllm/cli-claude/claude-sonnet-4-6
-  Response: CLI bridge OK
-  Latency: 2531ms
-  Active model unchanged: anthropic/claude-sonnet-4-6
-
-/cli-test cli-gemini
-→ 🧪 CLI Bridge Test
-  Model: vllm/cli-gemini/gemini-2.5-pro
-  Response: CLI bridge OK
-  Latency: 8586ms
-  Active model unchanged: anthropic/claude-sonnet-4-6
-```
-
-### 6. Switch and restore
-
-```
-/cli-sonnet
-→ ✅ Switched to Claude Sonnet 4.6 (CLI)
-   `vllm/cli-claude/claude-sonnet-4-6`
-   Use /cli-back to restore previous model.
-
-... test things ...
-
-/cli-back
-→ ✅ Restored previous model
-   `anthropic/claude-sonnet-4-6`
-```
+Model names are the slash-command names from `/cli-list` without the leading `/`. Any model reachable via the bridge can be used in any phase.
 
 ---
 
 ## Configuration
 
-In `~/.openclaw/openclaw.json` → `plugins.entries.openclaw-cli-bridge-elvatis.config`:
+### API keys
+
+All API keys go in `~/.openclaw/.env`:
+
+```env
+PERPLEXITY_API_KEY=pplx-...
+OPENROUTER_API_KEY=sk-or-v1-...
+LM_STUDIO_URL=http://192.168.177.4:1234   # optional, default: http://127.0.0.1:1234
+```
+
+### Plugin config
+
+In `~/.openclaw/openclaw.json` under `plugins.entries.openclaw-cli-bridge-elvatis.config`:
 
 ```json5
 {
@@ -295,26 +390,28 @@ In `~/.openclaw/openclaw.json` → `plugins.entries.openclaw-cli-bridge-elvatis.
   "enableProxy": true,         // start local CLI proxy server (default: true)
   "proxyPort": 31337,          // proxy port (default: 31337)
   "proxyApiKey": "cli-bridge", // key between OpenClaw vllm provider and proxy (default: "cli-bridge")
-  "proxyTimeoutMs": 300000,    // base CLI subprocess timeout in ms (default: 300s, scales dynamically)
+  "proxyTimeoutMs": 300000,    // base CLI subprocess timeout in ms (default: 300s)
   "modelTimeouts": {           // per-model timeout overrides in ms (optional)
-    "cli-claude/claude-opus-4-8":       360000,
-    "cli-claude/claude-opus-4-7":       360000,
-    "cli-claude/claude-opus-4-6":       300000,
-    "cli-claude/claude-sonnet-4-6":     180000,   // 3 min — interactive chat
-    "cli-claude/claude-haiku-4-5":       90000,   // 90s  — fast responses
-    "cli-gemini/gemini-2.5-pro":        180000,
-    "cli-gemini/gemini-2.5-flash":       90000,
-    "openai-codex/gpt-5.5":            300000,
-    "openai-codex/gpt-5.4":            300000,
-    "openai-codex/gpt-5.3-codex":      180000,
-    "openai-codex/gpt-5.1-codex-mini":  90000
+    "cli-claude/claude-fable-5":      360000,
+    "cli-claude/claude-sonnet-5":     300000,
+    "cli-claude/claude-opus-4-8":     360000,
+    "cli-claude/claude-opus-4-7":     360000,
+    "cli-claude/claude-opus-4-6":     300000,
+    "cli-claude/claude-sonnet-4-6":   180000,
+    "cli-claude/claude-haiku-4-5":     90000,
+    "cli-gemini/gemini-2.5-pro":      180000,
+    "cli-gemini/gemini-2.5-flash":     90000,
+    "openai-codex/gpt-5.5":          300000,
+    "openai-codex/gpt-5.4":          300000,
+    "openai-codex/gpt-5.3-codex":    180000,
+    "openai-codex/gpt-5.1-codex-mini": 90000
   }
 }
 ```
 
 ### Required: OpenClaw LLM idle timeout
 
-**Important:** OpenClaw's embedded agent has a default **LLM idle timeout of 60 seconds**. CLI subprocesses (especially Claude/Gemini with large prompts) often need longer than 60s before producing the first token. Without this setting, you'll see `exit 143` / `status:408` / `FailoverError: LLM request timed out.`
+OpenClaw's default `llm.idleTimeoutSeconds` is 60 seconds, which is too short for CLI subprocesses. Without this setting you will see `exit 143` / `status:408` / `FailoverError: LLM request timed out`.
 
 Add to `~/.openclaw/openclaw.json`:
 
@@ -323,22 +420,88 @@ Add to `~/.openclaw/openclaw.json`:
   "agents": {
     "defaults": {
       "llm": {
-        "idleTimeoutSeconds": 300  // 5 min — must be >= longest per-model timeout
+        "idleTimeoutSeconds": 300  // must be >= your longest per-model timeout
       }
     }
   }
 }
 ```
 
-> **Note:** Cron-triggered agents automatically have `idleTimeoutSeconds: 0` (disabled) in OpenClaw, so crons are not affected.
+Cron-triggered agents automatically have `idleTimeoutSeconds: 0` (disabled) in OpenClaw, so they are not affected.
 
 ---
 
-## Model Allowlist
+## Setup
 
-`routeToCliRunner` enforces `DEFAULT_ALLOWED_CLI_MODELS` — only models registered in the plugin are accepted by the proxy. Unregistered models receive a clear error listing allowed options.
+**1. Install the plugin**
 
-To disable the check (e.g. for custom vllm routing): pass `allowedModels: null` in `RouteOptions`.
+The plugin loads from `~/.openclaw/extensions/openclaw-cli-bridge-elvatis/`. Enable it in `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "openclaw-cli-bridge-elvatis": { "enabled": true }
+    }
+  }
+}
+```
+
+Or install from ClawHub:
+
+```bash
+clawhub install openclaw-cli-bridge-elvatis
+```
+
+**2. Add API keys**
+
+Add keys for the API providers you want to use to `~/.openclaw/.env` (see [Configuration](#configuration)).
+
+**3. Install CLI tools**
+
+Install the CLI tools for any CLI providers you want to use:
+
+```bash
+npm i -g @anthropic-ai/claude-code    # for cli-claude/*
+npm i -g @google/gemini-cli           # for cli-gemini/*
+# grok, opencode, pi: install per their own docs
+```
+
+**4. Restart the gateway**
+
+```bash
+openclaw gateway restart
+```
+
+Check the logs for:
+
+```
+[cli-bridge] proxy ready on :31337
+[cli-bridge] registered N commands (use /cli-list to see all)
+[cli-bridge] openai-codex provider registered
+```
+
+**5. Explore available models**
+
+```
+/cli-list
+```
+
+**6. Test without switching your model**
+
+```
+/cli-test
+/cli-test cli-gemini
+```
+
+**7. Switch models and restore**
+
+```
+/cli-fable5               # stage a switch to Claude Fable 5
+/cli-apply                # apply the staged switch
+...
+/cli-back                 # restore the previous model
+```
 
 ---
 
@@ -346,66 +509,88 @@ To disable the check (e.g. for custom vllm routing): pass `allowedModels: null` 
 
 ```
 OpenClaw agent
-  │
-  ├─ openai-codex/*  ──────────────────────────► OpenAI API (direct)
-  │    auth: ~/.codex/auth.json OAuth tokens
-  │    /cli-codex, /cli-codex-spark, /cli-codex52, /cli-codex54, /cli-codex55, /cli-codex-mini
-  │
-  └─ vllm/cli-gemini/*  ─┐
-     vllm/cli-claude/*   ─┤─► localhost:31337  (openclaw-cli-bridge proxy)
-     vllm/opencode/*     ─┤       ├─ cli-gemini/* → gemini -m <model> -p ""
-     vllm/pi/*           ─┘       │                 stdin=prompt, cwd=/tmp
-                          │       │                 (neutral cwd prevents agentic mode)
-                          │       ├─ cli-claude/* → claude -p --model <model>
-                          │       │                 stdin=prompt
-                          │       ├─ opencode/*   → opencode run "prompt"
-                          │       │                 prompt as CLI arg
-                          │       └─ pi/*         → pi -p "prompt"
-                          │                         prompt as -p flag
-
-Slash commands (requireAuth=false, gateway commands.allowFrom is the auth layer):
-  /cli-sonnet|opus|haiku|gemini|gemini-flash|gemini3|gemini3-flash
-  /cli-codex|codex-spark|codex52|codex54|codex-mini
-  /cli-opencode|cli-pi
-     └─► saves current model → ~/.openclaw/cli-bridge-state.json
-     └─► openclaw models set <model>
-
-  /cli-back   → reads state file, restores previous model, clears state
-  /cli-test   → HTTP POST → localhost:31337, no global model change
-  /cli-list   → formatted table of all registered models
+  |
+  +-- openai-codex/*  ---------------------------------> OpenAI API (direct)
+  |    auth: ~/.codex/auth.json OAuth tokens
+  |
+  +-- vllm/cli-claude/*  ---+
+  |   vllm/cli-gemini/*  ---+
+  |   vllm/cli-grok/*    ---+--> 127.0.0.1:31337 (openclaw-cli-bridge proxy)
+  |   vllm/opencode/*    ---+       |
+  |   vllm/pi/*          ---+       +-- cli-claude/*  -> claude -p --output-format json --model <m>
+  |   vllm/local-bitnet/* -+        |                   stdin=prompt, cwd=homedir()
+  |                                 |
+  |                                 +-- cli-gemini/*  -> gemini -m <model> -p ""
+  |                                 |                   stdin=prompt, cwd=/tmp
+  |                                 |
+  |                                 +-- cli-grok/*    -> grok --prompt-file <tmpfile>
+  |                                 |
+  |                                 +-- opencode/*    -> opencode run "prompt"
+  |                                 |
+  |                                 +-- pi/*          -> pi -p "prompt"
+  |                                 |
+  |                                 +-- local-bitnet/* -> llama-server on :8082
+  |
+  +-- perplexity/*  ---------------------------------> Perplexity REST API
+  |    key: PERPLEXITY_API_KEY in ~/.openclaw/.env
+  |
+  +-- openrouter/*  ---------------------------------> OpenRouter REST API
+  |    key: OPENROUTER_API_KEY in ~/.openclaw/.env
+  |
+  +-- lmstudio/*    ---------------------------------> LM Studio REST API
+       url: LM_STUDIO_URL in ~/.openclaw/.env
 
 Proxy endpoints:
-  /health     → simple {"status":"ok"}
-  /healthz    → detailed JSON (version, uptime, provider status, model count)
-  /status     → HTML dashboard (auto-refreshes every 30s)
-  /v1/models  → OpenAI-compatible model list
+  /health          -> {"status":"ok"}
+  /healthz         -> detailed JSON (version, uptime, provider status, model count)
+  /status          -> HTML dashboard (auto-refreshes every 10s)
+  /v1/models       -> OpenAI-compatible model list
+  /v1/provider-sessions       -> active CLI sessions + stats
+  /v1/provider-sessions/:id   -> DELETE to remove a session
+  /api/dashboard-data         -> pre-rendered HTML sections (AJAX polling target)
+  /api/logs/stream            -> SSE stream of debug.log (real-time)
 
-Model fallback (v1.9.0):
-  cli-gemini/gemini-2.5-pro      → cli-gemini/gemini-2.5-flash
-  cli-gemini/gemini-3-pro-preview → cli-gemini/gemini-3-flash-preview
-  cli-claude/claude-opus-4-6     → cli-claude/claude-sonnet-4-6
-  cli-claude/claude-sonnet-4-6   → cli-claude/claude-haiku-4-5
+Staged model switching:
+  /cli-<name>       -> stages switch, saves current model to ~/.openclaw/cli-bridge-state.json
+  /cli-apply        -> applies staged switch (calls openclaw models set <model>)
+  /cli-pending      -> shows staged switch
+  /cli-back         -> restores previous model, clears state file
+
+Browser provider profiles:
+  ~/.openclaw/grok-profile/      Grok persistent Chromium session
+  ~/.openclaw/gemini-profile/    Gemini persistent Chromium session
+  ~/.openclaw/claude-profile/    Claude.ai persistent Chromium session
+  ~/.openclaw/chatgpt-profile/   ChatGPT persistent Chromium session
+  ~/.openclaw/cookie-expiry.json Unified cookie expiry tracking
+
+Metrics and state:
+  ~/.openclaw/cli-bridge/debug.log       Request lifecycle logs (1MB rotation, 2 files)
+  ~/.openclaw/cli-bridge/metrics.json    Persistent per-model metrics (debounced 5s writes)
+  ~/.openclaw/cli-bridge/cli-sessions.json  CLI session registry
+  ~/.openclaw/cli-bridge-state.json      Previous model for /cli-back
 ```
 
 ---
 
-## Known Issues & Fixes
+## Requirements
 
-### `spawn E2BIG` (fixed in v0.2.1)
-**Symptom:** `CLI error for cli-claude/…: spawn E2BIG` after ~500+ messages.
-**Cause:** Gateway injects large values into `process.env` at runtime. Spreading it into `spawn()` exceeds Linux's `ARG_MAX` (~2MB).
-**Fix:** `buildMinimalEnv()` — only passes `HOME`, `PATH`, `USER`, and auth keys.
+| Requirement | Notes |
+|---|---|
+| OpenClaw gateway | Tested with 2026.7.x |
+| Node.js 22+ | Required |
+| `claude` CLI | For `cli-claude/*` models |
+| `gemini` CLI | For `cli-gemini/*` models |
+| `grok` CLI | For `cli-grok/*` models |
+| `opencode` CLI | For `vllm/opencode/default` |
+| `pi` CLI | For `vllm/pi/default` |
+| `codex` CLI | For `openai-codex/*` (Phase 1 auth bridge) |
+| `llama-server` on port 8082 | For `local-bitnet/bitnet-2b` |
+| `PERPLEXITY_API_KEY` | For Perplexity provider |
+| `OPENROUTER_API_KEY` | For OpenRouter provider |
+| LM Studio running | For LM Studio provider |
+| System Chrome / Chromium | For web browser providers (Phase 4) |
 
-### Claude Code 401 / timeout on OAuth login (fixed in v0.2.21)
-**Symptom:** `/cli-test cli-claude/*` times out after 30s; logs show `401 Invalid authentication credentials`.
-**Cause:** `buildMinimalEnv()` did not forward `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` to the spawned `claude` subprocess. Claude Code authenticated via `claude.ai` OAuth (Claude Max plan) stores its tokens in the system keyring (Gnome Keyring / libsecret) and needs these env vars to access it.
-**Affects:** Only systems using `claude auth` OAuth login (Claude Max / Teams). API-key users (`ANTHROPIC_API_KEY`) are not affected.
-**Fix:** Added `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` to the forwarded env keys in `buildMinimalEnv()`.
-
-### Gemini agentic mode / hangs (fixed in v0.2.4)
-**Symptom:** Gemini hangs, returns wrong answers, or says "directory does not exist".
-**Cause:** `@file` syntax (`gemini -p @/tmp/xxx.txt`) triggers agentic mode — Gemini scans the working directory for project context and treats prompts as task instructions.
-**Fix:** Stdin delivery (`gemini -p ""` with prompt via stdin) + `cwd=/tmp`.
+CLI tools and API keys are optional -- install only what you plan to use.
 
 ---
 
@@ -414,646 +599,154 @@ Model fallback (v1.9.0):
 ```bash
 npm run lint        # eslint (TypeScript-aware)
 npm run typecheck   # tsc --noEmit
-npm test            # vitest run (278+ tests)
+npm test            # vitest run
 npm run ci          # lint + typecheck + test
 ```
+
+Debug log: `tail -f ~/.openclaw/cli-bridge/debug.log`
+
+---
+
+## Known Issues and Fixes
+
+### `spawn E2BIG` (fixed in v0.2.1)
+
+**Symptom:** `CLI error for cli-claude/...: spawn E2BIG` after ~500+ messages.
+
+**Cause:** Gateway injects large values into `process.env` at runtime. Spreading it into `spawn()` exceeds Linux's `ARG_MAX` (~2MB).
+
+**Fix:** `buildMinimalEnv()` passes only `HOME`, `PATH`, `USER`, `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, and required auth keys.
+
+### Claude Code 401 / timeout on OAuth login (fixed in v0.2.21)
+
+**Symptom:** `/cli-test cli-claude/*` times out after 30s; logs show `401 Invalid authentication credentials`.
+
+**Cause:** `buildMinimalEnv()` did not forward `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS`. Claude Code authenticated via `claude.ai` OAuth (Claude Max) stores tokens in the system keyring (Gnome Keyring / libsecret) and needs these env vars to read them.
+
+**Affects:** Only systems using `claude auth` OAuth login. API-key users (`ANTHROPIC_API_KEY`) are not affected.
+
+**Fix:** Added `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` to `buildMinimalEnv()`.
+
+### Gemini agentic mode / hangs (fixed in v0.2.4)
+
+**Symptom:** Gemini hangs, returns wrong answers, or says "directory does not exist".
+
+**Cause:** `@file` syntax triggers Gemini's agentic mode -- it scans the working directory and treats prompts as task instructions.
+
+**Fix:** Stdin delivery (`gemini -p ""` with prompt via stdin) and `cwd=/tmp`.
+
+### Exit 143 / status 408 / FailoverError (see Configuration)
+
+**Symptom:** Requests to CLI models time out with `exit 143` or `FailoverError: LLM request timed out`.
+
+**Cause:** OpenClaw's default `llm.idleTimeoutSeconds` is 60s. CLI subprocesses often need more time before producing the first token.
+
+**Fix:** Set `agents.defaults.llm.idleTimeoutSeconds` to 300 or higher in `~/.openclaw/openclaw.json`. See [Configuration](#configuration).
 
 ---
 
 ## Changelog
 
-### v2026.7.1 — Revival + OpenClaw 2026.7.1 compatibility
+### v2026.7.1
 
-- **chore:** Switched versioning scheme to date-based (`YYYY.M.D`) aligned with OpenClaw.
-- **fix:** Plugin now compiles against OpenClaw 2026.7.1 SDK (resolved `openclaw/plugin-sdk` module path).
-- **feat:** Removed `cli-claude/*` provider — Claude models are now available natively via the `anthropic` plugin, making the subprocess wrapper redundant.
-- **feat:** 32 models active via proxy: Gemini CLI, Gemini API, Grok web, Gemini web, Codex, OpenCode, Pi, BitNet.
-- **chore:** Removed archive notice — project is actively maintained again.
+- Switched to date-based versioning (`YYYY.M.D`) aligned with OpenClaw.
+- Plugin now compiles against OpenClaw 2026.7.1 SDK (resolved `openclaw/plugin-sdk` module path).
+- Claude Code CLI models re-added: Fable 5, Sonnet 5, Opus 4.8, plus legacy variants.
+- Grok CLI added (`cli-grok/grok-4.5`).
+- Perplexity API: 35 models, new slash commands (`/plex-*`).
+- OpenRouter: 17+ models, new slash commands (`/or-*`).
+- LM Studio: dynamic model discovery, `/lms*` commands.
+- Phase 6 pipeline (`/pipeline`) added.
+- Archive notice removed -- project actively maintained.
 
-### v3.11.5 — Model catalog refresh
+### v3.11.5
 
-- **feat:** `/cli-opus` now targets Claude Opus 4.8, with `/cli-opus47` and `/cli-opus46` kept for explicit older Opus routing.
-- **feat:** `/cli-gemini3` now targets Gemini 3.1 Pro Preview, while `/cli-gemini3-pro-preview` remains available as a legacy alias.
-- **feat:** Adds GPT-5.5, Claude Opus 4.8, Gemini 3.1 Pro Preview, and Gemini API 3.1 timeout and fallback defaults.
-- **docs:** Refreshes CLI and web model lists based on current provider docs and local CLI probes.
-- **test:** Updates config coverage for the refreshed model timeout and fallback defaults.
+- `/cli-opus` now targets Claude Opus 4.8; `/cli-opus47` and `/cli-opus46` kept for explicit older routing.
+- `/cli-gemini3` now targets Gemini 3.1 Pro Preview; `/cli-gemini3-pro-preview` kept as legacy alias.
+- Adds GPT-5.5, Claude Opus 4.8, Gemini 3.1 Pro Preview timeout and fallback defaults.
+- Test coverage updated for refreshed model timeout and fallback defaults.
 
-### v3.11.4 — Documentation polish
+### v3.11.2
 
-- Minor README and CLAUDE.md improvements. No code changes.
+- New `/cli-codex55` slash command routes to `openai-codex/gpt-5.5`.
+- Per-model timeouts now cover Opus 4.8, Opus 4.7, and GPT-5.5 (previously missing, fell back to base `proxyTimeoutMs`).
 
-### v3.11.3 — Documentation refresh + version-file sync
+### v3.11.1
 
-- Internal documentation refresh in README, CLAUDE.md, and handoff notes.
-- Version files re-aligned across `package.json`, `openclaw.plugin.json`, `README.md`, and `SKILL.md`.
+- SDK import path fix for OpenClaw 2026.7.1 (`openclaw/plugin-sdk/provider-auth-result` submodule).
 
-### v3.11.2 — `/cli-codex55` + per-model timeouts for Opus 4-7 and GPT-5.5
+### v3.11.0
 
-- **feat:** New `/cli-codex55` slash command routes to `openai-codex/gpt-5.5` via the Codex CLI.
-- **fix:** Per-model timeouts in plugin config now cover Opus 4.8 (`cli-claude/claude-opus-4-8`), Opus 4.7 (`cli-claude/claude-opus-4-7`), and GPT-5.5 (`openai-codex/gpt-5.5`), which were missing from `DEFAULT_MODEL_TIMEOUTS` and falling back to the base `proxyTimeoutMs`.
+- Real token usage from Claude CLI (`--output-format json`): `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` now flow through to OpenClaw's session table.
+- Claude Opus 4.7 added (`/cli-opus47`).
+- OpenClaw 2026.5.x compatibility verified.
 
-### v3.11.1 — Plugin-SDK import path fix for OpenClaw 2026.5.x
+### v3.10.0 -- v3.10.8
 
-**Fix:**
-- **`buildOauthProviderAuthResult` import path** moved. In OpenClaw 2026.5.x, this helper was relocated from `openclaw/plugin-sdk` (root) to the `openclaw/plugin-sdk/provider-auth-result` submodule. The old import returns `undefined` and the plugin fails ESM resolution silently, so the gateway never reaches `register()`. Plugin now imports from the new submodule path. Verified against OpenClaw 2026.5.12+.
+- `v3.10.8`: Include `dist/` in npm tarball; `openclaw.extensions` field for OpenClaw 2026.5.16 compat. Dependency bumps.
+- `v3.10.6`: Pass `GEMINI_CLI_TRUST_WORKSPACE=1` to Gemini CLI subprocess.
+- `v3.10.3`: Gemini session resume disabled. Filter Gemini "YOLO mode" warnings.
+- `v3.10.2`: Codex session resume disabled; cwd fixed to `homedir()`.
+- `v3.10.0`: Intelligent prompt routing (`src/prompt-router.ts`); keyword-based model selection.
 
-**Known issue (unresolved, tracked for v3.12.0):**
-- On OpenClaw **2026.5.16-beta.4** the import-path fix above is not enough — the gateway loads the plugin's models (visible in the boot log under `auto-enabled plugins`: `vllm/cli-claude/claude-sonnet-4-6 model configured`) and `openclaw plugins list` reports it as `enabled`, but `register()` is never invoked: no STARTUP line in `~/.openclaw/cli-bridge/debug.log`, port 31337 stays closed, `http server listening` reports `(1 plugin: whatsapp; ...)`. The same plugin file loads correctly via raw `node` and via `jiti` when an `openclaw` symlink is present, so the failure is inside OpenClaw's plugin lifecycle. Most likely a Plugin SDK v1 → v2 shape change. Servers still on 2026.4.x are unaffected and run v3.11.x as before.
+### v3.9.0 -- v3.9.1
 
-### v3.11.0 — Real token usage + Opus 4-7 + OpenClaw 2026.5.x compat
-
-**Highlights:**
-- **feat: real token usage from Claude CLI.** Switched `claude -p` from `--output-format text` to `--output-format json` and parse the structured response. The CLI returns real `input_tokens`, `output_tokens`, `cache_read_input_tokens`, and `cache_creation_input_tokens` — these now flow through to OpenClaw's session table (replacing the `unknown/200k (?%)` you used to see in `openclaw status`). The proxy also passes Anthropic cache stats through as `cache_read_input_tokens` / `cache_creation_input_tokens` on the `usage` payload, which OpenClaw renders as `X% cached`.
-- **feat: Claude Opus 4-7 (`cli-claude/claude-opus-4-7`).** New `/cli-opus47` slash command. 1M context window, 6 min base timeout, registered in the allowlist and fallback chains. Sonnet 4-6's fallback chain now escalates to Opus 4-7 first (better long-session reasoning) before Gemini Flash. Opus 4-6 remains available as `/cli-opus`.
-- **feat: OpenClaw 2026.5.x compatibility verified.** Plugin loads cleanly on the new gateway (was: tested with 2026.4.x). No breaking changes for cli-bridge plugins.
-
-**Internal:**
-- New `TokenUsage` interface in `src/tool-protocol.ts` carries cache stats through the `CliToolResult` type.
-- New `parseClaudeJsonOutput()` helper in `src/cli-runner.ts` extracts the usage block from JSON output. Falls back to raw stdout if the CLI returns malformed JSON.
-- `runClaude()` return type changed from `Promise<string>` to `Promise<ClaudeRunResult>` (`{ content, usage }`).
-- `proxy-server.ts`: success and fallback paths now prefer real `usage.promptTokens`/`completionTokens` over `estimateTokens()`. Metrics + response usage payload both updated.
-- Test `DEFAULT_MODEL_FALLBACKS["cli-claude/claude-sonnet-4-6"]` updated to expect new Opus 4-7 entry.
-
-**Deferred to v3.12.0:**
-- Web-Grok new models (`grok-4-fast`, `grok-4.1`, etc.) — browser provider doesn't actually pick the model in the DOM; needs investigation before adding labels that wouldn't switch the underlying model.
-- Gemini CLI / Codex CLI real token usage — Codex's `--json` flag emits clean JSONL with `usage` (low-hanging fruit for next release).
-
-### v3.10.8
-- **fix:** Include `dist/` in npm tarball publish; add `openclaw.extensions` field for OpenClaw 2026.5.16 compat (commit `fdb83d1`).
-- **chore:** Dependency bumps — `@google/genai` 1.50.1→2.3.0 (major bump, runtime), `typescript-eslint` 8.59.1→8.59.3, `typescript` 6.0.2→6.0.3, `@types/node` 25.5.2→25.8.0.
-
-### v3.10.7
-- **chore:** Dependency bumps — `@google/genai` 1.49.0→1.50.1, `playwright` 1.58.2→1.59.1, `protobufjs` 7.5.4→7.5.6, `eslint` 10.1.0→10.2.1, `typescript-eslint` 8.58.1→8.59.1, `vitest` 4.1.2→4.1.5, `postcss` 8.5.8→8.5.12
-- **docs:** README updated — version, OpenClaw requirement bumped to 2026.4.x, test count corrected
-
-### v3.10.6
-- **fix:** Pass `GEMINI_CLI_TRUST_WORKSPACE=1` env var to Gemini CLI subprocess — prevents Gemini from refusing to run in trusted workspace directories
-
-### v3.10.5
-- **docs:** Updated `.ai/handoff/` files (STATUS.md, NEXT_ACTIONS.md, DASHBOARD.md) from v2.3.0 to v3.10.4. Added provider health results, session resume policy, key files reference.
-
-### v3.10.4
-- **docs:** Full changelog update v3.9.1 through v3.10.3. Updated CLAUDE.md with session resume policy table and routing status.
-
-### v3.10.3
-- **fix:** Gemini session resume disabled (exit 42 on stale sessions). ALL providers except Opus now use fresh calls.
-- **fix:** Filter "YOLO mode" warnings from Gemini stderr (informational, not errors)
-
-### v3.10.2
-- **fix:** Routing disabled (Codex CLI crashes on tool-injected prompts). Gateway handles model selection.
-- **fix:** Codex session resume disabled, cwd fixed to homedir()
-
-### v3.10.1
-- **fix:** Cross-provider routing only. Removed Claude-to-Claude rerouting (Opus, Haiku). Gateway handles Claude variant selection with 60+ models via direct API.
-
-### v3.10.0
-- **feat:** Intelligent prompt routing, ported from [elvatis-mcp](https://github.com/elvatis/elvatis-mcp). Keyword-based model selection: code to Codex, research to Gemini. Debug log: `[ROUTE]`.
-- **feat:** New `src/prompt-router.ts` with `matchRules()` and `detectOptimalModel()`
-- **feat:** 14 new unit tests for routing rules (`test/prompt-router.test.ts`)
-
-### v3.9.1
-- **fix:** Sonnet 60s stale timeout (was 30s, too aggressive for real-world tool reasoning with 21 tools)
-- **fix:** Task payload rescue from content: detects subagent payloads in `{"content":"..."}` and converts to proper `sessions_spawn` tool calls
-
-### v3.9.0
-- **docs:** Full changelog v3.4.0 through v3.8.2. Updated CLAUDE.md known issues with v3.8.0 root cause.
-
-### v3.8.2
-- **fix:** JSON parser sanitizes raw newlines (0x0A) in model output
-- **fix:** no-tools path extracts content from `{"content":"..."}` wrappers when models carry over JSON format
-
-### v3.8.1
-- **fix:** log rotation reduced to 1MB (was 5MB), keeps 2 rotated files (debug.log.1, .2)
-- **fix:** removed verbose `[TOOLS]` log line (tool count already in `[REQ]`)
+- `v3.9.1`: Sonnet 60s stale timeout (was 30s). Task payload rescue from subagent `{"content":"..."}` wrappers.
+- `v3.9.0`: Changelog and documentation update.
 
 ### v3.8.0
-- **fix:** ROOT CAUSE — Claude CLI must run from `homedir()`, never from workspace directories. Running from a project dir triggers Claude Code's agentic mode, which ignores tool injection and treats it as "prompt injection". This caused the 90% Sonnet failure rate.
-- **feat:** orchestration test script (`npx tsx test/orchestration-test.ts`) — tests all 5 providers with 3 scenarios x 3 reps
-- **fix:** Sonnet fallback chain now: Opus, Gemini Flash, Codex (Opus as first fallback)
-- **fix:** Opus escalation removed (Sonnet works reliably now that cwd is fixed)
 
-### v3.7.0
-- **feat:** Opus auto-escalation at 20+ messages with tools (Opus 94% vs Sonnet 55% at the time)
-- **feat:** Opus 90s stale-output timeout for long-form generation (blog posts, Lexical JSON)
-- **fix:** session resume disabled for Sonnet/Haiku (45% hang rate from corrupted sessions). Opus keeps `--session-id`/`--resume`
-- **feat:** generic skill auto-detection from `~/.openclaw/skills/` — injects pointers when prompt matches a skill name
-- **feat:** first user message pinning — original request survives prompt windowing at MAX_MESSAGES
-- **fix:** Haiku skip in tool-loop fallbacks (saves ~10s per fallback)
-- **fix:** improved JSON parser: multi-position embedded extraction, rescue-from-raw strategy
-- **fix:** workspace detection scoped to user messages only (not tool results)
-- **feat:** agent delegation infrastructure (disabled — `openclaw agent` is single-turn only)
-
-### v3.6.0
-- **feat:** generic skill auto-detection from `~/.openclaw/skills/` with SKILL.md parsing
-- **fix:** `contentToString()` for multimodal content arrays in skill/workspace detection
-- **fix:** compact skill hints (one-liner per skill, not multi-line)
-
-### v3.5.1
-- **fix:** improved JSON parser — `tryExtractEmbeddedJson` tries multiple `{` positions
-- **feat:** `rescue-from-raw` final parse strategy before falling back to raw content
-- **feat:** `[TOOLS]` debug log showing available tool names per request
-- **fix:** workspace detection scoped to user messages only
-
-### v3.5.0
-- **feat:** first user message pinning — the original request is always included in the prompt window
-- **perf:** skip Haiku in fallback chain during tool loops (consistently returns text, not tool_calls)
-- **fix:** session retry invalidation — prevents "Session ID already in use" loops
-
-### v3.4.1
-- **fix:** invalidate session on retry failure to prevent "already in use" loop
-
-### v3.4.0
-- **feat:** workspace project auto-detection — scans `~/.openclaw/workspace/` for project directories
-- **feat:** consecutive timeout session rotation — after 3 timeouts in a row, auto-expire session
-
-### v3.3.1
-- **fix:** test requests no longer pollute `debug.log` — test instances (port 0) now skip file logging
-- **fix:** Codex test updated for session resume args
-
-### v3.3.0
-- **feat:** session resume for ALL CLI providers — Claude, Gemini, and Codex all now use persistent sessions with `--resume`. Unified session registry at `~/.openclaw/cli-bridge/cli-sessions.json`.
-- **feat:** auto-rotation: sessions expire after 2 hours OR 50 requests (whichever first) to prevent context bloat
-- **feat:** per-provider debug logging: `[GEMINI]`, `[CODEX]` categories with session state
-
-### v3.2.0
-- **feat:** Claude session resume — persistent sessions eliminate the 20KB prompt replay that caused Sonnet to hang. First request creates a session (`--session-id`), subsequent requests resume it (`--resume`). Claude keeps the conversation context; the bridge only sends the new message.
-- **feat:** session registry persisted to `~/.openclaw/cli-bridge/claude-sessions.json` — survives gateway restarts, auto-expires after 2 hours of inactivity
-- **feat:** auto-recovery: corrupted/expired sessions are detected and recreated transparently
-
-### v3.1.2
-- **fix:** fallback models returning text instead of tool_calls in a tool loop now trigger the next model in the chain. Previously Haiku would say "Lass mich das starten:" as text but never call a tool — conversation died.
-- **feat:** `[FALLBACK-NO-TOOLS]` debug log category for tool-format violations
-
-### v3.1.1
-- **fix:** empty-response detection — models returning zero content now trigger the next fallback instead of silently stopping the chain. Previously Haiku would return empty (0 bytes) and the bridge treated it as success, leaving the user with no response.
-- **feat:** `[EMPTY]` and `[FALLBACK-EMPTY]` debug log categories for diagnosing empty model responses
-
-### v3.1.0
-- **feat:** cross-provider fallback chains — Sonnet → Haiku → Gemini Flash → Codex (was single-model fallback only)
-- **feat:** fallback chain loop — tries each model in order until one succeeds, logs each attempt
-- **fix:** live logs newest-on-top — latest entries now appear at the top of the log viewer
-- **feat:** SSE fallback notifications for each chain attempt so user sees what's happening
+- Root cause fix: Claude CLI must run from `homedir()`, not from project directories. Running from a project dir triggers agentic mode and prompt injection rejection. This caused the 90% Sonnet failure rate.
+- Orchestration test script added (`test/orchestration-test.ts`).
 
 ### v3.0.0
-- **feat:** dashboard v2 — sidebar navigation with 9 sections (Overview, Providers, Active, Requests, Fallbacks, Sessions, Live Logs, Timeouts, Models)
-- **feat:** live log viewer — SSE-powered real-time log streaming with color-coded categories, auto-scroll, pause/resume, 500-line client buffer
-- **feat:** AJAX polling — replaces full-page meta-refresh with incremental section updates every 10s (preserves scroll position and active section)
-- **feat:** `/api/dashboard-data` endpoint — returns pre-rendered HTML sections as JSON for client-side updates
-- **feat:** `/api/logs/stream` SSE endpoint — streams debug.log in real-time with initial tail of last 100 lines
-- **feat:** mobile-responsive sidebar with hamburger toggle
-- **feat:** CLAUDE.md added with full project documentation
 
-### v2.10.1
-- **feat:** smart tool-routing — tool-heavy requests (>8 tools) auto-route to Haiku instead of Sonnet. Haiku handles tool calls in ~11s vs Sonnet's 80-120s (with intermittent hangs). Sonnet is preserved for reasoning/text responses.
-- **fix:** reduce stale-output timeout 120s→60s — faster fallback when Sonnet goes silent
-- **feat:** per-model spawn logging with prompt size for debugging
-
-### v2.10.0
-- **fix:** cap effective timeout at 580s (under gateway's 600s `idleTimeoutSeconds`) so bridge fallback fires BEFORE gateway kills the request — eliminates the race condition where both compete to handle the timeout
-- **fix:** reduce Sonnet base timeout 420s→300s, Opus 420s→360s — ensures fallback triggers faster for stuck CLI sessions
-- **feat:** compact tool schema mode — when >8 tools, compress definitions to name+params only, cutting prompt size ~60%
-- **feat:** stale-output detection — if CLI produces no stdout for 120s, SIGTERM early instead of waiting full timeout
-- **feat:** adaptive message limits — reduce history from 20→12 messages when >10 tools to keep prompts smaller
-- **feat:** file-based debug log at `~/.openclaw/cli-bridge/debug.log` — `tail -f` for real-time request lifecycle visibility
-- **feat:** SSE progress comments every 30s so the webchat connection stays informed during long CLI runs
-- **feat:** SSE fallback notification — visible comment when a model times out and the bridge retries with fallback
-- **fix:** rescue tool_calls embedded inside content strings — handles models that wrap `{"tool_calls":[...]}` inside a `{"content":"..."}` wrapper
-- **fix:** parse robustness — debug logging on all parse paths to diagnose raw-JSON-instead-of-tool-calls issues
-
-### v2.9.0
-- **feat:** enhanced `/status` dashboard with 5 new panels:
-  - **Active Requests**: live in-flight requests with model, elapsed time, message/tool count, prompt preview
-  - **Recent Request Log**: last 20 requests with latency, success/fail, prompt preview, token counts
-  - **Fallback History**: last 10 fallback events with reason, timing, and outcome
-  - **Provider Sessions**: CLI session state (active/idle/expired), run count, timeout count
-  - **Timeout Configuration**: per-model base timeouts and dynamic scaling formula
-- **feat:** auto-refresh reduced from 30s to 10s for more responsive monitoring
-- **feat:** responsive two-column layout for fallback history and provider sessions
-
-### v2.8.5
-- **fix:** sync `openclaw.plugin.json` configSchema defaults with code: Sonnet/Opus 300s to 420s, Haiku 90s to 120s. The schema `default` block was overriding `DEFAULT_MODEL_TIMEOUTS` via `cfg.modelTimeouts`, making all code-level timeout bumps ineffective.
-
-### v2.8.4
-- **fix:** rebuild dist with correct per-model timeouts (v2.8.2 bumped source to 420s but dist was never recompiled, so gateway kept using 300s)
-- **fix:** recommend `agents.defaults.llm.idleTimeoutSeconds` bump 360s to 600s to prevent gateway-level timeout from killing Sonnet before plugin timeout fires
-
-### v2.8.3
-- **fix:** transparent fallback — responses now always report the originally requested model, preventing clients from "sticking" on Haiku after a single Sonnet timeout. Fallback still happens internally for resilience, but is invisible to the client.
-
-### v2.8.2
-- **fix:** increase Sonnet-4-6 and Opus-4-6 base timeout 300s→420s (7 min) to prevent premature timeout→Haiku fallback on large webchat sessions
-- **fix:** increase Haiku-4-5 base timeout 90s→120s for better reliability as fallback model
-
-### v2.8.1
-- **fix:** increase Sonnet-4-6 base timeout from 180s to 300s to prevent premature SIGTERM kills causing FailoverError fallback to gpt-5.2-codex
+- Dashboard v2: sidebar navigation with 9 sections.
+- Live log viewer: SSE-powered real-time log streaming.
+- AJAX polling replaces full-page meta-refresh (preserves scroll position).
 
 ### v2.8.0
-- **feat:** Gemini API provider (`gemini-api/gemini-2.5-flash`, `gemini-api/gemini-2.5-pro`) — direct Google Generative AI SDK integration with native **image generation** support via `responseModalities: ["TEXT", "IMAGE"]`. No CLI subprocess overhead, no browser needed.
-- **feat:** Images returned as base64 data URIs in OpenAI-compatible `content_parts` format — works with OpenClaw multimodal rendering
-- **feat:** Native Gemini tool calling — converts OpenAI tool format to Gemini `functionDeclarations`, parses `functionCall` responses back to `tool_calls`
-- **feat:** Real token usage from Gemini API (no estimation needed)
-- **config:** API key via `GOOGLE_API_KEY` env var or `~/.openclaw/.env`
-- **test:** 17 new tests — message conversion, tool conversion, proxy routing, streaming (278 total)
 
-### v2.7.3
-- **fix:** Gemini image generation timeouts — Gemini Pro models bumped from 180s → 300s base timeout, Flash models from 90s → 180s. Image generation needs significantly more time than text completion.
-- **tune:** Per-tool timeout bonus increased from 5s → 7s per tool definition (21 tools = 147s instead of 105s)
-- **tune:** Max effective timeout cap raised from 600s (10 min) → 900s (15 min) to accommodate long-running image generation with many tools
-
-### v2.7.2
-- **fix:** Self-heal plugin `modelOrder` still referenced `openai-codex/gpt-5.1` (not in bridge allowlist), causing failover errors. Updated to `vllm/openai-codex/gpt-5.2-codex`.
-
-### v2.7.1
-- **fix:** Fallback model `openai-codex/gpt-5.1` → `openai-codex/gpt-5.2-codex` — the bare `gpt-5.1` model ID doesn't exist in the CLI bridge allowlist, causing fallback failures with "model not allowed" errors
-- **fix:** Broken aliases `gpt51`, `gpt52`, `gemini25`, `gemini25-flash` now point to working CLI bridge models instead of non-existent providers (`google-gemini-cli`, bare `openai-codex` IDs)
-- **docs:** Perplexity `sonar-pro` tool incompatibility documented — API rejects tool parameters with `400 Tool parameters must be a JSON object`, tracked upstream as [openclaw/openclaw#64175](https://github.com/openclaw/openclaw/issues/64175). Fallback chain handles this correctly.
-
-### v2.7.0
-- **feat:** Persistent per-model metrics — request counts, error rates, latency, and token usage now survive gateway restarts. Stored in `~/.openclaw/cli-bridge/metrics.json`, debounced writes (5s).
-- **feat:** Token usage estimation for all models — CLI runners (claude, gemini, codex), web-session models (gemini, claude, chatgpt) now report estimated `prompt_tokens` and `completion_tokens` in the OpenAI-compatible `usage` response field (~4 chars/token heuristic). Grok models continue to use real token counts from the API.
-- **feat:** Dashboard and `/healthz` now show actual token stats per model instead of zeros
-- **test:** 9 new metrics tests — estimateTokens, MetricsCollector recording, sorting, reset (261 total)
-
-### v2.6.3
-- **security:** Bump `vite` 8.0.2 → 8.0.5 — fixes 3 CVEs: `server.fs.deny` bypass via query strings, arbitrary file read via WebSocket, path traversal in optimized deps `.map` handling (merged Dependabot PR #18)
-
-### v2.6.2
-- **fix:** Codex CLI `--quiet` flag removed in latest Codex version — replaced with `codex exec` subcommand for non-interactive execution. All `openai-codex/*` models were failing with "unexpected argument '--quiet'" error.
-- **fix:** Agent model routing — 10 agents referenced non-existent `google-gemini-cli` provider. Remapped to `vllm/cli-gemini/*` (OAuth-based, stable) for reliable Gemini access.
-- **fix:** Main agent fallback `openai-codex/gpt-5.1` routed via direct OpenAI API (broken OAuth scopes) — now routes through CLI bridge (`vllm/openai-codex/gpt-5.1`)
+- Gemini API provider (`gemini-api/gemini-2.5-flash`, `gemini-api/gemini-2.5-pro`): direct SDK integration with native image generation support.
 
 ### v2.6.1
-- **fix:** Root cause of Exit 143 / 408 timeouts identified — OpenClaw's `agents.defaults.llm.idleTimeoutSeconds` defaults to 60s, which is too short for CLI subprocesses that need time before producing the first token
-- **feat:** Startup warning when `idleTimeoutSeconds` is not set or < 120s — tells you exactly what to add to `openclaw.json`
-- **docs:** Added "Required: OpenClaw LLM idle timeout" section to README with recommended config
 
-### v2.6.0
-- **feat:** Provider session registry (`src/provider-sessions.ts`) — persistent sessions that survive across runs. When a CLI run times out, the session is preserved (not deleted) so follow-up runs can resume in the same context. Sessions are stored in `~/.openclaw/cli-bridge/sessions.json`.
-- **feat:** Centralized config module (`src/config.ts`) — all magic numbers, timeouts, paths, ports, and model defaults extracted into one file. No more scattered hardcoded values.
-- **feat:** Session-aware proxy — every CLI request gets a `provider_session_id` in the response. Pass it back via `providerSessionId` in subsequent requests to reuse the same session.
-- **feat:** New proxy endpoints: `GET /v1/provider-sessions` (list sessions + stats), `DELETE /v1/provider-sessions/:id` (remove a session)
-- **fix:** Version fallback changed from `"0.0.0"` to `"unknown"` with secondary lookup in `openclaw.plugin.json` — prevents Dashboard showing wrong version
-- **refactor:** `index.ts`, `cli-runner.ts`, `session-manager.ts`, `proxy-server.ts` now import all constants from `config.ts` instead of defining them locally
-- **test:** 35 new tests for provider sessions, config exports (252 total)
+- Startup warning when `idleTimeoutSeconds` is not set or is under 120s.
 
 ### v2.5.0
-- **feat:** Graceful timeout handling — replaces Node's `spawn({ timeout })` with manual SIGTERM→SIGKILL sequence (5s grace period). Exit 143 is now clearly annotated as "timeout by supervisor" in logs, not a cryptic model error.
-- **feat:** Per-model timeout profiles — new `modelTimeouts` config option sets sensible defaults per model: Opus 5 min, Sonnet 3 min, Haiku 90s, Flash models 90s. Scales dynamically with conversation size (+2s/msg beyond 10, +5s/tool).
-- **feat:** Timeout logging — every timeout event logs model, elapsed time, SIGTERM/SIGKILL steps. Fallback messages now show "timeout by supervisor" instead of raw exit codes.
-- **fix:** Base timeout raised from 120s to 300s (was causing frequent Exit 143 on normal Sonnet conversations)
-- **fix:** Session manager `kill()`, `cleanup()`, and `stop()` now use graceful SIGTERM→SIGKILL instead of immediate SIGTERM
-- **test:** 7 new tests for timeout handling and exit code annotation (217 total)
 
-### v2.4.0
-- **feat:** Metrics & health dashboard — request volume, latency, errors, token usage
+- Graceful timeout handling: SIGTERM -> SIGKILL with 5s grace period.
+- Per-model timeout profiles: Opus 5min, Sonnet 3min, Haiku 90s.
 
 ### v2.3.0
-- **feat:** OpenAI tool calling protocol support for all CLI models — tool definitions are injected into the prompt, structured `tool_calls` responses are parsed and returned in OpenAI format
-- **feat:** Multimodal content support — images and audio from webchat are extracted to temp files and passed to CLIs (Codex uses native `-i` flag, Claude/Gemini reference file paths in prompt)
-- **feat:** Autonomous execution mode — Claude uses `--permission-mode bypassPermissions`, Gemini uses `--approval-mode yolo`, Codex uses `--full-auto`. CLI models never ask interactive questions.
-- **feat:** New `src/tool-protocol.ts` module — tool prompt builder, response parser, call ID generator
-- **fix:** Removed `--tools ""` from Claude CLI args — allows native tool execution when needed
-- **fix:** Model capabilities now report `tools: true` for all CLI models (was `false`)
 
-### v2.2.1
-- **fix:** Config-patcher now validates `apiKey` value — re-patches if `__OPENCLAW_KEEP__` or any wrong value is present (prevents vllm 401 Unauthorized after config migrations)
+- OpenAI tool calling protocol support for all CLI models.
+- Multimodal content support (images/audio from webchat).
+- Autonomous execution mode for all CLI runners.
 
-### v2.2.0
-- **fix:** Module-level guards prevent duplicate log spam — `register()` is called per-agent (~11×), now logs Chrome/provider/commands only once
-- **fix:** Shortened command registration log: count + `/cli-list` reference instead of listing all 32 commands
-- **fix:** Removed `fuser -k` port cleanup — was killing the gateway process itself, causing systemd restart loops
-- **fix:** EADDRINUSE now handled gracefully (skip + log) instead of process killing
-- **fix:** Session restore (4× Chromium) only runs in gateway mode — CLI commands like `openclaw models status` no longer hang
-- **fix:** Codex auth import runs once per startup, not per-agent
+### v2.0.0
 
-### v2.1.3
-- **docs:** All documentation updated to reflect current version (README, SKILL.md, STATUS.md, MANIFEST.json)
+- Phase 2: local OpenAI-compatible proxy, stdin delivery, prompt truncation.
 
-### v2.1.2
-- **fix:** Updated ChatGPT web session model list: gpt-4o, gpt-4o-mini, gpt-4.1, gpt-4.1-mini, o3, o4-mini, gpt-5, gpt-5-mini
-- **fix:** `server.unref()` — proxy server no longer keeps `openclaw doctor` hanging indefinitely
-
-### v2.1.1
-- **fix:** `server.unref()` on proxy server so `openclaw doctor` (and short-lived CLI commands) exit cleanly
-
-### v2.1.0
-- **feat:** Session manager for isolated per-request workdirs
-- **feat:** Register OpenCode and Pi slash commands (`/cli-opencode`, `/cli-pi`)
-- **feat:** Codex auth auto-import support
-- **feat:** Workdir isolation for all CLI runners
-
-### v1.9.2
-- **fix:** Correct `maxTokens` and `contextWindow` for all CLI_MODELS — were hardcoded to 8192 output tokens
-  - Claude Opus 4.6: 1M context / 128k output (was 200k/8k)
-  - Claude Sonnet 4.6: 1M context / 64k output (was 200k/8k)
-  - Claude Haiku 4.5: 200k context / 64k output (was 200k/8k)
-  - Gemini 2.5 Pro/Flash: 1M context / 65k output (was 1M/8k)
-  - Gemini 3 Pro/Flash Preview: 1M context / 65k output (was 1M/8k)
-  - Web-session Gemini models: same corrections
-
-### v1.9.1
-- **feat:** Full slash command mapping on status page — all models now show their /cli-* command
-- **fix:** Register missing slash commands: /cli-codex-spark, /cli-codex52, /cli-codex-mini, /cli-gemini3-flash (documented but never registered)
-- **feat:** /cli-help command — full reference with CLI/Codex/Web/BitNet sections, expiry info, quick examples, dashboard links
-- **feat:** /cli-list now references /cli-help and shows dashboard URL
-
-/
 ### v1.9.0
-- **feat:** Auto-source version from `package.json` — eliminates hardcoded version string sync issues (was stale across v1.8.2–v1.8.8)
-- **feat:** ESLint config (`eslint.config.js`) — TypeScript-aware linting with `npm run lint`, integrated into CI pipeline
-- **refactor:** Extract `/status` HTML dashboard into `src/status-template.ts` — easier to maintain and test
-- **feat:** System Chrome startup check — logs a clear warning with install instructions if `google-chrome` / `chromium` is not found (required for stealth mode browser launches)
-- **refactor:** Consolidate 4 cookie expiry files (`grok-`, `gemini-`, `claude-`, `chatgpt-cookie-expiry.json`) into single `~/.openclaw/cookie-expiry.json`. Legacy files are auto-migrated on first load.
-- **fix:** Explicit `grokBrowser` cleanup on plugin unload — prevents orphaned Chromium processes on hot-reload. Launch promises (`_geminiLaunchPromise` etc.) are also cleared.
-- **feat:** Model fallback chain — when a CLI model fails (timeout, error), automatically retries with a lighter variant: `gemini-2.5-pro` → `flash`, `claude-opus` → `sonnet` → `haiku`. Response includes the actual model used.
-- **feat:** `/healthz` JSON endpoint — returns version, uptime, provider session status, and model count. Useful for monitoring scripts and health dashboards.
-- **feat:** Status page now shows slash commands (`/cli-codex`, `/cli-sonnet`, etc.) next to model IDs
 
-### v1.8.7
-- **fix:** Add missing cli-gemini/gemini-3-flash-preview and all Codex models to status page model list
-- **fix:** Remove duplicate cli-gemini/gemini-3-pro alias
-
-/
-### v1.8.6
-- **fix:** Remove stale web-claude/* and web-chatgpt/* entries from model list (status page showed removed providers)
-
-/
-### v1.8.5
-- **fix:** Replace full system prompt with 30-token mini stub for BitNet (prevents context overflow)
-- **fix:** Truncate to last 6 non-system messages before forwarding to BitNet (4096 token limit)
-- **fix:** Flatten multi-part content arrays to plain strings (llama-server crash fix)
-
-### v1.8.3 → v1.8.4
-- Intermediate BitNet crash fixes (superseded by v1.8.5)
-
-/
-### v1.8.2
-- **fix:** `local-bitnet/*` exempt from tool-call rejection — llama-server ignores tool schemas silently. OpenClaw always sends tools with every request, so this was blocking all BitNet usage.
-
-### v1.8.1
-- **fix:** `--now` flag now works when followed by additional text (e.g. `/cli-bitnet --now hello`) — was using `===` instead of `startsWith`.
+- Model fallback chains: `gemini-2.5-pro` -> Flash, `claude-opus` -> Sonnet -> Haiku.
+- `/healthz` JSON endpoint.
+- Staged model switching (`/cli-apply`, `/cli-pending`).
 
 ### v1.8.0
-- **feat:** BitNet local inference — `local-bitnet/bitnet-2b` routes to llama-server on 127.0.0.1:8082. No API key, no internet, pure CPU inference (2.87 tok/s on i7-6700K). Use `/cli-bitnet` to switch.
-- **feat:** `/bridge-status` shows BitNet server health as 5th provider.
 
-### v1.7.5
-- **chore:** Re-published to ClawHub with correct display name "OpenClaw CLI Bridge"
-
-### v1.7.4
-- **docs:** Handoff docs updated (DASHBOARD, LOG, STATUS, NEXT_ACTIONS)
-
-### v1.7.3
-- **fix:** Cookie expiry tracking for all 4 providers now uses the **longest-lived** auth cookie instead of the shortest. Previously, short-lived cookies caused false "session expired" alerts and unnecessary WhatsApp notifications on every gateway restart:
-  - **Claude:** `__cf_bm` (Cloudflare, ~30 min) removed from scan list; now tracks `sessionKey` (~1 year)
-  - **ChatGPT:** sort reversed; now prefers `__Secure-next-auth.session-token` over `_puid` (~7d)
-  - **Gemini:** sort reversed; now uses longest of `__Secure-1PSID` / `__Secure-3PSID` / `SID`
-  - **Grok:** sort reversed; now uses longest of `sso` / `sso-rw`
-
-### v1.7.2
-- **fix:** Startup restore now uses cookie expiry file as primary check — if cookies are still valid (>1h left), the persistent context is launched immediately without a fragile browser selector check. This eliminates false "not logged in" errors for Grok/Claude/ChatGPT caused by slow page loads or DOM selector changes.
-- **fix:** Grok cookie file path corrected to `grok-cookie-expiry.json` (was `grok-session.json`).
-
-### v1.7.1
-- **feat:** `/status` HTML dashboard — browser-accessible health page at `http://127.0.0.1:31337/status`. Shows all 4 web providers with live status badge (Connected / Logged in / Expired / Never logged in), cookie expiry per provider, CLI and web model list. Auto-refreshes every 30s.
-
-### v1.7.0
-- **fix:** Startup restore timeout 3s → 6s with one retry, eliminates false "not logged in" for slow-loading pages (Grok)
-- **feat:** Auto-relogin on startup — if cookies truly expired, attempt headless relogin before sending WhatsApp alert
-- **feat:** Keep-alive (20h) now verifies session after touch and attempts auto-relogin if expired
-- **feat:** Tests (vitest) — proxy tool rejection, models endpoint, auth, cookie expiry formatters
-
-### v1.6.5
-- **feat:** Automatic session keep-alive — every 20h, active browser sessions are silently refreshed by navigating to the provider home page. Prevents cookie expiry on providers like ChatGPT (7-day sessions) without storing credentials.
-
-### v1.6.4
-- **chore:** version bump (1.6.3 was already published on npm with partial changes)
-
-### v1.6.3
-- **fix:** CLI-proxy models (`cli-gemini/*`, `cli-claude/*`) now return HTTP 400 with `tools_not_supported` when a request includes tool/function call schemas — prevents agents from silently failing or hallucinating when assigned a CLI-proxy model
-- **feat:** `/v1/models` response includes `capabilities.tools: false` for CLI-proxy models so OpenClaw can detect tool support upfront
-- **fix:** EADDRINUSE on hot-reload: re-probe after 1.5s wait before retrying bind; probe timeout 800ms → 2000ms
-
-### v1.6.2
-- **docs:** Add missing changelog entries (v1.5.1, v1.6.0, v1.6.1), fix /cli-codex54 command name in SKILL.md, add startup re-login alert description to SKILL.md.
-
-### v1.6.1
-- **feat:** WhatsApp re-login alerts on startup. After each gateway restart, the session restore loop collects any providers that failed to restore (cookies expired) and sends a single batched WhatsApp notification with the exact `/xxx-login` commands needed. No credential storage — remains fully 2FA-safe.
+- BitNet local inference (`local-bitnet/bitnet-2b`, llama-server on port 8082).
+- `/bridge-status` shows BitNet server health.
 
 ### v1.6.0
-- **feat:** Persistent Chromium profiles for all 4 web providers (Grok, Gemini, Claude.ai, ChatGPT). Browser sessions now survive gateway restarts — cookies are stored in `~/.openclaw/{grok,gemini,claude,chatgpt}-profile/` and restored automatically on startup.
-- **feat:** Re-added `/claude-login`, `/claude-status`, `/claude-logout`, `/chatgpt-login`, `/chatgpt-status`, `/chatgpt-logout` commands with full persistent profile support.
-- **feat:** `/bridge-status` now shows all 4 providers with session state and cookie expiry at a glance.
-- **fix:** Startup restore guard (`_startupRestoreDone`) prevents duplicate browser launches on hot-reloads (SIGUSR1).
 
-### v1.5.1
-- **fix:** Hardcoded plugin version `1.3.1` in plugin object updated to `1.5.1`.
-- **docs:** Added `CONTRIBUTING.md` with release checklist and smoketest workflow.
-
-### v1.5.0
-- **refactor:** Removed `/claude-login`, `/claude-logout`, `/claude-status`, `/chatgpt-login`, `/chatgpt-logout`, `/chatgpt-status` commands and all related browser automation code. Claude is fully covered by `cli-claude/*` via CLI proxy, ChatGPT by `openai-codex` + `copilot-proxy`.
-- **refactor:** Removed `web-claude/*` and `web-chatgpt/*` proxy routes and model entries from proxy server.
-- **refactor:** Removed `getOrLaunchClaudeContext()` and `getOrLaunchChatGPTContext()` functions, claude/chatgpt session state, cookie expiry tracking, and startup restore for these providers.
-- **cleanup:** Deleted `test/claude-proxy.test.ts` and `test/chatgpt-proxy.test.ts`.
-- **result:** Cleaner codebase, no browser timeout on startup for unused providers. Only Grok and Gemini browser providers remain.
-
-### v1.4.3
-- **fix:** Full stealth mode for all browser launches - `ignoreDefaultArgs: ['--enable-automation']` removes Playwright's automation flag, `--disable-blink-features=AutomationControlled` hides `navigator.webdriver`, and `--disable-infobars` suppresses the "Chrome is being controlled by automated software" banner. Combined with `channel: "chrome"` (v1.4.2), this bypasses Cloudflare human verification completely.
-- **root cause:** Even with system Chrome (`channel: "chrome"`), Playwright injects `--enable-automation` by default, which sets `navigator.webdriver = true` and shows the automation infobar. Cloudflare checks both signals.
-
-### v1.4.2
-- **fix:** All browser launches now use `channel: "chrome"` (real system Chrome) instead of Playwright's bundled Chromium. Cloudflare human verification no longer blocks `/xxx-login` commands.
-- **root cause:** Playwright's bundled Chromium is fingerprinted by Cloudflare as an automation browser, triggering CAPTCHA challenges that cannot be completed. System Chrome is not flagged.
-
-### v1.4.1
-- **fix:** `/claude-login`, `/gemini-login`, `/chatgpt-login` now fall back to a **headed** (visible) Chromium browser when headless login fails (no saved cookies in profile). The user can log in manually in the opened browser window (5 min timeout). After login, cookies are saved to the persistent profile for future headless use.
-- **fix:** Added missing `claude-opus-4-6` and `claude-haiku-4-5` entries to the Claude browser MODEL_MAP
-- **root cause:** Headless Chromium without saved cookies sees a login page, not the editor - the user cannot interact with a headless browser to log in
-
-### v1.4.0
-- **feat:** Persistent browser fallback for all providers - `/claude-login`, `/gemini-login`, `/chatgpt-login` no longer require the OpenClaw browser (CDP port 18800). If CDP is available, cookies are imported; otherwise a standalone persistent headless Chromium is launched automatically from the saved profile directory.
-- **feat:** New helper functions `getOrLaunchClaudeContext()`, `getOrLaunchGeminiContext()`, `getOrLaunchChatGPTContext()` - same pattern as the existing `getOrLaunchGrokContext()` (try CDP, fall back to persistent Chromium, coalesce concurrent launches)
-- **fix:** Proxy server `connectXxxContext` callbacks now use the persistent fallback too - no more "not logged in" errors when CDP is unavailable but a saved profile exists
-- **fix:** `cleanupBrowsers()` now properly closes Claude, Gemini, and ChatGPT persistent contexts on plugin teardown (previously only cleaned up Grok + CDP)
-- **root cause:** All 3 login commands (Claude, Gemini, ChatGPT) called `connectToOpenClawBrowser()` directly, which only tries CDP on 127.0.0.1:18800. If Chrome was not running with `--remote-debugging-port=18800`, login always failed. Grok already had the fallback pattern since v0.2.27 - now all 4 providers are consistent.
-
-### v1.3.5
-- **fix:** Startup session restore now runs only once per process lifetime — `_startupRestoreDone` module-level guard prevents re-running on every hot-reload (SIGUSR1), which was triggered every ~60s by the openclaw-control-ui dashboard poll
-- **root cause:** Gateway `reload.mode=hybrid` + dashboard status polling caused plugin to reinitialize every 60s → each reload spawned a new Gemini Chromium instance → RAM/CPU OOM loop
-- **behavior:** First load after gateway start: sequential profile restore runs once. All subsequent hot-reloads: skip restore, reuse existing in-memory contexts
-
-### v1.3.4
-- **feat:** Safe sequential session restore on startup — if a saved profile exists, providers are reconnected automatically after gateway restart (one at a time, 3s delay between each, headless)
-- **fix:** No manual `/xxx-login` needed after reboot if profile is already saved
-- **safety:** Profile-gated — only restores if `~/.openclaw/<provider>-profile/` or cookie file exists; never spawns a browser for an uninitialized provider
-
-### v1.3.3
-- **fix:** Removed auto-connect of all browser providers on plugin startup — caused OOM (load 195, 30GB RAM) by spawning 4+ persistent Chromium instances on every gateway start
-- **fix:** Removed Grok session restore on startup — same root cause
-- **behavior change:** Browsers are now started **on-demand only** via `/grok-login`, `/claude-login`, `/gemini-login`, `/chatgpt-login`
-
-### v1.3.2
-- **fix:** Singleton promise guard on `ensureAllProviderContexts()` — concurrent requests no longer each spawn their own Chromium; extra callers await the existing run
-- **fix:** Removed recursive `ensureAllProviderContexts()` fallback from all `connect*Context` proxy callbacks — no more exponential browser spawn on CDP failure
-
-### v1.3.1
-- **fix:** /claude-login, /gemini-login, /chatgpt-login now bake cookies into persistent profile dirs
-- **fix:** After gateway restart, providers auto-reconnect from saved profile (no browser tabs needed)
-- **fix:** Better debug logging when persistent headless context fails (Cloudflare etc.)
-
-### v1.3.0
-- **fix:** Browser persistence after gateway restart — each provider launches its own persistent Chromium if OpenClaw browser is unavailable
-- **feat:** `ensureAllProviderContexts()` — unified startup connect for all 4 providers
-- **feat:** Lazy-connect fallback to persistent context when CDP unavailable
-
-### v1.2.0
-- **fix:** Fresh page per request — no more message accumulation across calls
-- **feat:** ChatGPT model switching via URL param (?model=gpt-4o, o3, etc.)
-- **chore:** Gemini model switching: TODO (requires UI interaction)
-
-### v1.1.0
-- **feat:** Auto-connect all providers on startup (no manual login after restart if browser is open)
-- **feat:** `/bridge-status` — all 4 providers at a glance with expiry info
-- **fix:** Removed obsolete CLI models: gpt-5.2-codex, gpt-5.3-codex-spark, gpt-5.1-codex-mini, gemini-3-flash-preview
-- **fix:** Removed duplicate cli-gemini3-flash (was same as gemini-3-flash-preview)
-- **chore:** Cleaned up CLI_MODEL_COMMANDS (8 models, down from 13)
-
-## v1.0.0 — Full Headless Browser Bridge 🚀
-
-All four major LLM providers are now available via browser automation.
-No CLI binaries required — just authenticated browser sessions.
-
-#### v1.1.0
-- **feat:** Auto-connect all providers on startup (no manual login after restart if browser is open)
-- **feat:** `/bridge-status` — all 4 providers at a glance with expiry info
-- **fix:** Removed obsolete CLI models: gpt-5.2-codex, gpt-5.3-codex-spark, gpt-5.1-codex-mini, gemini-3-flash-preview
-- **fix:** Removed duplicate cli-gemini3-flash (was same as gemini-3-flash-preview)
-- **chore:** Cleaned up CLI_MODEL_COMMANDS (8 models, down from 13)
-
-## v1.0.0
-- **feat:** `chatgpt-browser.ts` — chatgpt.com DOM-automation (`#prompt-textarea` + `[data-message-author-role]`)
-- **feat:** `web-chatgpt/*` models: gpt-4o, gpt-4o-mini, gpt-4.1, o3, o4-mini, gpt-5, gpt-5-mini (updated in v1.6.3)
-- **feat:** `/chatgpt-login`, `/chatgpt-status`, `/chatgpt-logout` + cookie-expiry tracking
-- **feat:** All 4 providers headless: Grok ✅ Claude ✅ Gemini ✅ ChatGPT ✅
-- **test:** 96/83 tests green (8 test files)
-- **fix:** Singleton CDP connection, cleanupBrowsers() on plugin stop
-
-### v0.2.30
-- **feat:** `gemini-browser.ts` — gemini.google.com DOM-automation (Quill editor + message-content polling)
-- **feat:** `web-gemini/*` models in proxy (gemini-2-5-pro, gemini-2-5-flash, gemini-3-pro, gemini-3-flash)
-- **feat:** `/gemini-login`, `/gemini-status`, `/gemini-logout` commands + cookie-expiry tracking
-- **fix:** Singleton CDP connection — no more zombie Chromium processes
-- **fix:** `cleanupBrowsers()` called on plugin stop — all browser resources released
-- **test:** 90/90 tests green (+6 gemini-proxy tests)
-
-### v0.2.29
-- **feat:** `claude-browser.ts` — claude.ai DOM-automation (ProseMirror + `[data-test-render-count]` polling)
-- **feat:** `web-claude/*` models in proxy (web-claude/claude-sonnet, claude-opus, claude-haiku)
-- **feat:** `/claude-login`, `/claude-status`, `/claude-logout` commands
-- **feat:** Claude cookie-expiry tracking (`~/.openclaw/claude-cookie-expiry.json`)
-- **test:** 84/84 tests green (+7 claude-proxy tests, +8 claude-browser unit tests)
-
-### v0.2.28
-- **feat:** `/grok-login` scans auth cookie expiry (sso cookie) and saves to `~/.openclaw/grok-cookie-expiry.json`
-- **feat:** `/grok-status` shows cookie expiry with color-coded warnings (🚨 <7d, ⚠️ <14d, ✅ otherwise)
-- **feat:** Startup log shows cookie expiry and refreshes the expiry file on session restore
-- **fix:** Flaky cli-runner test improved (was pre-existing)
-
-### v0.2.27
-- **feat:** Grok persistent Chromium profile (`~/.openclaw/grok-profile/`) — cookies survive gateway restarts
-- **feat:** `/grok-login` imports cookies from OpenClaw browser into persistent profile automatically
-- **fix:** `verifySession` reuses existing grok.com page instead of opening a new one (avoids Cloudflare 403)
-- **fix:** DOM-polling strategy instead of direct fetch API — bypasses `x-statsig-id` anti-bot check completely
-- **fix:** Lazy-connect: `connectGrokContext` callback auto-reconnects on first request after restart
-
-### v0.2.26
-- **feat:** Grok web-session bridge integrated into cli-bridge proxy — routes `web-grok/*` models through grok.com browser session (SuperGrok subscription, no API credits needed)
-- **feat:** `/grok-login` — opens Chromium for X.com OAuth login, saves session to `~/.openclaw/grok-session.json`
-- **feat:** `/grok-status` — check session validity
-- **feat:** `/grok-logout` — clear session
-- **fix:** Grok web-session plugin removed as separate plugin — consolidated into cli-bridge (fewer running processes, single proxy port)
-
-### v0.2.25
-- **feat:** Staged model switching — `/cli-*` now stages the switch instead of applying it immediately. Prevents silent session corruption when switching models mid-conversation.
-  - `/cli-sonnet` → stages switch, shows warning, does NOT apply
-  - `/cli-sonnet --now` → immediate switch (use only between sessions!)
-  - `/cli-apply` → apply staged switch after finishing current task
-  - `/cli-pending` → show staged switch (if any)
-  - `/cli-back` → restore previous model + clear staged switch
-- **fix:** Sleep-resilient OAuth token refresh — replaced single long `setTimeout` with `setInterval(10min)` polling. Token refresh no longer misses its window after system sleep/resume.
-- **fix:** Timer leak in `scheduleTokenRefresh()` — old interval now reliably cleared via `stopTokenRefresh()` before scheduling a new one.
-- **fix:** `stopTokenRefresh()` exported from `claude-auth.ts`; called automatically via `server.on("close")` when the proxy server closes.
-
-### v0.2.23
-- **feat:** Proactive OAuth token management (`src/claude-auth.ts`) — the proxy now reads `~/.claude/.credentials.json` at startup, schedules a refresh 30 minutes before expiry, and calls `ensureClaudeToken()` before every `claude` subprocess invocation. On 401 responses, automatically retries once after refreshing. Eliminates the need for manual re-login after token expiry in headless/systemd deployments.
-
-### v0.2.22
-- **fix:** `runClaude()` now detects expired/invalid OAuth tokens immediately (401 in stderr) and throws a clear actionable error instead of waiting for the 30s proxy timeout. Error message includes the exact re-login command.
-
-### v0.2.21
-- **fix:** `buildMinimalEnv()` now forwards `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` to Claude Code subprocesses — required for Gnome Keyring / libsecret access when Claude Code is authenticated via `claude.ai` OAuth (Claude Max). Without these, the spawned `claude` process cannot read its OAuth token from the system keyring, resulting in `401 Invalid authentication credentials` and a 30-second timeout on `/cli-test` and all `/cli-claude/*` requests.
-
-### v0.2.20
-- **fix:** `formatPrompt` now defensively coerces `content` to string via `contentToString()` — prevents `[object Object]` reaching the CLI when WhatsApp group messages contain structured content objects instead of plain strings
-- **feat:** `ChatMessage.content` now accepts `string | ContentPart[] | unknown` (OpenAI multimodal content arrays supported)
-- **feat:** New `contentToString()` helper: handles string, OpenAI ContentPart arrays, arbitrary objects (JSON.stringify), null/undefined
-
-### v0.2.19
-- **feat:** `/cli-list` command — formatted overview of all registered models grouped by provider
-- **docs:** Rewrite README to reflect current state (correct model names, command count, requireAuth, test count, /cli-list docs)
-
-### v0.2.18
-- **feat:** Add `/cli-gemini3-flash` → `gemini-3-flash-preview`
-- **feat:** Add `/cli-codex-spark` → `gpt-5.3-codex-spark`, `/cli-codex52` → `gpt-5.2-codex`, `/cli-codex54` → `gpt-5.4`
-- **fix:** Update `DEFAULT_ALLOWED_CLI_MODELS` with `gemini-3-flash-preview`
-
-### v0.2.17
-- **fix:** `/cli-gemini3` model corrected to `gemini-3-pro-preview` (was `gemini-3-pro`, returns 404 from Gemini API)
-
-### v0.2.16
-- **feat(T-101):** Expand test suite to 45 tests — new cases for `formatPrompt` (mixed roles, boundary values, system messages) and `routeToCliRunner` (gemini paths, edge cases)
-- **feat(T-103):** Add `DEFAULT_ALLOWED_CLI_MODELS` allowlist; `routeToCliRunner` now rejects unregistered models by default; pass `allowedModels: null` to opt out
-
-### v0.2.15
-- **docs:** Rewrite changelog (entries for v0.2.12–v0.2.14 were corrupted); all providers verified working end-to-end
-
-### v0.2.14
-- **fix:** Strip `vllm/` prefix in `routeToCliRunner` — OpenClaw sends full provider path (`vllm/cli-claude/...`) but proxy router expected bare `cli-claude/...`
-- **test:** Add 4 routing tests (9 total)
-
-### v0.2.13
-- **fix:** Set `requireAuth: false` on all `/cli-*` commands — plugin-level auth uses different resolution path than `commands.allowFrom`; gateway allowlist is the correct security layer
-- **fix:** Hardcoded `version: "0.2.5"` in plugin object now tracks `package.json`
-
-### v0.2.9
-- **fix:** Critical — replace `fuser -k 31337/tcp` with safe health probe to prevent gateway SIGKILL on hot-reloads
-
-### v0.2.7–v0.2.8
-- **fix:** Port leak on hot-reload — `registerService` stop() hook + `closeAllConnections()`
-
-### v0.2.6
-- **fix:** `openclaw.extensions` added to `package.json`; config patcher auto-adds vllm provider
-
-### v0.2.5
-- **feat:** `/cli-codex` + `/cli-codex-mini` (Codex OAuth provider, direct API)
-
-### v0.2.4
-- **fix:** Gemini agentic mode — stdin delivery + `cwd=/tmp`
-
-### v0.2.3
-- **feat:** `/cli-back` + `/cli-test`
-
-### v0.2.2
-- **feat:** Phase 3 — `/cli-*` slash commands
-
-### v0.2.1
-- **fix:** `spawn E2BIG` + unit tests
-
-### v0.2.0
-- **feat:** Phase 2 — local OpenAI-compatible proxy, stdin delivery, prompt truncation
+- Persistent Chromium profiles for all four web providers.
+- Sessions survive gateway restarts automatically.
 
 ### v0.1.x
-- Phase 1: Codex CLI OAuth auth bridge
+
+- Phase 1: Codex CLI OAuth auth bridge.
 
 ---
 

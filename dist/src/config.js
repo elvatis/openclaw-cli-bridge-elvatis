@@ -204,6 +204,15 @@ export const WORKDIR_ORPHAN_MAX_AGE_MS = 60 * 60 * 1_000; // 1 hour
 // ──────────────────────────────────────────────────────────────────────────────
 /** Default URL for the local BitNet llama-server. */
 export const DEFAULT_BITNET_SERVER_URL = "http://127.0.0.1:8082";
+// ──────────────────────────────────────────────────────────────────────────────
+// LM Studio
+// ──────────────────────────────────────────────────────────────────────────────
+/**
+ * Default URL for LM Studio's OpenAI-compatible API.
+ * Override via LM_STUDIO_URL in ~/.openclaw/.env — useful when LM Studio
+ * runs on a different machine (e.g. LM_STUDIO_URL=http://192.168.177.4:1234).
+ */
+export const DEFAULT_LM_STUDIO_URL = "http://127.0.0.1:1234";
 /** Max messages to send to BitNet (4096 token context limit). */
 export const BITNET_MAX_MESSAGES = 6;
 /** Minimal system prompt for BitNet to conserve tokens. */

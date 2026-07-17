@@ -9,6 +9,8 @@
  *   are routed to CLI tools or browser-session providers.
  *
  * Phase 3 (slash commands): registers /cli-* commands for instant model switching.
+ *   /cli-fable5       → vllm/cli-claude/claude-fable-5         (Claude Code CLI proxy, 1M ctx, flagship)
+ *   /cli-sonnet5      → vllm/cli-claude/claude-sonnet-5        (Claude Code CLI proxy, 1M ctx)
  *   /cli-sonnet       → vllm/cli-claude/claude-sonnet-4-6      (Claude Code CLI proxy)
  *   /cli-opus         → vllm/cli-claude/claude-opus-4-8        (Claude Code CLI proxy, 1M ctx)
  *   /cli-opus47       → vllm/cli-claude/claude-opus-4-7        (Claude Code CLI proxy, 1M ctx)

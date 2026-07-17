@@ -80,6 +80,11 @@ jobs:
             exit 1
           fi
 
+      - name: Undeprecate package on npm
+        run: npm deprecate @elvatis_com/openclaw-cli-bridge-elvatis ""
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Publish to npm
         run: npm publish --access public --ignore-scripts
         env:
@@ -132,8 +137,8 @@ jobs:
           NOTES=""
           if [ -f CHANGELOG.md ]; then
             NOTES=$(awk -v ver="$VERSION" '
-              $0 ~ "^### v"ver"[^0-9]" {flag=1; print; next}
-              flag && /^### v[0-9]/ {exit}
+              $0 ~ "^## v"ver"[^0-9]" {flag=1; next}
+              flag && /^## v[0-9]/ {exit}
               flag {print}
             ' CHANGELOG.md)
           fi
@@ -142,9 +147,12 @@ jobs:
           fi
           echo "$NOTES" > release_notes.md
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         run: |
           gh release create "$GITHUB_REF_NAME" \
+            --title "openclaw-cli-bridge-elvatis $GITHUB_REF_NAME" \
+            --notes-file release_notes.md \
+          || gh release edit "$GITHUB_REF_NAME" \
             --title "openclaw-cli-bridge-elvatis $GITHUB_REF_NAME" \
             --notes-file release_notes.md
         env:
