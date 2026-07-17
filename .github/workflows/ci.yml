@@ -90,39 +90,10 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  # ── Publish to ClawHub ──────────────────────────────────────────────────────
-  publish-clawhub:
-    name: Publish to ClawHub
-    needs: build
-    runs-on: ubuntu-latest
-    if: (startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '.')) || github.event_name == 'workflow_dispatch'
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '22'
-          registry-url: 'https://registry.clawhub.ai'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
-
-      - name: Build
-        run: npm run build
-
-      - name: Publish to ClawHub
-        run: npm publish --access public --ignore-scripts --registry https://registry.clawhub.ai
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-
   # ── Create GitHub Release ───────────────────────────────────────────────────
   release:
     name: Create GitHub Release
-    needs: [publish-npm, publish-clawhub]
+    needs: [publish-npm]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '.')
     permissions:
