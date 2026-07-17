@@ -20,6 +20,7 @@ import { claudeComplete, claudeCompleteStream, type ChatMessage as ClaudeBrowser
 import { chatgptComplete, chatgptCompleteStream, type ChatMessage as ChatGPTBrowserChatMessage } from "./chatgpt-browser.js";
 import { geminiApiComplete, geminiApiCompleteStream, type GeminiApiResult, type ContentPart } from "./gemini-api-runner.js";
 import { perplexityApiComplete, perplexityApiCompleteStream } from "./perplexity-api-runner.js";
+import { openrouterApiComplete, openrouterApiCompleteStream } from "./openrouter-runner.js";
 import type { BrowserContext } from "playwright";
 import { renderStatusPage, renderDashboardData, type StatusProvider } from "./status-template.js";
 import { sessionManager } from "./session-manager.js";
@@ -333,6 +334,31 @@ export const CLI_MODELS = [
   { id: "perplexity-api/perplexity/glm-5.2",          name: "GLM-5.2 (Perplexity)",         contextWindow: 128_000, maxTokens: 16_384 },
   // NVIDIA via Perplexity
   { id: "perplexity-api/nvidia/nemotron-3-super-120b-a12b", name: "Nemotron 3 Super 120B (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+
+  // ── OpenRouter (unified API key, hundreds of models) ─────────────────────
+  // Anthropic via OpenRouter
+  { id: "openrouter-api/anthropic/claude-opus-4-8",   name: "Claude Opus 4.8 (via OpenRouter)",   contextWindow: 200_000, maxTokens: 32_768 },
+  { id: "openrouter-api/anthropic/claude-sonnet-4-6", name: "Claude Sonnet 4.6 (via OpenRouter)", contextWindow: 200_000, maxTokens: 32_768 },
+  { id: "openrouter-api/anthropic/claude-haiku-4-5",  name: "Claude Haiku 4.5 (via OpenRouter)",  contextWindow: 200_000, maxTokens: 32_768 },
+  // OpenAI via OpenRouter
+  { id: "openrouter-api/openai/gpt-4o",               name: "GPT-4o (via OpenRouter)",            contextWindow: 128_000, maxTokens: 16_384 },
+  { id: "openrouter-api/openai/gpt-4.1",              name: "GPT-4.1 (via OpenRouter)",           contextWindow: 1_047_576, maxTokens: 32_768 },
+  { id: "openrouter-api/openai/o3",                   name: "o3 (via OpenRouter)",                contextWindow: 200_000, maxTokens: 100_000 },
+  // Google via OpenRouter
+  { id: "openrouter-api/google/gemini-2.5-pro",       name: "Gemini 2.5 Pro (via OpenRouter)",    contextWindow: 1_048_576, maxTokens: 65_536 },
+  { id: "openrouter-api/google/gemini-2.5-flash",     name: "Gemini 2.5 Flash (via OpenRouter)",  contextWindow: 1_048_576, maxTokens: 65_536 },
+  // xAI via OpenRouter
+  { id: "openrouter-api/x-ai/grok-3",                 name: "Grok 3 (via OpenRouter)",            contextWindow: 131_072, maxTokens: 16_384 },
+  { id: "openrouter-api/x-ai/grok-3-mini",            name: "Grok 3 Mini (via OpenRouter)",       contextWindow: 131_072, maxTokens: 16_384 },
+  // DeepSeek via OpenRouter
+  { id: "openrouter-api/deepseek/deepseek-r1",        name: "DeepSeek R1 (via OpenRouter)",       contextWindow: 163_840, maxTokens: 32_768 },
+  { id: "openrouter-api/deepseek/deepseek-chat-v3-0324", name: "DeepSeek V3 (via OpenRouter)",   contextWindow: 163_840, maxTokens: 32_768 },
+  // Meta via OpenRouter
+  { id: "openrouter-api/meta-llama/llama-4-maverick", name: "Llama 4 Maverick (via OpenRouter)", contextWindow: 1_000_000, maxTokens: 16_384 },
+  { id: "openrouter-api/meta-llama/llama-4-scout",    name: "Llama 4 Scout (via OpenRouter)",    contextWindow: 10_000_000, maxTokens: 16_384 },
+  // Mistral via OpenRouter
+  { id: "openrouter-api/mistralai/mistral-large-2407", name: "Mistral Large (via OpenRouter)",   contextWindow: 128_000, maxTokens: 16_384 },
+  { id: "openrouter-api/mistralai/mistral-small-3.2-24b-instruct", name: "Mistral Small 3.2 (via OpenRouter)", contextWindow: 128_000, maxTokens: 16_384 },
 ];
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -959,6 +985,54 @@ async function handleRequest(
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "application/json", ...corsHeaders() });
           res.end(JSON.stringify({ error: { message: msg, type: "perplexity_api_error" } }));
+        }
+      }
+      return;
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── OpenRouter API routing (OpenAI-compatible, multi-provider) ───────────
+    const openrouterApiModel = model.startsWith("vllm/") ? model.slice(5) : model;
+    if (openrouterApiModel.startsWith("openrouter-api/")) {
+      const timeoutMs = opts.modelTimeouts?.[openrouterApiModel] ?? opts.timeoutMs ?? 120_000;
+      const apiStart = Date.now();
+      const apiOpts = { model: openrouterApiModel, timeoutMs, log: opts.log };
+      try {
+        if (stream) {
+          res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
+          sendSseChunk(res, { id, created, model: openrouterApiModel, delta: { role: "assistant" }, finish_reason: null });
+          const result = await openrouterApiCompleteStream(
+            cleanMessages,
+            apiOpts,
+            (token) => sendSseChunk(res, { id, created, model: openrouterApiModel, delta: { content: token }, finish_reason: null })
+          );
+          const estComp = estimateTokens(result.content);
+          metrics.recordRequest(openrouterApiModel, Date.now() - apiStart, true, estPromptTokens, result.completionTokens ?? estComp);
+          sendSseChunk(res, { id, created, model: openrouterApiModel, delta: {}, finish_reason: result.finishReason });
+          res.write("data: [DONE]\n\n");
+          res.end();
+        } else {
+          const result = await openrouterApiComplete(cleanMessages, apiOpts);
+          const estComp = estimateTokens(result.content);
+          metrics.recordRequest(openrouterApiModel, Date.now() - apiStart, true, estPromptTokens, result.completionTokens ?? estComp);
+          res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({
+            id, object: "chat.completion", created, model: openrouterApiModel,
+            choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: result.finishReason }],
+            usage: {
+              prompt_tokens: result.promptTokens ?? estPromptTokens,
+              completion_tokens: result.completionTokens ?? estComp,
+              total_tokens: (result.promptTokens ?? estPromptTokens) + (result.completionTokens ?? estComp),
+            },
+          }));
+        }
+      } catch (err) {
+        metrics.recordRequest(openrouterApiModel, Date.now() - apiStart, false, estPromptTokens);
+        const msg = (err as Error).message;
+        opts.warn(`[cli-bridge] OpenRouter API error for ${openrouterApiModel}: ${msg}`);
+        if (!res.headersSent) {
+          res.writeHead(500, { "Content-Type": "application/json", ...corsHeaders() });
+          res.end(JSON.stringify({ error: { message: msg, type: "openrouter_api_error" } }));
         }
       }
       return;

@@ -820,6 +820,19 @@ const CLI_MODEL_COMMANDS = [
   { name: "cli-grok",         model: "vllm/cli-grok/grok-4.5",              description: "Grok 4.5 (Grok CLI)",                    label: "Grok 4.5 (CLI)" },
   // ── BitNet local inference (via local proxy → llama-server) ─────────────────
   { name: "cli-bitnet",       model: "vllm/local-bitnet/bitnet-2b",         description: "BitNet b1.58 2B (local CPU, no API key)", label: "BitNet 2B (local)" },
+  // ── OpenRouter API (REST, uses $OPENROUTER_API_KEY, 200+ models) ─────────────
+  { name: "or-opus",          model: "vllm/openrouter-api/anthropic/claude-opus-4-8",   description: "Claude Opus 4.8 via OpenRouter",      label: "Claude Opus 4.8 (OpenRouter)" },
+  { name: "or-sonnet",        model: "vllm/openrouter-api/anthropic/claude-sonnet-4-6", description: "Claude Sonnet 4.6 via OpenRouter",    label: "Claude Sonnet 4.6 (OpenRouter)" },
+  { name: "or-haiku",         model: "vllm/openrouter-api/anthropic/claude-haiku-4-5",  description: "Claude Haiku 4.5 via OpenRouter",     label: "Claude Haiku 4.5 (OpenRouter)" },
+  { name: "or-gpt4o",         model: "vllm/openrouter-api/openai/gpt-4o",               description: "GPT-4o via OpenRouter",               label: "GPT-4o (OpenRouter)" },
+  { name: "or-gpt41",         model: "vllm/openrouter-api/openai/gpt-4.1",              description: "GPT-4.1 (1M ctx) via OpenRouter",     label: "GPT-4.1 (OpenRouter)" },
+  { name: "or-o3",            model: "vllm/openrouter-api/openai/o3",                   description: "OpenAI o3 via OpenRouter",            label: "o3 (OpenRouter)" },
+  { name: "or-gemini",        model: "vllm/openrouter-api/google/gemini-2.5-pro",       description: "Gemini 2.5 Pro via OpenRouter",       label: "Gemini 2.5 Pro (OpenRouter)" },
+  { name: "or-gemini-flash",  model: "vllm/openrouter-api/google/gemini-2.5-flash",     description: "Gemini 2.5 Flash via OpenRouter",     label: "Gemini 2.5 Flash (OpenRouter)" },
+  { name: "or-grok3",         model: "vllm/openrouter-api/x-ai/grok-3",                 description: "Grok 3 via OpenRouter",               label: "Grok 3 (OpenRouter)" },
+  { name: "or-deepseek",      model: "vllm/openrouter-api/deepseek/deepseek-r1",        description: "DeepSeek R1 (reasoning) via OpenRouter", label: "DeepSeek R1 (OpenRouter)" },
+  { name: "or-deepseek-v3",   model: "vllm/openrouter-api/deepseek/deepseek-chat-v3-0324", description: "DeepSeek V3 via OpenRouter",     label: "DeepSeek V3 (OpenRouter)" },
+  { name: "or-llama4",        model: "vllm/openrouter-api/meta-llama/llama-4-maverick", description: "Llama 4 Maverick via OpenRouter",     label: "Llama 4 Maverick (OpenRouter)" },
   // ── Perplexity API (REST, no subprocess, uses $PERPLEXITY_API_KEY) ──────────
   { name: "plex-opus",    model: "vllm/perplexity-api/anthropic/claude-opus-4-8",          description: "Claude Opus 4.8 via Perplexity API",         label: "Claude Opus 4.8 (Perplexity)" },
   { name: "plex-sonnet",  model: "vllm/perplexity-api/anthropic/claude-sonnet-4-6",        description: "Claude Sonnet 4.6 via Perplexity API",       label: "Claude Sonnet 4.6 (Perplexity)" },
@@ -1744,6 +1757,7 @@ const plugin = {
           "Gemini CLI": [],
           "Codex (OAuth)": [],
           "Perplexity API": [],
+          "OpenRouter API": [],
           "Other": [],
         };
 
@@ -1753,6 +1767,7 @@ const plugin = {
           else if (c.model.startsWith("vllm/cli-gemini/")) groups["Gemini CLI"].push(entry);
           else if (c.model.startsWith("openai-codex/")) groups["Codex (OAuth)"].push(entry);
           else if (c.model.startsWith("vllm/perplexity-api/")) groups["Perplexity API"].push(entry);
+          else if (c.model.startsWith("vllm/openrouter-api/")) groups["OpenRouter API"].push(entry);
           else groups["Other"].push(entry);
         }
 
@@ -1765,6 +1780,7 @@ const plugin = {
               .replace(/^vllm\/cli-(claude|gemini)\//, "")
               .replace(/^openai-codex\//, "")
               .replace(/^vllm\/perplexity-api\//, "")
+              .replace(/^vllm\/openrouter-api\//, "")
               .replace(/^vllm\//, "");
             lines.push(`  ${cmd.padEnd(22)} ${modelId}`);
           }
@@ -2406,6 +2422,214 @@ const plugin = {
       },
     } satisfies OpenClawPluginCommandDefinition);
 
+    // ── /pipeline — multi-phase AI pipeline with user-selectable models ─────
+    api.registerCommand({
+      name: "pipeline",
+      description: [
+        'Run a multi-phase AI pipeline. Each phase uses a different model.',
+        'Usage: /pipeline "topic" [research=<cmd>] [architect=<cmd>] [implement=<cmd>] [review=<cmd>] [--skip=phase1,phase2]',
+        'Model names are slash-command names without the /. Example: research=plex-sonar architect=cli-opus implement=or-sonnet review=or-deepseek',
+        'Defaults: research=plex-sonar, architect=cli-opus, implement=cli-sonnet, review=plex-gpt55',
+      ].join(' '),
+      acceptsArgs: true,
+      requireAuth: false,
+      handler: async (ctx: PluginCommandContext): Promise<PluginCommandResult> => {
+        const raw = (ctx.args ?? "").trim();
+        if (!raw) {
+          return {
+            text: [
+              "❌ No topic provided.",
+              "",
+              "Usage: `/pipeline \"topic\" [phase=model] [--skip=phase1,phase2]`",
+              "",
+              "Phases: `research`, `architect`, `implement`, `review`",
+              "Model names: same as `/cli-list` commands (without the `/`)",
+              "",
+              "Examples:",
+              "  `/pipeline \"REST API for todo app\"`",
+              "  `/pipeline \"auth system\" architect=cli-opus implement=or-sonnet review=or-deepseek`",
+              "  `/pipeline \"refactor this\" --skip=research,architect implement=or-o3 review=plex-opus`",
+            ].join("\n"),
+          };
+        }
+
+        // ── Argument parsing ─────────────────────────────────────────────────
+        type Phase = "research" | "architect" | "implement" | "review";
+        const ALL_PHASES: Phase[] = ["research", "architect", "implement", "review"];
+
+        const PHASE_DEFAULTS: Record<Phase, string> = {
+          research:  "plex-sonar",
+          architect: "cli-opus",
+          implement: "cli-sonnet",
+          review:    "plex-gpt55",
+        };
+
+        const PHASE_SYSTEM_PROMPTS: Record<Phase, string> = {
+          research: [
+            "You are a research agent. Your job is to gather and structure information about the given topic.",
+            "Produce a concise, structured research brief: key concepts, relevant context, known constraints,",
+            "prior art or existing solutions, and open questions. Use bullet points. Be thorough but skip filler.",
+          ].join(" "),
+          architect: [
+            "You are a software architect. Given the research brief, design a concrete solution.",
+            "Output: system components, data flow, key interfaces, storage/state decisions, and tradeoffs.",
+            "Be specific. Mention tech choices. Note what is deferred to implementation.",
+          ].join(" "),
+          implement: [
+            "You are an implementation agent. Given the architecture, write the actual code.",
+            "Output production-quality, runnable code with brief comments only where the WHY is non-obvious.",
+            "Include all necessary imports and structure. If multiple files are needed, show each clearly.",
+          ].join(" "),
+          review: [
+            "You are a code reviewer with a DIFFERENT perspective than the implementer.",
+            "Find bugs, security vulnerabilities, edge cases, performance issues, and missing error handling.",
+            "Output: numbered list of findings, severity (critical/major/minor), and a concrete fix for each.",
+            "End with a concise overall verdict: approve / approve-with-changes / reject.",
+          ].join(" "),
+        };
+
+        // Parse topic: first quoted string or everything before first key=value
+        let topic = "";
+        let remainder = raw;
+
+        const quotedMatch = raw.match(/^["'](.+?)["']\s*(.*)/s);
+        if (quotedMatch) {
+          topic = quotedMatch[1].trim();
+          remainder = quotedMatch[2].trim();
+        } else {
+          // Take everything up to the first key=value or --skip
+          const splitIdx = raw.search(/\b\w+=|\-\-skip=/);
+          if (splitIdx === -1) {
+            topic = raw;
+            remainder = "";
+          } else {
+            topic = raw.slice(0, splitIdx).trim();
+            remainder = raw.slice(splitIdx).trim();
+          }
+        }
+
+        if (!topic) {
+          return { text: "❌ Could not parse topic. Wrap it in quotes: `/pipeline \"your topic\"`" };
+        }
+
+        // Parse --skip=phase1,phase2
+        const skipMatch = remainder.match(/--skip=([^\s]+)/);
+        const skipPhases = new Set<string>(
+          skipMatch ? skipMatch[1].split(",").map(s => s.trim()) : []
+        );
+
+        // Parse phase=model overrides
+        const phaseOverrides: Partial<Record<Phase, string>> = {};
+        const overrideRe = /\b(research|architect|implement|review)=(\S+)/g;
+        let m: RegExpExecArray | null;
+        while ((m = overrideRe.exec(remainder)) !== null) {
+          phaseOverrides[m[1] as Phase] = m[2];
+        }
+
+        // Build model lookup: slash-command name → vllm model ID
+        const cmdToModel = new Map<string, string>(
+          CLI_MODEL_COMMANDS.map((c) => [c.name, c.model])
+        );
+
+        // Resolve each phase to a vllm model ID
+        const resolveModel = (phase: Phase): { model: string; label: string } | null => {
+          const cmdName = phaseOverrides[phase] ?? PHASE_DEFAULTS[phase];
+          const vllmId = cmdToModel.get(cmdName);
+          if (!vllmId) {
+            return null;
+          }
+          // Label: find in CLI_MODEL_COMMANDS
+          const entry = CLI_MODEL_COMMANDS.find(c => c.name === cmdName);
+          return { model: vllmId, label: entry?.label ?? cmdName };
+        };
+
+        // ── Phase runner ─────────────────────────────────────────────────────
+        const callProxy = async (
+          phase: Phase,
+          vllmModel: string,
+          userContent: string
+        ): Promise<string> => {
+          // Strip vllm/ prefix — proxy accepts both but plain is cleaner
+          const modelId = vllmModel.startsWith("vllm/") ? vllmModel.slice(5) : vllmModel;
+          const body = JSON.stringify({
+            model: modelId,
+            stream: false,
+            messages: [
+              { role: "system", content: PHASE_SYSTEM_PROMPTS[phase] },
+              { role: "user", content: userContent },
+            ],
+          });
+
+          const resp = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body,
+            signal: AbortSignal.timeout(180_000),
+          });
+
+          if (!resp.ok) {
+            const errBody = await resp.text().catch(() => resp.statusText);
+            throw new Error(`Phase ${phase} failed (${resp.status}): ${errBody.slice(0, 200)}`);
+          }
+
+          const data = await resp.json() as {
+            choices?: Array<{ message?: { content?: string } }>;
+          };
+          return data.choices?.[0]?.message?.content ?? "(empty response)";
+        };
+
+        // ── Run pipeline ─────────────────────────────────────────────────────
+        const lines: string[] = [`🔄 *Pipeline: ${topic}*`, ""];
+        let context = `Topic: ${topic}`;
+        const phaseResults: Partial<Record<Phase, string>> = {};
+
+        for (const phase of ALL_PHASES) {
+          if (skipPhases.has(phase)) {
+            lines.push(`⏭ *${phase.charAt(0).toUpperCase() + phase.slice(1)}* — skipped`);
+            lines.push("");
+            continue;
+          }
+
+          const resolved = resolveModel(phase);
+          if (!resolved) {
+            const cmdName = phaseOverrides[phase] ?? PHASE_DEFAULTS[phase];
+            lines.push(`❌ *${phase}* — unknown model \`${cmdName}\`. Check \`/cli-list\`.`);
+            break;
+          }
+
+          lines.push(`⏳ *${phase.charAt(0).toUpperCase() + phase.slice(1)}* using \`${resolved.label}\`...`);
+
+          let result: string;
+          try {
+            result = await callProxy(phase, resolved.model, context);
+          } catch (err) {
+            lines.push(`❌ ${phase} failed: ${(err as Error).message}`);
+            break;
+          }
+
+          phaseResults[phase] = result;
+          lines.push(`✅ *${phase.charAt(0).toUpperCase() + phase.slice(1)}* (${resolved.label})`);
+          lines.push("");
+          lines.push(result.length > 2000 ? result.slice(0, 2000) + "\n\n_(truncated — full output in next message)_" : result);
+          lines.push("");
+          lines.push("---");
+          lines.push("");
+
+          // Each phase's output becomes context for the next
+          context = [
+            `Topic: ${topic}`,
+            "",
+            ...Object.entries(phaseResults).map(([p, r]) => `## ${p.charAt(0).toUpperCase() + p.slice(1)} output\n${r}`),
+          ].join("\n\n");
+        }
+
+        const donePhases = ALL_PHASES.filter(p => !skipPhases.has(p) && phaseResults[p]);
+        lines.push(`✅ Pipeline complete — ${donePhases.length} phase(s) finished.`);
+
+        return { text: lines.join("\n") };
+      },
+    } satisfies OpenClawPluginCommandDefinition);
+
     // ── /bridge-status — all providers at a glance ───────────────────────────
     api.registerCommand({
       name: "bridge-status",
@@ -2542,6 +2766,7 @@ const plugin = {
       "/chatgpt-logout",
       "/bridge-status",
       "/cli-help",
+      "/pipeline",
     ];
     // Command registration is silent — fires on every register() call
   },
