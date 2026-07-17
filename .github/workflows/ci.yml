@@ -1,0 +1,151 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags:
+      # Date-based version tags only: v2026.7.1, v2026.8.3, etc.
+      # Pattern: v<year>.<month>.<patch>  — all three segments required.
+      - 'v[0-9][0-9][0-9][0-9].[0-9]+.[0-9]+'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v2026.7.1)'
+        required: false
+
+jobs:
+  # ── Build + Test ────────────────────────────────────────────────────────────
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Verify dist entry point exists
+        run: |
+          MAIN=$(node -p "require('./package.json').main || ''")
+          if [[ "$MAIN" == dist/* ]] && [ ! -f "$MAIN" ]; then
+            echo "::error::package.json main is '$MAIN' but the file is missing — build failed silently"
+            exit 1
+          fi
+
+  # ── Publish to npm ──────────────────────────────────────────────────────────
+  publish-npm:
+    name: Publish to npm
+    needs: build
+    runs-on: ubuntu-latest
+    if: (startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '.')) || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify package.json version matches tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match tag ($TAG_VERSION)"
+            exit 1
+          fi
+
+      - name: Publish to npm
+        run: npm publish --access public --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ── Publish to ClawHub ──────────────────────────────────────────────────────
+  publish-clawhub:
+    name: Publish to ClawHub
+    needs: build
+    runs-on: ubuntu-latest
+    if: (startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '.')) || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.clawhub.ai'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to ClawHub
+        run: npm publish --access public --ignore-scripts --registry https://registry.clawhub.ai
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+
+  # ── Create GitHub Release ───────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [publish-npm, publish-clawhub]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '.')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES=""
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(awk -v ver="$VERSION" '
+              $0 ~ "^### v"ver"[^0-9]" {flag=1; print; next}
+              flag && /^### v[0-9]/ {exit}
+              flag {print}
+            ' CHANGELOG.md)
+          fi
+          if [ -z "$NOTES" ]; then
+            NOTES="See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md) for full changelog."
+          fi
+          echo "$NOTES" > release_notes.md
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "openclaw-cli-bridge-elvatis $GITHUB_REF_NAME" \
+            --notes-file release_notes.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
