@@ -16,6 +16,7 @@ import { geminiComplete, geminiCompleteStream } from "./gemini-browser.js";
 import { claudeComplete, claudeCompleteStream } from "./claude-browser.js";
 import { chatgptComplete, chatgptCompleteStream } from "./chatgpt-browser.js";
 import { geminiApiComplete, geminiApiCompleteStream } from "./gemini-api-runner.js";
+import { perplexityApiComplete, perplexityApiCompleteStream } from "./perplexity-api-runner.js";
 import { renderStatusPage, renderDashboardData } from "./status-template.js";
 import { sessionManager } from "./session-manager.js";
 import { metrics, estimateTokens } from "./metrics.js";
@@ -149,6 +150,8 @@ export const CLI_MODELS = [
     { id: "openai-codex/gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", contextWindow: 400_000, maxTokens: 64_000 },
     { id: "openai-codex/gpt-5.2-codex", name: "GPT-5.2 Codex", contextWindow: 200_000, maxTokens: 32_768 },
     { id: "openai-codex/gpt-5.1-codex-mini", name: "GPT-5.1 Codex Mini", contextWindow: 128_000, maxTokens: 16_384 },
+    // ── Grok CLI ─────────────────────────────────────────────────────────────
+    { id: "cli-grok/grok-4.5", name: "Grok 4.5 (CLI)", contextWindow: 131_072, maxTokens: 131_072 },
     // Grok web-session models (requires /grok-login)
     { id: "web-grok/grok-4", name: "Grok 4 (web session)", contextWindow: 131_072, maxTokens: 131_072 },
     { id: "web-grok/grok-3", name: "Grok 3 (web session)", contextWindow: 131_072, maxTokens: 131_072 },
@@ -174,6 +177,45 @@ export const CLI_MODELS = [
     { id: "pi/default", name: "Pi (CLI)", contextWindow: 128_000, maxTokens: 16_384 },
     // ── Local BitNet inference ──────────────────────────────────────────────────
     { id: "local-bitnet/bitnet-2b", name: "BitNet b1.58 2B (local CPU inference)", contextWindow: 4_096, maxTokens: 2_048 },
+    // ── Perplexity API (OpenAI-compatible, multi-provider) ────────────────────
+    // OpenAI via Perplexity
+    { id: "perplexity-api/openai/gpt-5.4-nano", name: "GPT-5.4 Nano (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5-mini", name: "GPT-5 Mini (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5.4-mini", name: "GPT-5.4 Mini (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5.6-luna", name: "GPT-5.6 Luna (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5.1", name: "GPT-5.1 (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5", name: "GPT-5 (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5.2", name: "GPT-5.2 (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5.4", name: "GPT-5.4 (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5.6-terra", name: "GPT-5.6 Terra (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5.5", name: "GPT-5.5 (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/openai/gpt-5.6-sol", name: "GPT-5.6 Sol (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    // Anthropic via Perplexity
+    { id: "perplexity-api/anthropic/claude-haiku-4-5", name: "Claude Haiku 4.5 (via Perplexity)", contextWindow: 200_000, maxTokens: 16_384 },
+    { id: "perplexity-api/anthropic/claude-sonnet-5", name: "Claude Sonnet 5 (via Perplexity)", contextWindow: 200_000, maxTokens: 16_384 },
+    { id: "perplexity-api/anthropic/claude-sonnet-4-5", name: "Claude Sonnet 4.5 (via Perplexity)", contextWindow: 200_000, maxTokens: 16_384 },
+    { id: "perplexity-api/anthropic/claude-sonnet-4-6", name: "Claude Sonnet 4.6 (via Perplexity)", contextWindow: 200_000, maxTokens: 16_384 },
+    { id: "perplexity-api/anthropic/claude-opus-4-5", name: "Claude Opus 4.5 (via Perplexity)", contextWindow: 200_000, maxTokens: 16_384 },
+    { id: "perplexity-api/anthropic/claude-opus-4-6", name: "Claude Opus 4.6 (via Perplexity)", contextWindow: 200_000, maxTokens: 16_384 },
+    { id: "perplexity-api/anthropic/claude-opus-4-7", name: "Claude Opus 4.7 (via Perplexity)", contextWindow: 200_000, maxTokens: 16_384 },
+    { id: "perplexity-api/anthropic/claude-opus-4-8", name: "Claude Opus 4.8 (via Perplexity)", contextWindow: 200_000, maxTokens: 16_384 },
+    // Google via Perplexity
+    { id: "perplexity-api/google/gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite (via Perplexity)", contextWindow: 1_048_576, maxTokens: 65_536 },
+    { id: "perplexity-api/google/gemini-3-flash-preview", name: "Gemini 3 Flash Preview (via Perplexity)", contextWindow: 1_048_576, maxTokens: 65_536 },
+    { id: "perplexity-api/google/gemini-3.5-flash", name: "Gemini 3.5 Flash (via Perplexity)", contextWindow: 1_048_576, maxTokens: 65_536 },
+    { id: "perplexity-api/google/gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview (via Perplexity)", contextWindow: 1_048_576, maxTokens: 65_536 },
+    // xAI via Perplexity
+    { id: "perplexity-api/xai/grok-4.3", name: "Grok 4.3 (via Perplexity)", contextWindow: 131_072, maxTokens: 16_384 },
+    { id: "perplexity-api/xai/grok-4.20-reasoning", name: "Grok 4.20 Reasoning (via Perplexity)", contextWindow: 131_072, maxTokens: 16_384 },
+    { id: "perplexity-api/xai/grok-4.20-non-reasoning", name: "Grok 4.20 Non-Reasoning (via Perplexity)", contextWindow: 131_072, maxTokens: 16_384 },
+    { id: "perplexity-api/xai/grok-4.20-multi-agent", name: "Grok 4.20 Multi-Agent (via Perplexity)", contextWindow: 131_072, maxTokens: 16_384 },
+    { id: "perplexity-api/xai/grok-4.5", name: "Grok 4.5 (via Perplexity)", contextWindow: 131_072, maxTokens: 16_384 },
+    // Perplexity-native models
+    { id: "perplexity-api/perplexity/sonar", name: "Sonar (Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/perplexity/kimi-k2.7-code", name: "Kimi K2.7 Code (Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    { id: "perplexity-api/perplexity/glm-5.2", name: "GLM-5.2 (Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
+    // NVIDIA via Perplexity
+    { id: "perplexity-api/nvidia/nemotron-3-super-120b-a12b", name: "Nemotron 3 Super 120B (via Perplexity)", contextWindow: 128_000, maxTokens: 16_384 },
 ];
 // ──────────────────────────────────────────────────────────────────────────────
 // Server
@@ -713,6 +755,51 @@ async function handleRequest(req, res, opts) {
             return;
         }
         // ─────────────────────────────────────────────────────────────────────────
+        // ── Perplexity API routing (OpenAI-compatible, multi-provider) ────────────
+        const perplexityApiModel = model.startsWith("vllm/") ? model.slice(5) : model;
+        if (perplexityApiModel.startsWith("perplexity-api/")) {
+            const timeoutMs = opts.modelTimeouts?.[perplexityApiModel] ?? opts.timeoutMs ?? 120_000;
+            const apiStart = Date.now();
+            const apiOpts = { model: perplexityApiModel, timeoutMs, log: opts.log };
+            try {
+                if (stream) {
+                    res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive", ...corsHeaders() });
+                    sendSseChunk(res, { id, created, model: perplexityApiModel, delta: { role: "assistant" }, finish_reason: null });
+                    const result = await perplexityApiCompleteStream(cleanMessages, apiOpts, (token) => sendSseChunk(res, { id, created, model: perplexityApiModel, delta: { content: token }, finish_reason: null }));
+                    const estComp = estimateTokens(result.content);
+                    metrics.recordRequest(perplexityApiModel, Date.now() - apiStart, true, estPromptTokens, result.completionTokens ?? estComp);
+                    sendSseChunk(res, { id, created, model: perplexityApiModel, delta: {}, finish_reason: result.finishReason });
+                    res.write("data: [DONE]\n\n");
+                    res.end();
+                }
+                else {
+                    const result = await perplexityApiComplete(cleanMessages, apiOpts);
+                    const estComp = estimateTokens(result.content);
+                    metrics.recordRequest(perplexityApiModel, Date.now() - apiStart, true, estPromptTokens, result.completionTokens ?? estComp);
+                    res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+                    res.end(JSON.stringify({
+                        id, object: "chat.completion", created, model: perplexityApiModel,
+                        choices: [{ index: 0, message: { role: "assistant", content: result.content }, finish_reason: result.finishReason }],
+                        usage: {
+                            prompt_tokens: result.promptTokens ?? estPromptTokens,
+                            completion_tokens: result.completionTokens ?? estComp,
+                            total_tokens: (result.promptTokens ?? estPromptTokens) + (result.completionTokens ?? estComp),
+                        },
+                    }));
+                }
+            }
+            catch (err) {
+                metrics.recordRequest(perplexityApiModel, Date.now() - apiStart, false, estPromptTokens);
+                const msg = err.message;
+                opts.warn(`[cli-bridge] Perplexity API error for ${perplexityApiModel}: ${msg}`);
+                if (!res.headersSent) {
+                    res.writeHead(500, { "Content-Type": "application/json", ...corsHeaders() });
+                    res.end(JSON.stringify({ error: { message: msg, type: "perplexity_api_error" } }));
+                }
+            }
+            return;
+        }
+        // ─────────────────────────────────────────────────────────────────────────
         // ── BitNet local inference routing ────────────────────────────────────────
         if (model.startsWith("local-bitnet/")) {
             const bitnetUrl = opts.getBitNetServerUrl?.() ?? DEFAULT_BITNET_SERVER_URL;
@@ -814,9 +901,9 @@ async function handleRequest(req, res, opts) {
                 const ka = setInterval(() => { res.write(": agent working\n\n"); }, 15_000);
                 try {
                     const lastUser = [...cleanMessages].reverse().find(m => m.role === "user");
-                    const delegatePrompt = typeof lastUser?.content === "string" ? lastUser.content
+                    const delegatePrompt = (typeof lastUser?.content === "string" ? lastUser.content
                         : Array.isArray(lastUser?.content) ? lastUser.content.filter(p => p.type === "text").map(p => p.text).join(" ")
-                            : userText.slice(-2000);
+                            : userText.slice(-2000));
                     const agentResult = await delegateToAgent(delegatePrompt, MAX_EFFECTIVE_TIMEOUT_MS);
                     debugLog("DELEGATE-OK", `skill "${matchedSkill}" completed in ${(agentResult.durationMs / 1000).toFixed(1)}s`, { contentLen: agentResult.text.length });
                     metrics.recordRequest(model, agentResult.durationMs, true, estPromptTokens, estimateTokens(agentResult.text), promptPreview);
@@ -851,9 +938,9 @@ async function handleRequest(req, res, opts) {
             // Non-streaming delegation
             try {
                 const lastUser = [...cleanMessages].reverse().find(m => m.role === "user");
-                const delegatePrompt = typeof lastUser?.content === "string" ? lastUser.content
+                const delegatePrompt = (typeof lastUser?.content === "string" ? lastUser.content
                     : Array.isArray(lastUser?.content) ? lastUser.content.filter(p => p.type === "text").map(p => p.text).join(" ")
-                        : userText.slice(-2000);
+                        : userText.slice(-2000));
                 const agentResult = await delegateToAgent(delegatePrompt, MAX_EFFECTIVE_TIMEOUT_MS);
                 debugLog("DELEGATE-OK", `skill "${matchedSkill}" completed in ${(agentResult.durationMs / 1000).toFixed(1)}s`, { contentLen: agentResult.text.length });
                 res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
@@ -876,7 +963,7 @@ async function handleRequest(req, res, opts) {
             }
         }
         // ── CLI runner routing (Gemini / Claude Code / Codex) ──────────────────────
-        let result;
+        let result = { content: "" };
         let usedModel = model;
         // ── Intelligent prompt-based routing (ported from elvatis-mcp) ────────────
         // Disabled: the gateway should handle model selection. The bridge's role is to

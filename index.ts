@@ -21,9 +21,19 @@
  *   /cli-codex54      → openai-codex/gpt-5.4                   (Codex CLI OAuth, direct API)
  *   /cli-opencode     → vllm/opencode/default                  (OpenCode CLI proxy)
  *   /cli-pi           → vllm/pi/default                        (Pi CLI proxy)
+ *   /cli-grok         → vllm/cli-grok/grok-4.5                (Grok CLI proxy)
  *   /cli-back         → restore model that was active before last /cli-* switch
  *   /cli-test [model] → one-shot proxy health check (does NOT switch global model)
  *   /cli-list         → list all registered CLI bridge models with commands
+ *
+ * Perplexity API models (via REST, uses $PERPLEXITY_API_KEY, no subprocess):
+ *   /plex-opus        → vllm/perplexity-api/anthropic/claude-opus-4-8
+ *   /plex-sonnet      → vllm/perplexity-api/anthropic/claude-sonnet-4-6
+ *   /plex-gpt5        → vllm/perplexity-api/openai/gpt-5
+ *   /plex-gpt55       → vllm/perplexity-api/openai/gpt-5.5
+ *   /plex-grok4       → vllm/perplexity-api/xai/grok-4.5
+ *   /plex-gemini      → vllm/perplexity-api/google/gemini-3.1-pro-preview
+ *   /plex-sonar       → vllm/perplexity-api/perplexity/sonar
  *
  * Provider / model naming:
  *   vllm/cli-gemini/gemini-2.5-pro  → `gemini -m gemini-2.5-pro @<tmpfile>`
@@ -59,6 +69,7 @@ import type {
   ProviderAuthContext,
   ProviderAuthResult,
 } from "openclaw/plugin-sdk";
+import type { OAuthCredential } from "openclaw/plugin-sdk/provider-auth";
 
 // OpenClawPluginCommandDefinition is defined in the SDK types but not re-exported
 // by the package — derive it from the registerCommand signature.
@@ -805,8 +816,20 @@ const CLI_MODEL_COMMANDS = [
   { name: "cli-opencode",     model: "vllm/opencode/default",               description: "OpenCode (CLI)",                         label: "OpenCode (CLI)" },
   // ── Pi CLI (via local proxy) ─────────────────────────────────────────────────
   { name: "cli-pi",           model: "vllm/pi/default",                     description: "Pi (CLI)",                               label: "Pi (CLI)" },
+  // ── Grok CLI (via local proxy) ───────────────────────────────────────────────
+  { name: "cli-grok",         model: "vllm/cli-grok/grok-4.5",              description: "Grok 4.5 (Grok CLI)",                    label: "Grok 4.5 (CLI)" },
   // ── BitNet local inference (via local proxy → llama-server) ─────────────────
   { name: "cli-bitnet",       model: "vllm/local-bitnet/bitnet-2b",         description: "BitNet b1.58 2B (local CPU, no API key)", label: "BitNet 2B (local)" },
+  // ── Perplexity API (REST, no subprocess, uses $PERPLEXITY_API_KEY) ──────────
+  { name: "plex-opus",    model: "vllm/perplexity-api/anthropic/claude-opus-4-8",          description: "Claude Opus 4.8 via Perplexity API",         label: "Claude Opus 4.8 (Perplexity)" },
+  { name: "plex-sonnet",  model: "vllm/perplexity-api/anthropic/claude-sonnet-4-6",        description: "Claude Sonnet 4.6 via Perplexity API",       label: "Claude Sonnet 4.6 (Perplexity)" },
+  { name: "plex-haiku",   model: "vllm/perplexity-api/anthropic/claude-haiku-4-5",         description: "Claude Haiku 4.5 via Perplexity API",        label: "Claude Haiku 4.5 (Perplexity)" },
+  { name: "plex-gpt5",    model: "vllm/perplexity-api/openai/gpt-5",                       description: "GPT-5 via Perplexity API",                   label: "GPT-5 (Perplexity)" },
+  { name: "plex-gpt54",   model: "vllm/perplexity-api/openai/gpt-5.4",                     description: "GPT-5.4 via Perplexity API",                 label: "GPT-5.4 (Perplexity)" },
+  { name: "plex-gpt55",   model: "vllm/perplexity-api/openai/gpt-5.5",                     description: "GPT-5.5 via Perplexity API",                 label: "GPT-5.5 (Perplexity)" },
+  { name: "plex-grok4",   model: "vllm/perplexity-api/xai/grok-4.5",                       description: "Grok 4.5 via Perplexity API",                label: "Grok 4.5 (Perplexity)" },
+  { name: "plex-gemini",  model: "vllm/perplexity-api/google/gemini-3.1-pro-preview",       description: "Gemini 3.1 Pro Preview via Perplexity API",  label: "Gemini 3.1 Pro (Perplexity)" },
+  { name: "plex-sonar",   model: "vllm/perplexity-api/perplexity/sonar",                    description: "Perplexity Sonar (native search model)",    label: "Sonar (Perplexity)" },
 ] as const;
 
 /** Default model used by /cli-test when no arg is given */
@@ -1207,7 +1230,7 @@ const plugin = {
           const msg = `🔐 *cli-bridge:* Session expired for ${needsLogin.length} provider(s). Run to re-login:\n\n${cmds}`;
           try {
             await api.runtime.system.runCommandWithTimeout(
-              ["openclaw", "message", "send", "--channel", "whatsapp", "--to", "+4915170113694", "--message", msg],
+              ["openclaw", "message", "send", "--channel", "discord", "--to", "1480601811537760487", "--message", msg],
               { timeoutMs: 10_000 }
             );
             api.logger.info(`[cli-bridge] sent re-login notification for: ${needsLogin.join(", ")}`);
@@ -1227,7 +1250,7 @@ const plugin = {
               const msg = `🔐 *cli-bridge keep-alive:* Session expired for ${failed.length} provider(s). Run to re-login:\n\n${cmds}`;
               try {
                 await api.runtime.system.runCommandWithTimeout(
-                  ["openclaw", "message", "send", "--channel", "whatsapp", "--to", "+4915170113694", "--message", msg],
+                  ["openclaw", "message", "send", "--channel", "discord", "--to", "1480601811537760487", "--message", msg],
                   { timeoutMs: 10_000 }
                 );
                 api.logger.info(`[cli-bridge] keep-alive: sent re-login notification for: ${failed.join(", ")}`);
@@ -1280,7 +1303,7 @@ const plugin = {
           },
         ],
 
-        refreshOAuth: async (cred: ProviderAuthContext) => {
+        refreshOAuth: async (cred: OAuthCredential) => {
           try {
             const fresh = await readCodexCredentials(codexAuthPath);
             // Also update the agent auth store with refreshed tokens
@@ -1423,7 +1446,9 @@ const plugin = {
           // Warn if OpenClaw's LLM idle timeout is too low for CLI models.
           // CLI subprocesses (especially with large prompts) need time before producing
           // the first token. The default 60s causes premature 408 timeouts.
-          const llmIdleTimeout = (api.pluginConfig as Record<string, unknown>)?._resolvedAgentDefaults?.llm?.idleTimeoutSeconds;
+          const _agentDefaults = (api.pluginConfig as Record<string, unknown>)?.["_resolvedAgentDefaults"] as Record<string, unknown> | undefined;
+          const _llmConfig = _agentDefaults?.["llm"] as Record<string, unknown> | undefined;
+          const llmIdleTimeout = _llmConfig?.["idleTimeoutSeconds"] as number | undefined;
           if (llmIdleTimeout === undefined) {
             // Can't read the resolved config — check the raw file instead
             try {
@@ -1718,13 +1743,17 @@ const plugin = {
           "Claude Code CLI": [],
           "Gemini CLI": [],
           "Codex (OAuth)": [],
+          "Perplexity API": [],
+          "Other": [],
         };
 
         for (const c of CLI_MODEL_COMMANDS) {
           const entry = { cmd: `/${c.name}`, model: c.model };
           if (c.model.startsWith("vllm/cli-claude/")) groups["Claude Code CLI"].push(entry);
           else if (c.model.startsWith("vllm/cli-gemini/")) groups["Gemini CLI"].push(entry);
-          else groups["Codex (OAuth)"].push(entry);
+          else if (c.model.startsWith("openai-codex/")) groups["Codex (OAuth)"].push(entry);
+          else if (c.model.startsWith("vllm/perplexity-api/")) groups["Perplexity API"].push(entry);
+          else groups["Other"].push(entry);
         }
 
         const lines: string[] = ["🤖 *CLI Bridge Models*", ""];
@@ -1732,8 +1761,12 @@ const plugin = {
           if (entries.length === 0) continue;
           lines.push(`*${group}*`);
           for (const { cmd, model } of entries) {
-            const modelId = model.replace(/^vllm\/cli-(claude|gemini)\//, "").replace(/^openai-codex\//, "");
-            lines.push(`  ${cmd.padEnd(20)} ${modelId}`);
+            const modelId = model
+              .replace(/^vllm\/cli-(claude|gemini)\//, "")
+              .replace(/^openai-codex\//, "")
+              .replace(/^vllm\/perplexity-api\//, "")
+              .replace(/^vllm\//, "");
+            lines.push(`  ${cmd.padEnd(22)} ${modelId}`);
           }
           lines.push("");
         }

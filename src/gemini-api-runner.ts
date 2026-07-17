@@ -321,7 +321,7 @@ export async function geminiApiComplete(
     : null;
 
   try {
-    const response = await ai.models.generateContent(requestOpts as Parameters<typeof ai.models.generateContent>[0]);
+    const response = await ai.models.generateContent(requestOpts as unknown as Parameters<typeof ai.models.generateContent>[0]);
 
     const candidate = response.candidates?.[0];
     const parts = candidate?.content?.parts as Array<Record<string, unknown>> | undefined;
@@ -377,7 +377,7 @@ export async function geminiApiCompleteStream(
     : null;
 
   try {
-    const stream = await ai.models.generateContentStream(requestOpts as Parameters<typeof ai.models.generateContentStream>[0]);
+    const stream = await ai.models.generateContentStream(requestOpts as unknown as Parameters<typeof ai.models.generateContentStream>[0]);
 
     let fullText = "";
     const allImageParts: ContentPart[] = [];

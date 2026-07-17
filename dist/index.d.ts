@@ -21,9 +21,19 @@
  *   /cli-codex54      → openai-codex/gpt-5.4                   (Codex CLI OAuth, direct API)
  *   /cli-opencode     → vllm/opencode/default                  (OpenCode CLI proxy)
  *   /cli-pi           → vllm/pi/default                        (Pi CLI proxy)
+ *   /cli-grok         → vllm/cli-grok/grok-4.5                (Grok CLI proxy)
  *   /cli-back         → restore model that was active before last /cli-* switch
  *   /cli-test [model] → one-shot proxy health check (does NOT switch global model)
  *   /cli-list         → list all registered CLI bridge models with commands
+ *
+ * Perplexity API models (via REST, uses $PERPLEXITY_API_KEY, no subprocess):
+ *   /plex-opus        → vllm/perplexity-api/anthropic/claude-opus-4-8
+ *   /plex-sonnet      → vllm/perplexity-api/anthropic/claude-sonnet-4-6
+ *   /plex-gpt5        → vllm/perplexity-api/openai/gpt-5
+ *   /plex-gpt55       → vllm/perplexity-api/openai/gpt-5.5
+ *   /plex-grok4       → vllm/perplexity-api/xai/grok-4.5
+ *   /plex-gemini      → vllm/perplexity-api/google/gemini-3.1-pro-preview
+ *   /plex-sonar       → vllm/perplexity-api/perplexity/sonar
  *
  * Provider / model naming:
  *   vllm/cli-gemini/gemini-2.5-pro  → `gemini -m gemini-2.5-pro @<tmpfile>`

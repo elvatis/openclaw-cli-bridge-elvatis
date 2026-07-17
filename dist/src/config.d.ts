@@ -141,5 +141,5 @@ export declare const DEFAULT_BITNET_SERVER_URL = "http://127.0.0.1:8082";
 export declare const BITNET_MAX_MESSAGES = 6;
 /** Minimal system prompt for BitNet to conserve tokens. */
 export declare const BITNET_SYSTEM_PROMPT = "You are Akido, a concise AI assistant. Answer briefly and directly. Current user: Emre. Timezone: Europe/Berlin.";
-export declare const CLI_TEST_DEFAULT_MODEL = "cli-claude/claude-sonnet-4-6";
+export declare const CLI_TEST_DEFAULT_MODEL = "cli-gemini/gemini-2.5-flash";
 //# sourceMappingURL=config.d.ts.map

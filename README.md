@@ -1,10 +1,8 @@
 # openclaw-cli-bridge-elvatis
 
-> **Archived and no longer maintained.** This project is no longer actively developed and has been archived. It is provided as-is under the MIT License. Feel free to fork and use it.
+> OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, OpenCode, Pi) and web browser sessions (Grok, Gemini Web) as model providers. Includes slash commands for instant model switching, restore, health testing, and model listing.
 
-> OpenClaw plugin that bridges locally installed AI CLIs (Codex, Gemini, Claude Code, OpenCode, Pi) as model providers — with slash commands for instant model switching, restore, health testing, and model listing.
-
-**Current version:** `3.11.5`
+**Current version:** `2026.7.1`
 
 ---
 
@@ -423,6 +421,14 @@ npm run ci          # lint + typecheck + test
 ---
 
 ## Changelog
+
+### v2026.7.1 — Revival + OpenClaw 2026.7.1 compatibility
+
+- **chore:** Switched versioning scheme to date-based (`YYYY.M.D`) aligned with OpenClaw.
+- **fix:** Plugin now compiles against OpenClaw 2026.7.1 SDK (resolved `openclaw/plugin-sdk` module path).
+- **feat:** Removed `cli-claude/*` provider — Claude models are now available natively via the `anthropic` plugin, making the subprocess wrapper redundant.
+- **feat:** 32 models active via proxy: Gemini CLI, Gemini API, Grok web, Gemini web, Codex, OpenCode, Pi, BitNet.
+- **chore:** Removed archive notice — project is actively maintained again.
 
 ### v3.11.5 — Model catalog refresh
 

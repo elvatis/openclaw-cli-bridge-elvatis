@@ -70,4 +70,4 @@ On gateway restart, if any session has expired, a **WhatsApp alert** is sent aut
 
 See `README.md` for full configuration reference and architecture diagram.
 
-**Version:** 3.11.5
+**Version:** 2026.7.1

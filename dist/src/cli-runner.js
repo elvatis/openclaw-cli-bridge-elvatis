@@ -19,8 +19,7 @@ import { spawn, execSync } from "node:child_process";
 import { tmpdir, homedir } from "node:os";
 import { existsSync, writeFileSync, unlinkSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { randomBytes, randomUUID } from "node:crypto";
-import { ensureClaudeToken, refreshClaudeToken } from "./claude-auth.js";
+import { randomBytes } from "node:crypto";
 import { buildToolPromptBlock, parseToolCallResponse, } from "./tool-protocol.js";
 import { MAX_MESSAGES, MAX_MESSAGES_HEAVY_TOOLS, TOOL_HEAVY_THRESHOLD, MAX_MSG_CHARS, DEFAULT_CLI_TIMEOUT_MS, TIMEOUT_GRACE_MS, MEDIA_TMP_DIR, STALE_OUTPUT_TIMEOUT_MS, WORKSPACE_DIR, } from "./config.js";
 import { debugLog } from "./debug-log.js";
@@ -425,235 +424,6 @@ export async function runGemini(prompt, modelId, timeoutMs, workdir, opts) {
     return result.stdout || cleanStderr;
 }
 // ──────────────────────────────────────────────────────────────────────────────
-// Claude Code CLI
-// ──────────────────────────────────────────────────────────────────────────────
-// ── Claude session registry ─────────────────────────────────────────────────
-// Persistent sessions avoid re-sending the full 20KB prompt on every request.
-// First call creates a session; subsequent calls resume it with just the new message.
-// ── Generic CLI session registry ────────────────────────────────────────────
-// Shared by Claude, Gemini, and Codex — persistent sessions avoid replaying
-// the full conversation on every request.
-const CLI_SESSIONS_FILE = join(homedir(), ".openclaw", "cli-bridge", "cli-sessions.json");
-const SESSION_TTL = 2 * 60 * 60 * 1000; // 2 hours
-const SESSION_MAX_REQUESTS = 50;
-const CONSECUTIVE_TIMEOUT_LIMIT = 3;
-const cliSessions = new Map();
-let sessionsLoaded = false;
-function loadCliSessions() {
-    if (sessionsLoaded)
-        return;
-    sessionsLoaded = true;
-    try {
-        const data = JSON.parse(readFileSync(CLI_SESSIONS_FILE, "utf8"));
-        if (Array.isArray(data.sessions)) {
-            for (const s of data.sessions)
-                cliSessions.set(s.model, s);
-        }
-    }
-    catch { /* no sessions file yet */ }
-}
-function saveCliSessions() {
-    try {
-        mkdirSync(join(homedir(), ".openclaw", "cli-bridge"), { recursive: true });
-        writeFileSync(CLI_SESSIONS_FILE, JSON.stringify({
-            version: 1,
-            sessions: [...cliSessions.values()],
-        }, null, 2));
-    }
-    catch { /* best effort */ }
-}
-function getOrCreateSession(provider, model) {
-    loadCliSessions();
-    const existing = cliSessions.get(model);
-    if (existing && (Date.now() - existing.lastUsedAt) < SESSION_TTL && existing.requestCount < SESSION_MAX_REQUESTS) {
-        return existing;
-    }
-    if (existing) {
-        debugLog("SESSION", `${provider} session ${existing.sessionId.slice(0, 8)} expired`, { reason: existing.requestCount >= SESSION_MAX_REQUESTS ? "max_requests" : "ttl", requestCount: existing.requestCount });
-    }
-    const entry = {
-        sessionId: randomUUID(),
-        provider,
-        model,
-        createdAt: Date.now(),
-        lastUsedAt: Date.now(),
-        requestCount: 0,
-        consecutiveTimeouts: 0,
-    };
-    cliSessions.set(model, entry);
-    saveCliSessions();
-    return entry;
-}
-function recordSessionSuccess(model) {
-    const s = cliSessions.get(model);
-    if (s) {
-        s.requestCount++;
-        s.lastUsedAt = Date.now();
-        s.consecutiveTimeouts = 0;
-        saveCliSessions();
-    }
-}
-function recordSessionTimeout(model) {
-    const s = cliSessions.get(model);
-    if (!s)
-        return;
-    s.consecutiveTimeouts++;
-    s.lastUsedAt = Date.now();
-    if (s.consecutiveTimeouts >= CONSECUTIVE_TIMEOUT_LIMIT) {
-        debugLog("SESSION", `${s.provider} session ${s.sessionId.slice(0, 8)} expired`, {
-            reason: "consecutive_timeouts", consecutiveTimeouts: s.consecutiveTimeouts, requestCount: s.requestCount,
-        });
-        cliSessions.delete(model);
-    }
-    saveCliSessions();
-}
-function invalidateSession(model) {
-    cliSessions.delete(model);
-    saveCliSessions();
-}
-export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
-    await ensureClaudeToken();
-    const model = stripPrefix(modelId);
-    const session = getOrCreateSession("claude", model);
-    // Session resume: enabled for Opus (reliable), disabled for Sonnet/Haiku (45% hang rate)
-    const isOpus = model.includes("opus");
-    const isResume = isOpus && session.requestCount > 0;
-    // JSON output mode (v3.11.0): gives us real token usage + cache stats.
-    // Stream-json would be needed for streaming, but the bridge buffers
-    // anyway since OpenClaw's vllm provider doesn't stream from us.
-    const args = [
-        "-p",
-        "--output-format", "json",
-        "--permission-mode", "bypassPermissions",
-        "--dangerously-skip-permissions",
-        "--model", model,
-    ];
-    if (isResume) {
-        args.push("--resume", session.sessionId);
-    }
-    else if (isOpus) {
-        args.push("--session-id", session.sessionId);
-    }
-    // Sonnet/Haiku: no session args — fresh call every time
-    // On resume: only send the last user message (Opus has the full history).
-    // On fresh: send the full prompt with tool block.
-    const effectivePrompt = opts?.tools?.length
-        ? (isResume
-            ? prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
-            : buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else.")
-        : prompt;
-    // CRITICAL: Always use homedir() for Claude CLI. Running from a project directory
-    // triggers Claude Code's agentic mode, which ignores our tool injection and
-    // treats it as a "prompt injection attempt". This was the root cause of the 90%
-    // Sonnet failure rate. Workspace context is injected as text in the prompt instead.
-    const cwd = homedir();
-    debugLog("CLAUDE", `${isResume ? "resume" : "fresh"} ${model}${isResume ? ` session=${session.sessionId.slice(0, 8)}` : ""}`, {
-        promptLen: effectivePrompt.length, promptKB: Math.round(effectivePrompt.length / 1024),
-        cwd, timeoutMs: Math.round(timeoutMs / 1000), ...(isOpus ? { requestCount: session.requestCount } : {}),
-    });
-    // Opus gets 90s stale timeout — it needs think time for long-form generation (blog posts, Lexical JSON)
-    // Opus: 90s stale timeout (long-form generation needs think time).
-    // Sonnet: 60s (real-world tool reasoning with 21 tools can take 30-50s).
-    // Haiku: 30s (default — fast model, if silent for 30s it's hung).
-    const staleMs = isOpus ? 90_000 : model.includes("sonnet") ? 60_000 : undefined;
-    const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log, staleTimeoutMs: staleMs });
-    // Session succeeded — update registry
-    if (result.exitCode === 0 || result.stdout.length > 0) {
-        recordSessionSuccess(model);
-        return parseClaudeJsonOutput(result.stdout);
-    }
-    // Session failed — check if it's a timeout or auth issue
-    if (result.timedOut) {
-        // Track consecutive timeouts — after 3 in a row, expire the session
-        recordSessionTimeout(model);
-        throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, true, modelId)}`);
-    }
-    const stderr = result.stderr || "(no output)";
-    // Session might be corrupted, expired, or locked by a zombie process — invalidate and retry
-    if (stderr.includes("session") || stderr.includes("resume") || stderr.includes("not found") || stderr.includes("already in use")) {
-        debugLog("CLAUDE", `session ${session.sessionId.slice(0, 8)} invalid, creating fresh`, { error: stderr.slice(0, 100) });
-        invalidateSession(model);
-        // Retry once with a fresh session
-        const freshSession = getOrCreateSession("claude", model);
-        const freshArgs = [
-            "-p", "--output-format", "json",
-            "--permission-mode", "bypassPermissions", "--dangerously-skip-permissions",
-            "--model", model, "--session-id", freshSession.sessionId,
-        ];
-        const retry = await runCli("claude", freshArgs, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
-        if (retry.exitCode === 0 || retry.stdout.length > 0) {
-            recordSessionSuccess(model);
-            return parseClaudeJsonOutput(retry.stdout);
-        }
-        // Retry also failed — invalidate the fresh session so the next request doesn't reuse it
-        invalidateSession(model);
-        throw new Error(`claude exited ${retry.exitCode}: ${annotateExitError(retry.exitCode, retry.stderr || "(no output)", false, modelId)}`);
-    }
-    // Auth failure — refresh token and retry
-    if (stderr.includes("401") || stderr.includes("Invalid authentication credentials") || stderr.includes("authentication_error")) {
-        await refreshClaudeToken();
-        const retry = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
-        if (retry.exitCode === 0 || retry.stdout.length > 0) {
-            recordSessionSuccess(model);
-            return parseClaudeJsonOutput(retry.stdout);
-        }
-        const retryStderr = retry.stderr || "(no output)";
-        if (retryStderr.includes("401") || retryStderr.includes("authentication_error")) {
-            throw new Error("Claude CLI OAuth token refresh failed. Re-login required: run `claude auth logout && claude auth login`.");
-        }
-        throw new Error(`claude exited ${retry.exitCode} (after token refresh): ${retryStderr}`);
-    }
-    throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, stderr, false, modelId)}`);
-}
-/**
- * Parse Claude CLI's `--output-format json` response.
- *
- * Expected shape (from claude CLI v2.x):
- *   {
- *     "result": "model response text",
- *     "usage": { "input_tokens", "output_tokens", "cache_read_input_tokens", ... },
- *     "total_cost_usd": 0.0123,
- *     "stop_reason": "end_turn"
- *   }
- *
- * Robust to malformed output: if parsing fails or the shape is unexpected,
- * falls back to the raw stdout as content with no usage data.
- */
-function parseClaudeJsonOutput(stdout) {
-    const trimmed = stdout.trim();
-    if (!trimmed)
-        return { content: "" };
-    try {
-        const parsed = JSON.parse(trimmed);
-        if (typeof parsed?.result === "string") {
-            const usage = parsed.usage && typeof parsed.usage === "object" ? parsed.usage : undefined;
-            const out = { content: parsed.result };
-            if (usage) {
-                const tokenUsage = {};
-                if (typeof usage.input_tokens === "number")
-                    tokenUsage.promptTokens = usage.input_tokens;
-                if (typeof usage.output_tokens === "number")
-                    tokenUsage.completionTokens = usage.output_tokens;
-                if (typeof usage.cache_read_input_tokens === "number")
-                    tokenUsage.cacheReadTokens = usage.cache_read_input_tokens;
-                if (typeof usage.cache_creation_input_tokens === "number")
-                    tokenUsage.cacheCreationTokens = usage.cache_creation_input_tokens;
-                if (typeof parsed.total_cost_usd === "number")
-                    tokenUsage.totalCostUsd = parsed.total_cost_usd;
-                if (Object.keys(tokenUsage).length > 0)
-                    out.usage = tokenUsage;
-            }
-            return out;
-        }
-    }
-    catch {
-        // Not JSON or malformed — fall through to raw
-        debugLog("CLAUDE-PARSE", "JSON output mode returned non-JSON, falling back to raw", { preview: trimmed.slice(0, 100) });
-    }
-    // Fallback: treat the whole stdout as plain text content (old --output-format text behavior)
-    return { content: trimmed };
-}
-// ──────────────────────────────────────────────────────────────────────────────
 // Codex CLI
 // ──────────────────────────────────────────────────────────────────────────────
 /**
@@ -732,6 +502,76 @@ export async function runPi(prompt, _modelId, timeoutMs, workdir, opts) {
     return result.stdout || result.stderr;
 }
 // ──────────────────────────────────────────────────────────────────────────────
+// Grok CLI
+// ──────────────────────────────────────────────────────────────────────────────
+/**
+ * Run Grok CLI in single-turn headless mode.
+ *
+ * Uses --prompt-file to avoid E2BIG on long conversations (prompt never touches argv).
+ * cwd = homedir() by default (neutral, avoids workspace context scanning).
+ */
+export async function runGrok(prompt, modelId, timeoutMs, workdir, opts) {
+    const model = stripPrefix(modelId);
+    const effectivePrompt = opts?.tools?.length
+        ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
+        : prompt;
+    const cwd = workdir ?? homedir();
+    // Write prompt to a temp file — avoids E2BIG and shell quoting issues
+    const promptFile = join(tmpdir(), `cli-bridge-grok-${Date.now()}.txt`);
+    writeFileSync(promptFile, effectivePrompt, "utf8");
+    const args = [
+        "--prompt-file", promptFile,
+        "--model", model,
+        "--output-format", "plain",
+        "--no-plan",
+        "--always-approve",
+    ];
+    debugLog("GROK", `fresh ${model}`, {
+        promptLen: effectivePrompt.length,
+        promptKB: Math.round(effectivePrompt.length / 1024),
+    });
+    const result = await runCliWithArg("grok", args, timeoutMs, { cwd, log: opts?.log });
+    try {
+        unlinkSync(promptFile);
+    }
+    catch { /* best effort */ }
+    if (result.exitCode !== 0 && result.stdout.length === 0) {
+        throw new Error(`grok exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, result.timedOut, modelId)}`);
+    }
+    return result.stdout || result.stderr;
+}
+// ──────────────────────────────────────────────────────────────────────────────
+// Claude CLI
+// ──────────────────────────────────────────────────────────────────────────────
+/**
+ * Run Claude Code CLI in single-turn non-interactive mode.
+ *
+ * Uses --print with prompt via stdin to avoid E2BIG on long conversations.
+ * cwd = homedir() by default (avoids workspace context scanning).
+ */
+export async function runClaude(prompt, modelId, timeoutMs, workdir, opts) {
+    const model = stripPrefix(modelId);
+    const effectivePrompt = opts?.tools?.length
+        ? buildToolPromptBlock(opts.tools) + "\n\n" + prompt + "\n\nREMINDER: You MUST respond with ONLY valid JSON — either {\"tool_calls\":[...]} or {\"content\":\"...\"}. Nothing else."
+        : prompt;
+    const cwd = workdir ?? homedir();
+    const args = [
+        "--print",
+        "--model", model,
+        "--dangerously-skip-permissions",
+        "--no-session-persistence",
+        "--output-format", "text",
+    ];
+    debugLog("CLAUDE-CLI", `fresh ${model}`, {
+        promptLen: effectivePrompt.length,
+    });
+    const result = await runCli("claude", args, effectivePrompt, timeoutMs, { cwd, log: opts?.log });
+    if (result.exitCode !== 0 && result.stdout.length === 0) {
+        throw new Error(`claude exited ${result.exitCode}: ${annotateExitError(result.exitCode, result.stderr, result.timedOut, modelId)}`);
+    }
+    return result.stdout || result.stderr;
+}
+// ──────────────────────────────────────────────────────────────────────────────
 // Model allowlist (T-103)
 // ──────────────────────────────────────────────────────────────────────────────
 /**
@@ -743,12 +583,6 @@ export async function runPi(prompt, _modelId, timeoutMs, workdir, opts) {
  * To disable the check: pass `null` for `allowedModels`.
  */
 export const DEFAULT_ALLOWED_CLI_MODELS = new Set([
-    // Claude Code CLI
-    "cli-claude/claude-opus-4-8",
-    "cli-claude/claude-opus-4-7",
-    "cli-claude/claude-sonnet-4-6",
-    "cli-claude/claude-opus-4-6",
-    "cli-claude/claude-haiku-4-5",
     // Gemini CLI
     "cli-gemini/gemini-2.5-pro",
     "cli-gemini/gemini-2.5-flash",
@@ -769,6 +603,19 @@ export const DEFAULT_ALLOWED_CLI_MODELS = new Set([
     "opencode/default",
     // Pi CLI
     "pi/default",
+    // Claude CLI
+    "cli-claude/claude-opus-4-8",
+    "cli-claude/claude-opus-4-7",
+    "cli-claude/claude-sonnet-4-6",
+    "cli-claude/claude-opus-4-6",
+    "cli-claude/claude-haiku-4-5",
+    // Grok CLI
+    "cli-grok/grok-4.5",
+    "cli-grok/grok-4",
+    "cli-grok/grok-3",
+    "cli-grok/grok-3-fast",
+    "cli-grok/grok-3-mini",
+    "cli-grok/grok-3-mini-fast",
 ]);
 /** Normalize model aliases to their canonical CLI model names. */
 function normalizeModelAlias(normalized) {
@@ -959,14 +806,12 @@ export async function routeToCliRunner(model, messages, timeoutMs, opts = {}) {
     const resolved = normalizeModelAlias(normalized);
     const log = opts.log;
     let rawText;
-    let usage;
     if (resolved.startsWith("cli-gemini/"))
         rawText = await runGemini(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, log });
-    else if (resolved.startsWith("cli-claude/")) {
-        const claudeResult = await runClaude(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, log });
-        rawText = claudeResult.content;
-        usage = claudeResult.usage;
-    }
+    else if (resolved.startsWith("cli-claude/"))
+        rawText = await runClaude(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, log });
+    else if (resolved.startsWith("cli-grok/"))
+        rawText = await runGrok(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, log });
     else if (resolved.startsWith("openai-codex/"))
         rawText = await runCodex(prompt, resolved, timeoutMs, opts.workdir, { tools: opts.tools, mediaFiles: opts.mediaFiles, log });
     else if (resolved.startsWith("opencode/"))
@@ -974,24 +819,21 @@ export async function routeToCliRunner(model, messages, timeoutMs, opts = {}) {
     else if (resolved.startsWith("pi/"))
         rawText = await runPi(prompt, resolved, timeoutMs, opts.workdir, { log });
     else
-        throw new Error(`Unknown CLI bridge model: "${model}". Use "vllm/cli-gemini/<model>", "vllm/cli-claude/<model>", "openai-codex/<model>", "opencode/<model>", or "pi/<model>".`);
+        throw new Error(`Unknown CLI bridge model: "${model}". Use "vllm/cli-gemini/<model>", "vllm/cli-claude/<model>", "vllm/cli-grok/<model>", "openai-codex/<model>", "opencode/<model>", or "pi/<model>".`);
     // When tools were provided, try to parse structured tool_calls from the response
     if (hasTools) {
-        const parsed = parseToolCallResponse(rawText);
-        if (usage)
-            parsed.usage = usage;
-        return parsed;
+        return parseToolCallResponse(rawText);
     }
     // No tools — but check if the model still wrapped its response in {"content":"..."} JSON
     // (this happens when tool instructions from a previous turn are still in the conversation)
     try {
         const parsed = JSON.parse(rawText.trim());
         if (typeof parsed?.content === "string") {
-            return { content: parsed.content, ...(usage ? { usage } : {}) };
+            return { content: parsed.content };
         }
     }
     catch { /* not JSON, that's fine */ }
-    return { content: rawText, ...(usage ? { usage } : {}) };
+    return { content: rawText };
 }
 // ──────────────────────────────────────────────────────────────────────────────
 // Helpers

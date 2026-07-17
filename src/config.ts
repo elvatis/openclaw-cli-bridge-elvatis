@@ -125,11 +125,6 @@ export const PROVIDER_SESSION_SWEEP_MS = 10 * 60 * 1_000; // 10 min
  *   - Fast/lightweight (Haiku, Flash, Mini): 120s
  */
 export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
-  "cli-claude/claude-opus-4-8":        360_000,  // 6 min, current Opus
-  "cli-claude/claude-opus-4-7":        360_000,  // 6 min, previous Opus
-  "cli-claude/claude-opus-4-6":        360_000,  // 6 min — leaves room for dynamic scaling up to 580s cap
-  "cli-claude/claude-sonnet-4-6":      300_000,  // 5 min — was 7 min, reduced so fallback fires before gateway's 600s
-  "cli-claude/claude-haiku-4-5":       120_000,  // 2 min
   "cli-gemini/gemini-2.5-pro":         300_000,  // 5 min — image generation needs more time
   "cli-gemini/gemini-2.5-flash":       180_000,  // 3 min
   "cli-gemini/gemini-3.1-pro-preview": 300_000,  // 5 min
@@ -143,6 +138,11 @@ export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
   "gemini-api/gemini-2.5-flash":      180_000,  // 3 min
   "gemini-api/gemini-3.1-pro-preview": 300_000,  // 5 min
   "gemini-api/gemini-3-flash-preview": 180_000,  // 3 min
+  "cli-grok/grok-4":               300_000,  // 5 min
+  "cli-grok/grok-3":               240_000,  // 4 min
+  "cli-grok/grok-3-fast":          180_000,  // 3 min
+  "cli-grok/grok-3-mini":          120_000,  // 2 min
+  "cli-grok/grok-3-mini-fast":      90_000,  // 1.5 min
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -157,12 +157,7 @@ export const DEFAULT_MODEL_TIMEOUTS: Record<string, number> = {
  * Strategy: same-provider fast model first, then cross-provider alternatives.
  */
 export const DEFAULT_MODEL_FALLBACKS: Record<string, string[]> = {
-  "cli-claude/claude-opus-4-8":       ["cli-claude/claude-opus-4-7", "cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-3.1-pro-preview"],
-  "cli-claude/claude-opus-4-7":       ["cli-claude/claude-opus-4-6", "cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-2.5-pro"],
-  "cli-claude/claude-opus-4-6":       ["cli-claude/claude-sonnet-4-6", "cli-gemini/gemini-2.5-pro", "cli-claude/claude-haiku-4-5"],
-  "cli-claude/claude-sonnet-4-6":     ["cli-claude/claude-opus-4-8", "cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.3-codex"],
-  "cli-claude/claude-haiku-4-5":      ["cli-gemini/gemini-2.5-flash", "openai-codex/gpt-5.1-codex-mini"],
-  "cli-gemini/gemini-2.5-pro":        ["cli-gemini/gemini-2.5-flash", "cli-claude/claude-haiku-4-5"],
+  "cli-gemini/gemini-2.5-pro":        ["cli-gemini/gemini-2.5-flash"],
   "cli-gemini/gemini-3.1-pro-preview": ["cli-gemini/gemini-3-flash-preview", "cli-gemini/gemini-2.5-flash"],
   "cli-gemini/gemini-3-pro-preview":  ["cli-gemini/gemini-3-flash-preview", "cli-gemini/gemini-2.5-flash"],
   "openai-codex/gpt-5.5":             ["openai-codex/gpt-5.4", "openai-codex/gpt-5.3-codex", "cli-claude/claude-haiku-4-5"],
@@ -170,6 +165,10 @@ export const DEFAULT_MODEL_FALLBACKS: Record<string, string[]> = {
   "openai-codex/gpt-5.3-codex":       ["openai-codex/gpt-5.1-codex-mini", "cli-gemini/gemini-2.5-flash"],
   "gemini-api/gemini-2.5-pro":        ["gemini-api/gemini-2.5-flash"],
   "gemini-api/gemini-3.1-pro-preview": ["gemini-api/gemini-3-flash-preview", "gemini-api/gemini-2.5-flash"],
+  "cli-grok/grok-4":              ["cli-grok/grok-3", "cli-gemini/gemini-2.5-pro"],
+  "cli-grok/grok-3":              ["cli-grok/grok-3-fast", "cli-gemini/gemini-2.5-flash"],
+  "cli-grok/grok-3-fast":         ["cli-grok/grok-3-mini-fast", "cli-gemini/gemini-2.5-flash"],
+  "cli-grok/grok-3-mini":         ["cli-grok/grok-3-mini-fast"],
 };
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -274,4 +273,4 @@ export const BITNET_SYSTEM_PROMPT =
 // Default model for /cli-test
 // ──────────────────────────────────────────────────────────────────────────────
 
-export const CLI_TEST_DEFAULT_MODEL = "cli-claude/claude-sonnet-4-6";
+export const CLI_TEST_DEFAULT_MODEL = "cli-gemini/gemini-2.5-flash";

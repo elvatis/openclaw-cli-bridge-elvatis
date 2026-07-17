@@ -261,9 +261,17 @@ export class SessionManager {
         if (normalized.startsWith("cli-claude/")) {
             return {
                 cmd: "claude",
-                args: ["-p", "--output-format", "text", "--permission-mode", "plan", "--tools", "", "--model", modelName],
+                args: ["--print", "--output-format", "text", "--dangerously-skip-permissions", "--no-session-persistence", "--model", modelName],
                 cwd: opts.workdir ?? homedir(),
                 useStdin: true,
+            };
+        }
+        if (normalized.startsWith("cli-grok/")) {
+            return {
+                cmd: "grok",
+                args: ["--single", prompt, "--model", modelName, "--output-format", "plain"],
+                cwd: opts.workdir ?? homedir(),
+                useStdin: false,
             };
         }
         if (normalized.startsWith("openai-codex/")) {
