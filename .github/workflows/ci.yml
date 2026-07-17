@@ -90,6 +90,53 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+  # ── Publish to ClawHub ──────────────────────────────────────────────────────
+  # ClawHub is not an npm registry; it uses the standalone `clawhub` CLI.
+  # Runs in parallel with publish-npm and does NOT gate the GitHub Release,
+  # so a transient ClawHub failure never blocks the npm release.
+  publish-clawhub:
+    name: Publish to ClawHub
+    needs: build
+    runs-on: ubuntu-latest
+    if: (startsWith(github.ref, 'refs/tags/v') && contains(github.ref, '.')) || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Install ClawHub CLI
+        run: npm i -g clawhub
+
+      - name: Authenticate ClawHub
+        run: clawhub login --token "$CLAWHUB_TOKEN" --no-browser
+        env:
+          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+
+      - name: Publish to ClawHub
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          clawhub package publish . \
+            --family code-plugin \
+            --owner elvatis_com \
+            --name @elvatis_com/openclaw-cli-bridge-elvatis \
+            --version "$VERSION" \
+            --source-repo "$GITHUB_REPOSITORY" \
+            --source-commit "$GITHUB_SHA" \
+            --source-ref "$GITHUB_REF_NAME" \
+            --changelog "See CHANGELOG.md for release notes."
+
   # ── Create GitHub Release ───────────────────────────────────────────────────
   release:
     name: Create GitHub Release
