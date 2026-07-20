@@ -36,7 +36,7 @@
     "@types/node": "^26.1.1",
     "eslint": "^10.0.3",
     "openclaw": "^2026.7.1",
-    "typescript": "^6.0.2",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.58.1",
     "vitest": "^4.0.18"
   },
